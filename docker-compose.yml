@@ -1,0 +1,24 @@
+version: "3.8"
+services:
+  qir-app:
+    build: .
+    container_name: qir-app
+    restart: unless-stopped
+    ports:
+      - "3100:3000"
+    env_file: .env
+    depends_on:
+      - qir-redis
+    volumes:
+      - qir-tmp:/tmp/qir-audio
+
+  qir-redis:
+    image: redis:7-alpine
+    container_name: qir-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+volumes:
+  qir-tmp:
+  redis-data:
