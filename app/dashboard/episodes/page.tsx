@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { SkeletonTableRows } from '@/app/components/skeleton'
 
 interface Episode {
   id: number
@@ -165,7 +166,7 @@ export default function EpisodesPage() {
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">Loading...</td></tr>
+              <SkeletonTableRows rows={8} />
             ) : episodes.length === 0 ? (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No episodes found</td></tr>
             ) : episodes.map((ep) => (

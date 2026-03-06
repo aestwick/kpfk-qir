@@ -1,6 +1,19 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
 import PrintButton from './print-button'
+import type { Metadata } from 'next'
+
+export async function generateMetadata({
+  params,
+}: {
+  params: { year: string; quarter: string }
+}): Promise<Metadata> {
+  const year = parseInt(params.year)
+  const quarter = parseInt(params.quarter)
+  const title = `KPFK Quarterly Issues Report — Q${quarter} ${year}`
+  const description = `KPFK, Los Angeles — FCC Quarterly Issues Report for Q${quarter} ${year}`
+  return { title, description }
+}
 
 interface QirEntry {
   episode_id: number

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createBrowserClient } from '@/lib/supabase'
 import { usePathname } from 'next/navigation'
+import { ErrorBoundary } from '@/app/components/error-boundary'
 
 const navItems = [
   { href: '/dashboard', label: 'Overview' },
@@ -21,7 +22,12 @@ export default function DashboardLayout({
 }) {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [userEmail, setUserEmail] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [pathname])
 
   useEffect(() => {
     const supabase = createBrowserClient()
@@ -52,14 +58,45 @@ export default function DashboardLayout({
   if (authed === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-gray-500">Loading...</p>
+        <div className="animate-pulse text-gray-400">Loading...</div>
       </div>
     )
   }
 
   return (
     <div className="min-h-screen flex">
-      <nav className="w-56 bg-gray-900 text-gray-100 p-4 flex flex-col shrink-0">
+      {/* Mobile header */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-30 bg-gray-900 text-white flex items-center justify-between px-4 py-3">
+        <h1 className="text-lg font-bold">QIR / KPFK</h1>
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="p-1 rounded hover:bg-gray-800"
+          aria-label="Toggle menu"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {sidebarOpen ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            )}
+          </svg>
+        </button>
+      </div>
+
+      {/* Backdrop */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-30 bg-black/50"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <nav className={`
+        fixed md:static z-40 top-0 left-0 h-full w-56 bg-gray-900 text-gray-100 p-4 flex flex-col shrink-0
+        transition-transform duration-200 ease-in-out
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+      `}>
         <h1 className="text-lg font-bold mb-6 px-2">QIR / KPFK</h1>
         <div className="flex flex-col gap-0.5 flex-1">
           {navItems.map((item) => {
@@ -87,7 +124,12 @@ export default function DashboardLayout({
           </button>
         </div>
       </nav>
-      <main className="flex-1 p-6 overflow-auto">{children}</main>
+
+      <main className="flex-1 p-6 overflow-auto pt-16 md:pt-6">
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
+      </main>
     </div>
   )
 }
