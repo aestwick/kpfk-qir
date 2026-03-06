@@ -1,6 +1,30 @@
-node_modules/
-.next/
+# env
 .env
 .env.local
-*.tsbuildinfo
+.env.production
+# deps
+node_modules/
+# next.js
+.next/
+out/
 next-env.d.ts
+*.tsbuildinfo
+# build
+dist/
+build/
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# os
+.DS_Store
+Thumbs.db
+# editor
+.vscode/
+.idea/
+*.swp
+*.swo
+# deploy (lives on VPS only)
+deploy-qir.sh
+# temp audio files
+/tmp/qir-audio/

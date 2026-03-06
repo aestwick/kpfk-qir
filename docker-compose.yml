@@ -11,6 +11,15 @@ services:
       - qir-redis
     volumes:
       - qir-tmp:/tmp/qir-audio
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.qir.rule=Host(`qir.kpfk.org`)"
+      - "traefik.http.routers.qir.entrypoints=websecure"
+      - "traefik.http.routers.qir.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.qir.loadbalancer.server.port=3000"
+    networks:
+      - traefik
+      - default
 
   qir-redis:
     image: redis:7-alpine
@@ -22,3 +31,7 @@ services:
 volumes:
   qir-tmp:
   redis-data:
+
+networks:
+  traefik:
+    external: true
