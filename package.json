@@ -1,0 +1,35 @@
+{
+  "name": "qir-kpfk",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "workers": "tsx workers/index.ts",
+    "start:all": "concurrently \"npm run start\" \"npm run workers\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "autoprefixer": "^10.4.27",
+    "bullmq": "^5.12.0",
+    "concurrently": "^8.2.2",
+    "fast-xml-parser": "^4.4.1",
+    "next": "14.2.15",
+    "openai": "^4.56.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "14.2.15",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
