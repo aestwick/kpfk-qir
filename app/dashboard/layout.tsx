@@ -103,7 +103,7 @@ export default function DashboardLayout({
 
       {/* Sidebar */}
       <nav className={`
-        fixed md:static z-40 top-0 left-0 h-full w-56 bg-gray-900 text-gray-100 p-4 flex flex-col shrink-0
+        fixed md:sticky z-40 top-0 left-0 h-full md:h-screen w-56 bg-gray-900 text-gray-100 p-4 flex flex-col shrink-0
         transition-transform duration-200 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>

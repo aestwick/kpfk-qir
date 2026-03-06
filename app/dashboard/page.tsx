@@ -39,11 +39,26 @@ const statusColors: Record<string, string> = {
   unavailable: 'bg-gray-100 text-gray-600',
 }
 
+interface JobCounts {
+  active: number
+  waiting: number
+  completed: number
+  failed: number
+}
+
+interface QueueStatus {
+  ingest: JobCounts
+  transcribe: JobCounts
+  summarize: JobCounts
+}
+
 export default function DashboardOverview() {
   const [counts, setCounts] = useState<StatusCounts | null>(null)
   const [recent, setRecent] = useState<RecentEpisode[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [actionResult, setActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null)
 
   const quarter = getQuarterBounds()
 
@@ -63,17 +78,48 @@ export default function DashboardOverview() {
     }
   }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  const fetchQueueStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/jobs')
+      if (res.ok) setQueueStatus(await res.json())
+    } catch {
+      // silently ignore polling errors
+    }
+  }, [])
+
+  useEffect(() => { fetchData(); fetchQueueStatus() }, [fetchData, fetchQueueStatus])
+
+  // Poll job status every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(fetchQueueStatus, 5000)
+    return () => clearInterval(interval)
+  }, [fetchQueueStatus])
+
+  // Auto-dismiss action result after 5 seconds
+  useEffect(() => {
+    if (!actionResult) return
+    const timer = setTimeout(() => setActionResult(null), 5000)
+    return () => clearTimeout(timer)
+  }, [actionResult])
 
   async function triggerAction(action: string) {
     setActionLoading(action)
+    setActionResult(null)
     try {
-      await fetch('/api/jobs', {
+      const res = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      setTimeout(fetchData, 2000)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setActionResult({ type: 'error', message: data.error ?? `Failed to queue ${action} (${res.status})` })
+        return
+      }
+      setActionResult({ type: 'success', message: `${action} job queued successfully` })
+      setTimeout(() => { fetchData(); fetchQueueStatus() }, 2000)
+    } catch {
+      setActionResult({ type: 'error', message: `Network error: could not reach server` })
     } finally {
       setActionLoading(null)
     }
@@ -106,6 +152,21 @@ export default function DashboardOverview() {
         ))}
       </div>
 
+      {/* Active Jobs Banner */}
+      {queueStatus && (queueStatus.ingest.active + queueStatus.transcribe.active + queueStatus.summarize.active > 0 ||
+        queueStatus.ingest.waiting + queueStatus.transcribe.waiting + queueStatus.summarize.waiting > 0) && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3">
+          <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full shrink-0" />
+          <div className="text-sm text-blue-800">
+            <span className="font-medium">Jobs running: </span>
+            {(['ingest', 'transcribe', 'summarize'] as const)
+              .filter(q => queueStatus[q].active > 0 || queueStatus[q].waiting > 0)
+              .map(q => `${q} (${queueStatus[q].active} active, ${queueStatus[q].waiting} waiting)`)
+              .join(' · ')}
+          </div>
+        </div>
+      )}
+
       {/* Quick Actions */}
       <div className="bg-white rounded-lg shadow p-4">
         <h3 className="text-sm font-semibold text-gray-500 uppercase mb-3">Quick Actions</h3>
@@ -115,12 +176,22 @@ export default function DashboardOverview() {
               key={action}
               onClick={() => triggerAction(action)}
               disabled={actionLoading !== null}
-              className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50 capitalize"
+              className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50 capitalize flex items-center gap-2"
             >
-              {actionLoading === action ? 'Running...' : `Run ${action}`}
+              {actionLoading === action && (
+                <div className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full" />
+              )}
+              {actionLoading === action ? `Queuing ${action}...` : `Run ${action}`}
             </button>
           ))}
         </div>
+        {actionResult && (
+          <div className={`mt-3 text-sm px-3 py-2 rounded ${
+            actionResult.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'
+          }`}>
+            {actionResult.message}
+          </div>
+        )}
       </div>
 
       {/* Quarter Progress */}
