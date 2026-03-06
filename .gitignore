@@ -1,3 +1,30 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# build
+dist/
+build/
+*.tsbuildinfo
+
+# env
 .env
-node_modules
-.next
+.env.local
+.env.*.local
+
+# audio temp files
+/tmp/qir-audio/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# editors
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
