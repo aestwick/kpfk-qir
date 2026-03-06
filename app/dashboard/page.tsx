@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 
 interface StatusCounts {
   pending: number
@@ -78,7 +79,14 @@ export default function DashboardOverview() {
     }
   }
 
-  if (loading) return <p className="text-gray-500">Loading...</p>
+  if (loading) return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold">Dashboard</h2>
+      <SkeletonCards count={5} />
+      <SkeletonBlock />
+      <SkeletonBlock />
+    </div>
+  )
 
   const total = counts ? counts.pending + counts.transcribed + counts.summarized + counts.failed + counts.unavailable : 0
   const processed = counts ? counts.summarized : 0
