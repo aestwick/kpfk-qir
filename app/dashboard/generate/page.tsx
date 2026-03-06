@@ -115,11 +115,16 @@ export default function GenerateQirPage() {
     if (action === 'finalize' && !confirm('Finalize this QIR draft? It will be published on the public page.')) return
     setActionLoading(action)
     try {
-      await fetch('/api/qir', {
+      const res = await fetch('/api/qir', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: draftId, action }),
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error ?? `Failed to ${action}`)
+        return
+      }
       await fetchDrafts()
       if (activeDraft?.id === draftId) {
         setActiveDraft((prev) =>

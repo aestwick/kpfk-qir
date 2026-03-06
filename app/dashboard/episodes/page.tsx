@@ -68,11 +68,21 @@ export default function EpisodesPage() {
 
   async function handleBulkRetry() {
     if (!confirm('Retry all failed episodes?')) return
-    await fetch('/api/episodes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'bulk-retry' }),
-    })
+    try {
+      const res = await fetch('/api/episodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk-retry' }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error ?? 'Failed to retry episodes')
+        return
+      }
+    } catch {
+      alert('Network error: could not reach server')
+      return
+    }
     fetchEpisodes()
   }
 
