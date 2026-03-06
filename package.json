@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "workers": "tsx workers/index.ts",
+    "generate-qir": "tsx -e \"const { Queue } = require('bullmq'); const q = new Queue('generate-qir', { connection: { host: 'localhost', port: 6379 } }); const [,, ...args] = process.argv; const yearIdx = args.indexOf('--year'); const qIdx = args.indexOf('--quarter'); const year = yearIdx >= 0 ? parseInt(args[yearIdx+1]) : new Date().getFullYear(); const quarter = qIdx >= 0 ? parseInt(args[qIdx+1]) : Math.floor(new Date().getMonth()/3)+1; q.add('generate', { year, quarter }).then(() => { console.log('Queued QIR generation for Q'+quarter+' '+year); process.exit(0); });\"",
     "start:all": "concurrently \"npm run start\" \"npm run workers\""
   },
   "dependencies": {

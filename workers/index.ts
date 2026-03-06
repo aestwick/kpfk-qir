@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq'
 import { processIngest } from './ingest'
 import { processTranscribe } from './transcribe'
 import { processSummarize } from './summarize'
+import { processGenerateQir } from './generate-qir'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -19,6 +20,7 @@ const connection = parseRedisUrl(redisUrl)
 const ingestQueue = new Queue('ingest', { connection })
 const transcribeQueue = new Queue('transcribe', { connection })
 const summarizeQueue = new Queue('summarize', { connection })
+const generateQirQueue = new Queue('generate-qir', { connection })
 
 // -- Ingest Worker --
 const ingestWorker = new Worker('ingest', processIngest, {
@@ -68,6 +70,20 @@ summarizeWorker.on('failed', (job, err) => {
   console.error(`[summarize] failed:`, err.message)
 })
 
+// -- Generate QIR Worker --
+const generateQirWorker = new Worker('generate-qir', processGenerateQir, {
+  connection,
+  concurrency: 1,
+})
+
+generateQirWorker.on('completed', (job) => {
+  const result = job.returnvalue
+  console.log(`[generate-qir] completed —`, result)
+})
+generateQirWorker.on('failed', (job, err) => {
+  console.error(`[generate-qir] failed:`, err.message)
+})
+
 // -- Hourly Ingest Cron (minute :02) --
 async function setupCron() {
   // Remove any existing repeatable jobs first
@@ -97,6 +113,7 @@ async function shutdown() {
     ingestWorker.close(),
     transcribeWorker.close(),
     summarizeWorker.close(),
+    generateQirWorker.close(),
   ])
   process.exit(0)
 }
