@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 
 interface UsageEntry {
   id: number
@@ -85,7 +86,11 @@ export default function UsagePage() {
       </div>
 
       {loading ? (
-        <p className="text-gray-500">Loading...</p>
+        <div className="space-y-6">
+          <SkeletonCards count={5} />
+          <SkeletonBlock />
+          <SkeletonBlock />
+        </div>
       ) : (
         <>
           {/* Summary Cards */}

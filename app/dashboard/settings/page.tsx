@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { SkeletonBlock } from '@/app/components/skeleton'
 
 interface Correction {
   id: number
@@ -154,7 +155,13 @@ export default function SettingsPage() {
     setTestOutput(output)
   }
 
-  if (loading) return <p className="text-gray-500">Loading...</p>
+  if (loading) return (
+    <div className="space-y-8">
+      <h2 className="text-2xl font-bold">Settings</h2>
+      <SkeletonBlock />
+      <SkeletonBlock />
+    </div>
+  )
 
   return (
     <div className="space-y-8">

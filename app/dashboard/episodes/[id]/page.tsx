@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams } from 'next/navigation'
+import { SkeletonBlock } from '@/app/components/skeleton'
 
 interface Episode {
   id: number
@@ -119,6 +120,12 @@ export default function EpisodeDetailPage() {
   }
 
   async function handleAction(action: string) {
+    const confirmMessages: Record<string, string> = {
+      're-transcribe': 'Re-transcribe this episode? This will overwrite the existing transcript.',
+      're-summarize': 'Re-summarize this episode? This will overwrite the existing summary.',
+    }
+    if (confirmMessages[action] && !confirm(confirmMessages[action])) return
+
     setActionLoading(action)
     await fetch(`/api/episodes/${id}`, {
       method: 'PATCH',
@@ -141,19 +148,46 @@ export default function EpisodeDetailPage() {
     URL.revokeObjectURL(url)
   }
 
-  if (loading) return <p className="text-gray-500">Loading...</p>
+  if (loading) return (
+    <div className="space-y-6">
+      <div className="h-8 bg-gray-200 rounded w-64 animate-pulse" />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="bg-white rounded shadow p-3 animate-pulse">
+            <div className="h-3 bg-gray-200 rounded w-16 mb-2" />
+            <div className="h-4 bg-gray-200 rounded w-24" />
+          </div>
+        ))}
+      </div>
+      <SkeletonBlock />
+      <SkeletonBlock />
+    </div>
+  )
   if (!episode) return <p className="text-red-600">Episode not found</p>
 
   const vttCues = transcript?.vtt ? parseVtt(transcript.vtt) : []
   const activeCueIdx = vttCues.findIndex((c) => currentTime >= c.start && currentTime < c.end)
 
   const transcriptText = transcript?.transcript ?? ''
-  const highlightedTranscript = searchQuery
-    ? transcriptText.replace(
-        new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
-        '<mark class="bg-yellow-200">$1</mark>'
-      )
-    : transcriptText
+
+  // Highlight search matches safely (no dangerouslySetInnerHTML)
+  function renderTranscript() {
+    if (!searchQuery) return <span>{transcriptText}</span>
+    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(${escaped})`, 'gi')
+    const parts = transcriptText.split(regex)
+    return (
+      <>
+        {parts.map((part, i) =>
+          regex.test(part) ? (
+            <mark key={i} className="bg-yellow-200">{part}</mark>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -311,10 +345,9 @@ export default function EpisodeDetailPage() {
               className="border rounded px-2 py-1 text-sm w-64"
             />
           </div>
-          <div
-            className="max-h-96 overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap"
-            dangerouslySetInnerHTML={{ __html: highlightedTranscript }}
-          />
+          <div className="max-h-96 overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap">
+            {renderTranscript()}
+          </div>
         </div>
       )}
     </div>

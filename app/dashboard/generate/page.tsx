@@ -112,6 +112,7 @@ export default function GenerateQirPage() {
   }
 
   async function handleFinalize(draftId: number, action: 'finalize' | 'unfinalize') {
+    if (action === 'finalize' && !confirm('Finalize this QIR draft? It will be published on the public page.')) return
     setActionLoading(action)
     try {
       await fetch('/api/qir', {

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { SkeletonCard } from '@/app/components/skeleton'
 
 interface QueueCounts {
   active: number
@@ -45,7 +46,14 @@ export default function JobsPage() {
     }, 1500)
   }
 
-  if (loading) return <p className="text-gray-500">Loading...</p>
+  if (loading) return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold">Jobs</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+      </div>
+    </div>
+  )
 
   const queueNames = ['ingest', 'transcribe', 'summarize'] as const
 
