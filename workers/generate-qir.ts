@@ -49,13 +49,13 @@ export async function processGenerateQir(job: Job) {
       'Arts & Culture',
     ]
 
-  // Get all completed episodes in this quarter (summarized or compliance_checked)
+  // Get all completed episodes in this quarter (summarized or compliance_checked),
+  // including those with null air_date created during this quarter
   const { data: episodes, error } = await supabaseAdmin
     .from('episode_log')
     .select('*')
     .in('status', ['summarized', 'compliance_checked'])
-    .gte('air_date', start)
-    .lte('air_date', end)
+    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('air_date', { ascending: true })
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
