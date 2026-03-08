@@ -10,46 +10,31 @@ function parseRedisUrl(url: string) {
   }
 }
 
-const connectionConfig = parseRedisUrl(redisUrl)
+const defaultJobOptions = {
+  attempts: 2,
+  backoff: { type: 'exponential' as const, delay: 5000 },
+}
 
-export const ingestQueue = new Queue('ingest', {
-  connection: connectionConfig,
-  defaultJobOptions: {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  },
-})
-export const transcribeQueue = new Queue('transcribe', {
-  connection: connectionConfig,
-  defaultJobOptions: {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  },
-})
-export const summarizeQueue = new Queue('summarize', {
-  connection: connectionConfig,
-  defaultJobOptions: {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  },
-})
-export const generateQirQueue = new Queue('generate-qir', {
-  connection: connectionConfig,
-  defaultJobOptions: {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  },
-})
-export const complianceQueue = new Queue('compliance', {
-  connection: connectionConfig,
-  defaultJobOptions: {
-    attempts: 2,
-    backoff: { type: 'exponential', delay: 5000 },
-  },
-})
-export const autoRetryQueue = new Queue('auto-retry', {
-  connection: connectionConfig,
-  defaultJobOptions: {
-    attempts: 1,
-  },
-})
+// Lazy-initialize queues to avoid Redis connections during next build.
+// Uses the same Proxy pattern as lib/supabase.ts.
+function lazyQueue(name: string, jobOptions?: Record<string, unknown>): Queue {
+  let instance: Queue | null = null
+  return new Proxy({} as Queue, {
+    get(_target, prop) {
+      if (!instance) {
+        instance = new Queue(name, {
+          connection: parseRedisUrl(redisUrl),
+          defaultJobOptions: jobOptions ?? defaultJobOptions,
+        })
+      }
+      return (instance as any)[prop]
+    },
+  })
+}
+
+export const ingestQueue = lazyQueue('ingest')
+export const transcribeQueue = lazyQueue('transcribe')
+export const summarizeQueue = lazyQueue('summarize')
+export const generateQirQueue = lazyQueue('generate-qir')
+export const complianceQueue = lazyQueue('compliance')
+export const autoRetryQueue = lazyQueue('auto-retry', { attempts: 1 })

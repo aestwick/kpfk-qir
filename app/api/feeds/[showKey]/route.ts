@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '../../../../lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 function escapeXml(str: string): string {
   return str
     .replace(/&/g, '&amp;')
