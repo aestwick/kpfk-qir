@@ -49,12 +49,12 @@ interface DashData {
   avgProcessingTimes: Record<string, number>
 }
 
-const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string }> = {
-  pending:      { color: 'text-amber-700',  bg: 'bg-amber-50  border-amber-200', label: 'Pending' },
-  transcribed:  { color: 'text-blue-700',   bg: 'bg-blue-50   border-blue-200',  label: 'Transcribed' },
-  summarized:   { color: 'text-emerald-700',bg: 'bg-emerald-50 border-emerald-200', label: 'Summarized' },
-  failed:       { color: 'text-red-700',    bg: 'bg-red-50    border-red-200',   label: 'Failed' },
-  unavailable:  { color: 'text-gray-500',   bg: 'bg-gray-50   border-gray-200',  label: 'Unavailable' },
+const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string; description: string }> = {
+  pending:      { color: 'text-amber-700',  bg: 'bg-amber-50  border-amber-200', label: 'Need Transcription', description: 'Audio downloaded, waiting to be transcribed' },
+  transcribed:  { color: 'text-blue-700',   bg: 'bg-blue-50   border-blue-200',  label: 'Need Summarization', description: 'Transcribed, waiting for AI summary' },
+  summarized:   { color: 'text-emerald-700',bg: 'bg-emerald-50 border-emerald-200', label: 'Complete', description: 'Fully processed and ready for QIR' },
+  failed:       { color: 'text-red-700',    bg: 'bg-red-50    border-red-200',   label: 'Failed', description: 'Hit an error — can be retried' },
+  unavailable:  { color: 'text-gray-500',   bg: 'bg-gray-50   border-gray-200',  label: 'Unavailable', description: 'Audio file not found (404)' },
 }
 
 const PIPELINE_STAGES = [
@@ -154,9 +154,9 @@ export default function DashboardOverview() {
   const anyWaiting = queues.ingest.waiting + queues.transcribe.waiting + queues.summarize.waiting > 0
 
   const donutSegments = [
-    { label: 'Summarized', value: counts.quarter.summarized ?? 0, color: '#10b981' },
-    { label: 'Transcribed', value: counts.quarter.transcribed ?? 0, color: '#3b82f6' },
-    { label: 'Pending', value: counts.quarter.pending ?? 0, color: '#f59e0b' },
+    { label: 'Complete', value: counts.quarter.summarized ?? 0, color: '#10b981' },
+    { label: 'Need Summary', value: counts.quarter.transcribed ?? 0, color: '#3b82f6' },
+    { label: 'Need Transcription', value: counts.quarter.pending ?? 0, color: '#f59e0b' },
     { label: 'Failed', value: counts.quarter.failed ?? 0, color: '#ef4444' },
     { label: 'Unavailable', value: counts.quarter.unavailable ?? 0, color: '#9ca3af' },
   ]
@@ -167,54 +167,70 @@ export default function DashboardOverview() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Dashboard</h2>
-          <p className="text-sm text-gray-500">{data.quarter.label} — FCC Compliance Pipeline</p>
+          <p className="text-sm text-gray-500">{data.quarter.label} — FCC Quarterly Issues Report</p>
         </div>
         <div className="flex items-center gap-2">
-          {(anyActive || anyWaiting) && (
+          {(anyActive || anyWaiting) ? (
             <span className="flex items-center gap-1.5 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-3 py-1">
               <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-              Processing
+              Processing {queues.ingest.active + queues.transcribe.active + queues.summarize.active} episode{queues.ingest.active + queues.transcribe.active + queues.summarize.active !== 1 ? 's' : ''}
             </span>
+          ) : qtrPct === 100 && qtrTotal > 0 ? (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1">
+              All caught up
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Pipeline Status — what's happening now */}
+      <div className="bg-white rounded-xl shadow-sm border p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Pipeline Status</h3>
+          {(anyActive || anyWaiting) && (
+            <span className="text-[10px] text-gray-400">Auto-refreshes every 30s</span>
           )}
         </div>
-      </div>
-
-      {/* Pipeline Visualization */}
-      <div className="bg-white rounded-xl shadow-sm border p-5">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-4">Pipeline Status</h3>
         <PipelineViz queues={queues} />
 
-        {/* Quick actions */}
-        <div className="mt-4 pt-4 border-t flex items-center gap-3">
-          <span className="text-xs text-gray-400 uppercase font-semibold mr-1">Run:</span>
-          {PIPELINE_STAGES.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => triggerAction(key)}
-              disabled={actionLoading !== null}
-              className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
-            >
-              {actionLoading === key && <span className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full" />}
-              {label}
-            </button>
-          ))}
+        {/* Manual triggers — explain what they do */}
+        <div className="mt-4 pt-4 border-t">
+          <p className="text-[11px] text-gray-400 mb-2">Manually start a pipeline stage (normally runs automatically every hour):</p>
+          <div className="flex items-center gap-2">
+            {([
+              { key: 'ingest', label: 'Fetch New Episodes', desc: 'Check RSS feeds for new episodes' },
+              { key: 'transcribe', label: 'Transcribe Pending', desc: 'Process pending audio files' },
+              { key: 'summarize', label: 'Summarize Transcripts', desc: 'Generate AI summaries' },
+            ] as const).map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => triggerAction(key)}
+                disabled={actionLoading !== null}
+                className="px-3 py-1.5 text-xs font-medium rounded-md bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              >
+                {actionLoading === key && <span className="animate-spin h-3 w-3 border-2 border-white border-t-transparent rounded-full" />}
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {Object.entries(counts.quarter).map(([status, count]) => {
-          const cfg = STATUS_CONFIG[status] ?? { color: 'text-gray-700', bg: 'bg-gray-50 border-gray-200', label: status }
-          return (
-            <div key={status} className={`rounded-lg border p-3 ${cfg.bg}`}>
-              <p className={`text-xs font-medium ${cfg.color} opacity-80`}>{cfg.label}</p>
-              <p className={`text-2xl font-bold ${cfg.color}`}>{count}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">
-                {counts.all[status] ?? 0} all-time
-              </p>
-            </div>
-          )
-        })}
+      {/* Episode Status — where things stand this quarter */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">This Quarter&apos;s Episodes</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {Object.entries(counts.quarter).map(([status, count]) => {
+            const cfg = STATUS_CONFIG[status] ?? { color: 'text-gray-700', bg: 'bg-gray-50 border-gray-200', label: status, description: '' }
+            return (
+              <div key={status} className={`rounded-lg border p-3 ${cfg.bg}`}>
+                <p className={`text-xs font-medium ${cfg.color} opacity-80`}>{cfg.label}</p>
+                <p className={`text-2xl font-bold ${cfg.color}`}>{count}</p>
+                <p className="text-[10px] text-gray-400 mt-1">{cfg.description}</p>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* Quarter progress + Donut + Cost */}
@@ -297,7 +313,7 @@ export default function DashboardOverview() {
 
           {/* Throughput stats */}
           <div className="mt-4 pt-3 border-t">
-            <h4 className="text-[10px] text-gray-400 uppercase font-semibold mb-2">Queue Totals</h4>
+            <h4 className="text-[10px] text-gray-400 uppercase font-semibold mb-2">Total Jobs Processed</h4>
             <div className="grid grid-cols-3 gap-2 text-xs">
               {PIPELINE_STAGES.map(({ key, label }) => {
                 const q = queues[key]
@@ -305,7 +321,7 @@ export default function DashboardOverview() {
                   <div key={key} className="text-center">
                     <p className="text-gray-400">{label}</p>
                     <p className="font-semibold text-gray-900">{q.completed}</p>
-                    <p className="text-[10px] text-gray-400">completed</p>
+                    {q.failed > 0 && <p className="text-[10px] text-red-500">{q.failed} failed</p>}
                   </div>
                 )
               })}

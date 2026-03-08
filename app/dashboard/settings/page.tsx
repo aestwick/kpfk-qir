@@ -41,10 +41,29 @@ const settingFields: SettingField[] = [
   { key: 'curation_prompt', label: 'Curation Prompt', type: 'textarea' },
 ]
 
+const PIPELINE_MODES = [
+  {
+    key: 'steady',
+    label: 'Steady',
+    description: 'Normal processing — 1 transcription, 5 summarizations at a time',
+    transcribe: 1,
+    summarize: 5,
+  },
+  {
+    key: 'catch-up',
+    label: 'Catch-up',
+    description: 'Faster processing — 3 transcriptions, 10 summarizations at a time',
+    transcribe: 3,
+    summarize: 10,
+  },
+] as const
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, unknown>>({})
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
+  const [pipelineMode, setPipelineMode] = useState('steady')
+  const [savingMode, setSavingMode] = useState(false)
   const [corrections, setCorrections] = useState<Correction[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -66,6 +85,9 @@ export default function SettingsPage() {
         }
       }
       setEditValues(vals)
+      if (data.settings?.pipeline_mode) {
+        setPipelineMode(data.settings.pipeline_mode as string)
+      }
     }
     if (correctionsRes.ok) {
       const data = await correctionsRes.json()
@@ -100,6 +122,28 @@ export default function SettingsPage() {
       toast('error', 'Network error: could not reach server')
     }
     setSaving(null)
+  }
+
+  async function savePipelineMode(mode: string) {
+    setSavingMode(true)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'pipeline_mode', value: mode }),
+      })
+      if (res.ok) {
+        setPipelineMode(mode)
+        const preset = PIPELINE_MODES.find((m) => m.key === mode)
+        toast('success', `Switched to ${preset?.label} mode — workers will pick this up within 30 seconds`)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast('error', data.error ?? 'Failed to save pipeline mode')
+      }
+    } catch {
+      toast('error', 'Network error: could not reach server')
+    }
+    setSavingMode(false)
   }
 
   async function handleSaveCorrection(
@@ -176,6 +220,39 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Settings</h2>
+
+      {/* Pipeline Processing Mode */}
+      <div className="bg-white rounded-lg shadow p-4 space-y-3">
+        <h3 className="font-semibold text-sm text-gray-500 uppercase">Processing Mode</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {PIPELINE_MODES.map((mode) => {
+            const isActive = pipelineMode === mode.key
+            return (
+              <button
+                key={mode.key}
+                onClick={() => !isActive && savePipelineMode(mode.key)}
+                disabled={savingMode}
+                className={`text-left p-4 rounded-lg border-2 transition-colors ${
+                  isActive
+                    ? 'border-gray-900 bg-gray-50'
+                    : 'border-gray-200 hover:border-gray-400'
+                } disabled:opacity-50`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <div className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
+                  <span className="font-semibold text-gray-900">{mode.label}</span>
+                </div>
+                <p className="text-sm text-gray-600">{mode.description}</p>
+                <div className="mt-2 flex gap-3 text-xs text-gray-500">
+                  <span>Transcribe: {mode.transcribe} concurrent</span>
+                  <span>Summarize: {mode.summarize} concurrent</span>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-xs text-gray-400">Workers check for mode changes every 30 seconds.</p>
+      </div>
 
       {/* QIR Settings */}
       <div className="bg-white rounded-lg shadow p-4 space-y-4">
