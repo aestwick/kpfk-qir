@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
 /* ─── lazy-loaded report components ─── */
 const FullReportView = dynamic(() => import('@/app/components/qir-report-view').then(m => ({ default: m.FullReportView })), {
@@ -39,6 +40,18 @@ interface QirDraft {
   updated_at: string
 }
 
+interface ValidationCheck {
+  label: string
+  status: 'pass' | 'warn' | 'fail'
+  detail: string
+}
+
+const ALL_CATEGORIES = [
+  'Civil Rights / Social Justice', 'Immigration', 'Economy / Labor',
+  'Environment / Climate', 'Government / Politics', 'Health',
+  'International Affairs / War & Peace', 'Arts & Culture',
+]
+
 function getQuarterOptions() {
   const options: { label: string; year: number; quarter: number }[] = []
   const now = new Date()
@@ -64,6 +77,84 @@ function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
   return grouped
 }
 
+function runValidation(draft: QirDraft, complianceSummary: Record<string, { count: number; critical: number }>): ValidationCheck[] {
+  const checks: ValidationCheck[] = []
+  const entries = draft.curated_entries ?? []
+  const grouped = groupByCategory(entries)
+  const coveredCategories = Object.keys(grouped).filter(c => c !== 'Uncategorized')
+
+  // 1. Minimum entries
+  if (entries.length >= 20) {
+    checks.push({ label: 'Entry count', status: 'pass', detail: `${entries.length} entries (20+ recommended)` })
+  } else if (entries.length >= 10) {
+    checks.push({ label: 'Entry count', status: 'warn', detail: `${entries.length} entries (20+ recommended)` })
+  } else {
+    checks.push({ label: 'Entry count', status: 'fail', detail: `Only ${entries.length} entries (20+ recommended)` })
+  }
+
+  // 2. Category coverage
+  const missingCats = ALL_CATEGORIES.filter(c => !coveredCategories.includes(c))
+  if (missingCats.length === 0) {
+    checks.push({ label: 'Category coverage', status: 'pass', detail: `All ${ALL_CATEGORIES.length} categories covered` })
+  } else if (missingCats.length <= 3) {
+    checks.push({ label: 'Category coverage', status: 'warn', detail: `Missing: ${missingCats.join(', ')}` })
+  } else {
+    checks.push({ label: 'Category coverage', status: 'fail', detail: `Missing ${missingCats.length} categories: ${missingCats.join(', ')}` })
+  }
+
+  // 3. Show variety
+  const uniqueShows = new Set(entries.map(e => e.show_name))
+  if (uniqueShows.size >= 8) {
+    checks.push({ label: 'Show variety', status: 'pass', detail: `${uniqueShows.size} different shows` })
+  } else if (uniqueShows.size >= 4) {
+    checks.push({ label: 'Show variety', status: 'warn', detail: `Only ${uniqueShows.size} different shows (8+ recommended)` })
+  } else {
+    checks.push({ label: 'Show variety', status: 'fail', detail: `Only ${uniqueShows.size} different shows (8+ recommended)` })
+  }
+
+  // 4. Date spread
+  const dates = entries.map(e => e.air_date).filter(Boolean).sort()
+  if (dates.length >= 2) {
+    const first = new Date(dates[0])
+    const last = new Date(dates[dates.length - 1])
+    const spanDays = Math.round((last.getTime() - first.getTime()) / (1000 * 60 * 60 * 24))
+    if (spanDays >= 60) {
+      checks.push({ label: 'Date distribution', status: 'pass', detail: `Spans ${spanDays} days across the quarter` })
+    } else if (spanDays >= 30) {
+      checks.push({ label: 'Date distribution', status: 'warn', detail: `Only spans ${spanDays} days (aim for full quarter)` })
+    } else {
+      checks.push({ label: 'Date distribution', status: 'fail', detail: `Only spans ${spanDays} days - entries are clustered` })
+    }
+  }
+
+  // 5. Missing fields
+  const missingFields = entries.filter(e => !e.summary || !e.host || !e.headline)
+  if (missingFields.length === 0) {
+    checks.push({ label: 'Complete entries', status: 'pass', detail: 'All entries have summary, host, and headline' })
+  } else {
+    checks.push({ label: 'Complete entries', status: 'warn', detail: `${missingFields.length} entries missing summary, host, or headline` })
+  }
+
+  // 6. Compliance flags
+  const totalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.count, 0)
+  const criticalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.critical, 0)
+  if (totalFlags === 0) {
+    checks.push({ label: 'Compliance', status: 'pass', detail: 'No unresolved compliance flags' })
+  } else if (criticalFlags > 0) {
+    checks.push({ label: 'Compliance', status: 'fail', detail: `${criticalFlags} critical compliance flags unresolved` })
+  } else {
+    checks.push({ label: 'Compliance', status: 'warn', detail: `${totalFlags} compliance warnings unresolved` })
+  }
+
+  return checks
+}
+
+const CHECK_ICONS: Record<string, { icon: string; bg: string; text: string }> = {
+  pass: { icon: '\u2713', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700' },
+  warn: { icon: '!', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700' },
+  fail: { icon: '\u2717', bg: 'bg-red-50 border-red-200', text: 'text-red-700' },
+}
+
 export default function GenerateQirPage() {
   const quarterOptions = getQuarterOptions()
   const [selectedQuarter, setSelectedQuarter] = useState(quarterOptions[0])
@@ -75,19 +166,26 @@ export default function GenerateQirPage() {
   const [view, setView] = useState<'curated' | 'full'>('curated')
   const [editingEntry, setEditingEntry] = useState<number | null>(null)
   const [editSummary, setEditSummary] = useState('')
+  const [confirmFinalize, setConfirmFinalize] = useState<number | null>(null)
+  const [complianceSummary, setComplianceSummary] = useState<Record<string, { count: number; critical: number }>>({})
 
   const fetchDrafts = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(
-        `/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`
-      )
-      if (res.ok) {
-        const data = await res.json()
+      const [draftsRes, dashRes] = await Promise.all([
+        fetch(`/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
+        fetch('/api/dashboard'),
+      ])
+      if (draftsRes.ok) {
+        const data = await draftsRes.json()
         setDrafts(data.drafts ?? [])
         if (data.drafts?.length && !activeDraft) {
           setActiveDraft(data.drafts[0])
         }
+      }
+      if (dashRes.ok) {
+        const data = await dashRes.json()
+        setComplianceSummary(data.complianceSummary ?? {})
       }
     } finally {
       setLoading(false)
@@ -123,7 +221,15 @@ export default function GenerateQirPage() {
   }
 
   async function handleFinalize(draftId: number, action: 'finalize' | 'unfinalize') {
-    if (action === 'finalize' && !confirm('Finalize this QIR draft? It will be published on the public page.')) return
+    if (action === 'finalize') {
+      setConfirmFinalize(draftId)
+      return
+    }
+    await executeFinalize(draftId, action)
+  }
+
+  async function executeFinalize(draftId: number, action: 'finalize' | 'unfinalize') {
+    setConfirmFinalize(null)
     setActionLoading(action)
     try {
       const res = await fetch('/api/qir', {
@@ -185,6 +291,10 @@ export default function GenerateQirPage() {
     : {}
   const totalCurated = activeDraft?.curated_entries?.length ?? 0
 
+  // Run validation checks if we have a draft
+  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary) : []
+  const hasBlockers = validationChecks.some(c => c.status === 'fail')
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -216,6 +326,36 @@ export default function GenerateQirPage() {
           </button>
         </div>
       </div>
+
+      {/* ═══ Pre-finalization Validation Checklist ═══ */}
+      {activeDraft && activeDraft.status === 'draft' && validationChecks.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border">
+          <div className="px-5 py-3 border-b flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Pre-Finalization Checklist</h3>
+            {hasBlockers ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Issues found</span>
+            ) : (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Ready</span>
+            )}
+          </div>
+          <div className="divide-y">
+            {validationChecks.map((check) => {
+              const style = CHECK_ICONS[check.status]
+              return (
+                <div key={check.label} className="flex items-center gap-3 px-5 py-2.5">
+                  <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border ${style.bg} ${style.text}`}>
+                    {style.icon}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{check.label}</p>
+                    <p className="text-xs text-gray-500">{check.detail}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Draft History */}
       {drafts.length > 0 && (
@@ -293,7 +433,7 @@ export default function GenerateQirPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h3 className="text-lg font-semibold">
-                Q{activeDraft.quarter} {activeDraft.year} — v{activeDraft.version}
+                Q{activeDraft.quarter} {activeDraft.year} &mdash; v{activeDraft.version}
               </h3>
               <span className="text-sm text-gray-500">
                 {totalCurated} curated entries
@@ -363,6 +503,21 @@ export default function GenerateQirPage() {
           </p>
         </div>
       )}
+
+      {/* Finalize Confirmation */}
+      <ConfirmDialog
+        open={confirmFinalize !== null}
+        title="Finalize QIR Draft"
+        message={
+          hasBlockers
+            ? 'This draft has validation issues. Finalize anyway? It will be published on the public page.'
+            : 'Finalize this QIR draft? It will be published on the public page.'
+        }
+        confirmLabel="Finalize"
+        confirmVariant={hasBlockers ? 'danger' : 'primary'}
+        onConfirm={() => confirmFinalize && executeFinalize(confirmFinalize, 'finalize')}
+        onCancel={() => setConfirmFinalize(null)}
+      />
     </div>
   )
 }

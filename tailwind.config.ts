@@ -6,7 +6,16 @@ const config: Config = {
     './components/**/*.{js,ts,jsx,tsx,mdx}',
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        kpfk: {
+          red: '#C41E3A',
+          black: '#1a1a1a',
+          gold: '#D4A843',
+          cream: '#FAF8F5',
+        },
+      },
+    },
   },
   plugins: [],
 }

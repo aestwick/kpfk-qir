@@ -35,6 +35,24 @@ export async function getSummarizeBatchSize(): Promise<number> {
   return (await getSetting<number>('summarize_batch_size')) ?? 10
 }
 
+export async function getComplianceChecksEnabled(): Promise<Record<string, boolean>> {
+  return (await getSetting<Record<string, boolean>>('compliance_checks_enabled')) ?? {
+    profanity: true,
+    station_id_missing: true,
+    technical: true,
+    payola_plugola: true,
+    sponsor_id: true,
+  }
+}
+
+export async function getCompliancePrompt(): Promise<string> {
+  return (await getSetting<string>('compliance_prompt')) ?? ''
+}
+
+export async function isComplianceBlocking(): Promise<boolean> {
+  return (await getSetting<boolean>('compliance_blocking')) ?? false
+}
+
 export async function getIssueCategories(): Promise<string[]> {
   return (await getSetting<string[]>('issue_categories')) ?? [
     'Civil Rights / Social Justice',

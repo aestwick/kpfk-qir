@@ -49,18 +49,18 @@ export async function processGenerateQir(job: Job) {
       'Arts & Culture',
     ]
 
-  // Get all summarized episodes in this quarter
+  // Get all completed episodes in this quarter (summarized or compliance_checked)
   const { data: episodes, error } = await supabaseAdmin
     .from('episode_log')
     .select('*')
-    .eq('status', 'summarized')
+    .in('status', ['summarized', 'compliance_checked'])
     .gte('air_date', start)
     .lte('air_date', end)
     .order('air_date', { ascending: true })
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
   if (!episodes?.length) {
-    console.log('[generate-qir] no summarized episodes for this quarter')
+    console.log('[generate-qir] no completed episodes for this quarter')
     return { drafted: false, reason: 'no episodes' }
   }
 
