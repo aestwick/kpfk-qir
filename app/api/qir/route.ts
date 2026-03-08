@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
 // GET — list QIR drafts, optionally filtered by year/quarter
 export async function GET(request: NextRequest) {
   try {
