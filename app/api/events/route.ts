@@ -1,4 +1,4 @@
-import { ingestQueue, transcribeQueue, summarizeQueue } from '@/lib/queue'
+import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,20 +15,24 @@ async function getQueueCounts(queue: typeof ingestQueue) {
 export async function GET() {
   const encoder = new TextEncoder()
 
+  // Shared cleanup state — accessible from both start() and cancel()
+  let closed = false
+  let interval: ReturnType<typeof setInterval> | null = null
+  let timeout: ReturnType<typeof setTimeout> | null = null
+
   const stream = new ReadableStream({
     async start(controller) {
-      let closed = false
-
       async function push() {
         if (closed) return
         try {
-          const [ingest, transcribe, summarize] = await Promise.all([
+          const [ingest, transcribe, summarize, compliance] = await Promise.all([
             getQueueCounts(ingestQueue),
             getQueueCounts(transcribeQueue),
             getQueueCounts(summarizeQueue),
+            getQueueCounts(complianceQueue),
           ])
 
-          const data = { ingest, transcribe, summarize }
+          const data = { ingest, transcribe, summarize, compliance }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         } catch {
           // Silently skip on error — client will reconnect
@@ -39,17 +43,22 @@ export async function GET() {
       await push()
 
       // Then push every 5 seconds
-      const interval = setInterval(push, 5000)
+      interval = setInterval(push, 5000)
 
       // Clean up after 5 minutes (client will reconnect)
-      const timeout = setTimeout(() => {
+      timeout = setTimeout(() => {
         closed = true
-        clearInterval(interval)
+        if (interval) clearInterval(interval)
         controller.close()
       }, 5 * 60 * 1000)
 
-      // Handle client disconnect
       controller.enqueue(encoder.encode(': connected\n\n'))
+    },
+    cancel() {
+      // Clean up when client disconnects
+      closed = true
+      if (interval) clearInterval(interval)
+      if (timeout) clearTimeout(timeout)
     },
   })
 
