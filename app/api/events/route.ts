@@ -15,10 +15,13 @@ async function getQueueCounts(queue: typeof ingestQueue) {
 export async function GET() {
   const encoder = new TextEncoder()
 
+  // Shared cleanup state — accessible from both start() and cancel()
+  let closed = false
+  let interval: ReturnType<typeof setInterval> | null = null
+  let timeout: ReturnType<typeof setTimeout> | null = null
+
   const stream = new ReadableStream({
     async start(controller) {
-      let closed = false
-
       async function push() {
         if (closed) return
         try {
@@ -40,17 +43,22 @@ export async function GET() {
       await push()
 
       // Then push every 5 seconds
-      const interval = setInterval(push, 5000)
+      interval = setInterval(push, 5000)
 
       // Clean up after 5 minutes (client will reconnect)
-      const timeout = setTimeout(() => {
+      timeout = setTimeout(() => {
         closed = true
-        clearInterval(interval)
+        if (interval) clearInterval(interval)
         controller.close()
       }, 5 * 60 * 1000)
 
-      // Handle client disconnect
       controller.enqueue(encoder.encode(': connected\n\n'))
+    },
+    cancel() {
+      // Clean up when client disconnects
+      closed = true
+      if (interval) clearInterval(interval)
+      if (timeout) clearTimeout(timeout)
     },
   })
 

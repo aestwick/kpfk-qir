@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { SkeletonCard } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
+import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { useQueueSSE } from '@/lib/use-sse'
 
 interface FailedJob {
@@ -25,16 +26,18 @@ interface QueueWithFailed {
 type PipelineMode = 'steady' | 'catch-up'
 
 const queueNames = ['ingest', 'transcribe', 'summarize', 'compliance'] as const
-type QueueName = typeof queueNames[number]
 
 export default function JobsPage() {
   const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [pipelineMode, setPipelineMode] = useState<PipelineMode>('steady')
-  const [modeLoading, setModeLoading] = useState(false)
   const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> | null>(null)
   const [failedExpanded, setFailedExpanded] = useState(false)
+  const [confirmClear, setConfirmClear] = useState<string | null>(null)
+  const [sseTimedOut, setSseTimedOut] = useState(false)
   const { toast } = useToast()
+
+  const anyLoading = actionLoading !== null
 
   // Fetch failed job details and pipeline mode setting
   const fetchDetails = useCallback(async () => {
@@ -68,10 +71,19 @@ export default function JobsPage() {
 
   useEffect(() => {
     fetchDetails()
-    // Refresh failed details every 15 seconds
     const interval = setInterval(fetchDetails, 15000)
     return () => clearInterval(interval)
   }, [fetchDetails])
+
+  // SSE timeout fallback — if no data after 15 seconds, show error state
+  useEffect(() => {
+    if (queues) {
+      setSseTimedOut(false)
+      return
+    }
+    const timeout = setTimeout(() => setSseTimedOut(true), 15000)
+    return () => clearTimeout(timeout)
+  }, [queues])
 
   async function triggerJob(action: string) {
     setActionLoading(action)
@@ -90,12 +102,12 @@ export default function JobsPage() {
     } catch {
       toast('error', 'Network error: could not reach server')
     }
-    setTimeout(() => setActionLoading(null), 1500)
+    setActionLoading(null)
   }
 
   async function togglePipelineMode() {
     const newMode: PipelineMode = pipelineMode === 'steady' ? 'catch-up' : 'steady'
-    setModeLoading(true)
+    setActionLoading('pipeline-mode')
     try {
       const res = await fetch('/api/jobs', {
         method: 'POST',
@@ -112,7 +124,7 @@ export default function JobsPage() {
     } catch {
       toast('error', 'Network error')
     }
-    setModeLoading(false)
+    setActionLoading(null)
   }
 
   async function clearFailed(queueName: string) {
@@ -125,7 +137,7 @@ export default function JobsPage() {
       })
       if (res.ok) {
         toast('success', `Cleared failed jobs from ${queueName}`)
-        fetchDetails()
+        await fetchDetails()
       } else {
         const data = await res.json().catch(() => ({}))
         toast('error', data.error ?? 'Failed to clear')
@@ -147,7 +159,7 @@ export default function JobsPage() {
       if (res.ok) {
         const data = await res.json()
         toast('success', data.message)
-        fetchDetails()
+        await fetchDetails()
       } else {
         const data = await res.json().catch(() => ({}))
         toast('error', data.error ?? 'Failed to retry')
@@ -156,6 +168,44 @@ export default function JobsPage() {
       toast('error', 'Network error')
     }
     setActionLoading(null)
+  }
+
+  // SSE timed out — show error with fallback data from polling
+  if (sseTimedOut && !queues) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold">Jobs</h2>
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <p className="text-sm text-amber-800">
+            Unable to connect to live updates. Queue data may be stale.
+          </p>
+          <button
+            onClick={() => { setSseTimedOut(false); window.location.reload() }}
+            className="mt-2 px-3 py-1 text-xs bg-amber-100 text-amber-800 rounded hover:bg-amber-200 transition-colors"
+          >
+            Retry Connection
+          </button>
+        </div>
+        {failedDetails && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {queueNames.map((name) => {
+              const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
+              return (
+                <div key={name} className="bg-white rounded-xl shadow-sm border p-4 space-y-3 opacity-75">
+                  <h3 className="font-semibold capitalize">{name}</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <CountCell count={q.active} label="Active" bg="bg-blue-50" text="text-blue-700" sub="text-blue-600" />
+                    <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50" text="text-yellow-700" sub="text-yellow-600" />
+                    <CountCell count={q.completed} label="Completed" bg="bg-green-50" text="text-green-700" sub="text-green-600" />
+                    <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50' : 'bg-gray-50'} text={q.failed > 0 ? 'text-red-700' : 'text-gray-500'} sub={q.failed > 0 ? 'text-red-600' : 'text-gray-400'} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
   }
 
   if (!queues) return (
@@ -167,9 +217,15 @@ export default function JobsPage() {
     </div>
   )
 
-  const totalFailed = queueNames.reduce((sum, name) => {
-    const q = failedDetails?.[name]
-    return sum + (q?.failedJobs?.length ?? 0)
+  // Use SSE counts for failed section visibility (more up-to-date than polling)
+  const anyQueueHasFailed = queueNames.some((name) => {
+    const sseCount = queues[name]?.failed ?? 0
+    const polledCount = failedDetails?.[name]?.failedJobs?.length ?? 0
+    return sseCount > 0 || polledCount > 0
+  })
+
+  const totalFailedJobs = queueNames.reduce((sum, name) => {
+    return sum + (failedDetails?.[name]?.failedJobs?.length ?? 0)
   }, 0)
 
   return (
@@ -186,7 +242,7 @@ export default function JobsPage() {
                 <h3 className="font-semibold capitalize">{name}</h3>
                 <button
                   onClick={() => triggerJob(name)}
-                  disabled={actionLoading !== null}
+                  disabled={anyLoading}
                   className="px-3 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-colors"
                 >
                   {actionLoading === name ? 'Queuing...' : 'Run Now'}
@@ -224,10 +280,10 @@ export default function JobsPage() {
             </span>
             <button
               onClick={togglePipelineMode}
-              disabled={modeLoading}
+              disabled={anyLoading}
               className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-colors"
             >
-              {modeLoading ? 'Switching...' : `Switch to ${pipelineMode === 'steady' ? 'Catch-up' : 'Steady'}`}
+              {actionLoading === 'pipeline-mode' ? 'Switching...' : `Switch to ${pipelineMode === 'steady' ? 'Catch-up' : 'Steady'}`}
             </button>
           </div>
         </div>
@@ -249,7 +305,7 @@ export default function JobsPage() {
       </div>
 
       {/* Failed Jobs Detail — collapsible */}
-      {totalFailed > 0 && (
+      {anyQueueHasFailed && (
         <div className="bg-white rounded-xl shadow-sm border">
           <button
             onClick={() => setFailedExpanded(!failedExpanded)}
@@ -258,7 +314,7 @@ export default function JobsPage() {
             <div className="flex items-center gap-2">
               <h3 className="font-semibold">Failed Jobs</h3>
               <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">
-                {totalFailed}
+                {totalFailedJobs > 0 ? totalFailedJobs : '...'}
               </span>
             </div>
             <svg
@@ -285,14 +341,14 @@ export default function JobsPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => retryFailed(name)}
-                          disabled={actionLoading !== null}
+                          disabled={anyLoading}
                           className="px-2 py-1 text-xs bg-amber-100 text-amber-800 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors"
                         >
                           {actionLoading === `retry-${name}` ? 'Retrying...' : 'Retry All Failed'}
                         </button>
                         <button
-                          onClick={() => clearFailed(name)}
-                          disabled={actionLoading !== null}
+                          onClick={() => setConfirmClear(name)}
+                          disabled={anyLoading}
                           className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors"
                         >
                           {actionLoading === `clear-${name}` ? 'Clearing...' : 'Clear Failed'}
@@ -333,6 +389,20 @@ export default function JobsPage() {
           )}
         </div>
       )}
+
+      {/* Confirm dialog for clearing failed jobs */}
+      <ConfirmDialog
+        open={confirmClear !== null}
+        title="Clear Failed Jobs"
+        message={`Permanently remove all failed jobs from the ${confirmClear} queue? This clears them from BullMQ but does not change episode statuses.`}
+        confirmLabel="Clear Failed"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (confirmClear) clearFailed(confirmClear)
+          setConfirmClear(null)
+        }}
+        onCancel={() => setConfirmClear(null)}
+      />
     </div>
   )
 }

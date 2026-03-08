@@ -37,10 +37,14 @@ export async function POST(request: NextRequest) {
       const failed = await queue.getFailed(0, 100)
       let retried = 0
       for (const job of failed) {
-        await job.retry()
-        retried++
+        try {
+          await job.retry()
+          retried++
+        } catch {
+          // Job may have been removed or already retried — skip
+        }
       }
-      return NextResponse.json({ ok: true, message: `Retried ${retried} failed jobs in ${body.queue}` })
+      return NextResponse.json({ ok: true, message: `Retried ${retried} of ${failed.length} failed jobs in ${body.queue}` })
     }
 
     switch (action) {
