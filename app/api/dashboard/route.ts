@@ -45,6 +45,9 @@ export async function GET() {
     complianceFlags,
     qirDrafts,
     monthlyUsage,
+    qualityFlagEpisodes,
+    lastFiledQir,
+    lastCompletedJobs,
   ] = await Promise.all([
     // 1. Overall status counts
     Promise.all(
@@ -155,6 +158,31 @@ export async function GET() {
       .from('usage_log')
       .select('estimated_cost, service')
       .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+
+    // 18. Quality flags: episodes with very short transcripts but long duration
+    supabaseAdmin
+      .from('episode_log')
+      .select('id, show_name, headline, air_date, duration, status')
+      .in('status', ['transcribed', 'summarized', 'compliance_checked'])
+      .gt('duration', 1800)
+      .gte('air_date', qtr.start)
+      .lte('air_date', qtr.end),
+
+    // 19. Last filed (finalized) QIR
+    supabaseAdmin
+      .from('qir_drafts')
+      .select('id, year, quarter, version, updated_at')
+      .eq('status', 'final')
+      .order('updated_at', { ascending: false })
+      .limit(1),
+
+    // 20. Last completed job timestamp per queue type
+    supabaseAdmin
+      .from('usage_log')
+      .select('operation, created_at')
+      .in('operation', ['transcribe', 'summarize', 'compliance', 'ingest'])
+      .order('created_at', { ascending: false })
+      .limit(20),
   ])
 
   // Aggregate status counts
@@ -282,6 +310,45 @@ export async function GET() {
     else monthOpenai += cost
   }
 
+  // Quality flags: filter episodes that might have transcript issues
+  // We'll check transcript length for candidates with long duration
+  const qualityCandidates = qualityFlagEpisodes.data ?? []
+  let qualityFlags: Array<{ id: number; show_name: string | null; headline: string | null; air_date: string | null; reason: string }> = []
+  if (qualityCandidates.length > 0) {
+    const candidateIds = qualityCandidates.map((e) => e.id)
+    const { data: transcripts } = await supabaseAdmin
+      .from('transcripts')
+      .select('episode_id, transcript')
+      .in('episode_id', candidateIds)
+    const transcriptLengths = new Map<number, number>()
+    for (const t of transcripts ?? []) {
+      transcriptLengths.set(t.episode_id, (t.transcript ?? '').length)
+    }
+    qualityFlags = qualityCandidates
+      .filter((e) => {
+        const len = transcriptLengths.get(e.id) ?? 0
+        return len < 500
+      })
+      .map((e) => ({
+        id: e.id,
+        show_name: e.show_name,
+        headline: e.headline,
+        air_date: e.air_date,
+        reason: 'Short transcript for long episode',
+      }))
+  }
+
+  // Last filed QIR
+  const lastFiled = lastFiledQir.data?.[0] ?? null
+
+  // Last completed job per queue type
+  const lastJobTimestamps: Record<string, string> = {}
+  for (const row of lastCompletedJobs.data ?? []) {
+    if (!lastJobTimestamps[row.operation]) {
+      lastJobTimestamps[row.operation] = row.created_at
+    }
+  }
+
   // Time estimates
   const pendingCount = quarterCounts.pending ?? 0
   const transcribedCount = quarterCounts.transcribed ?? 0
@@ -326,5 +393,8 @@ export async function GET() {
     coverageGaps,
     complianceSummary: complianceFlagCounts,
     qirStatus,
+    qualityFlags,
+    lastFiledQir: lastFiled,
+    lastCompletedJobs: lastJobTimestamps,
   })
 }

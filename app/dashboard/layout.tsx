@@ -9,6 +9,7 @@ import { ToastProvider } from '@/app/components/toast'
 const navItems = [
   { href: '/dashboard', label: 'Overview' },
   { href: '/dashboard/episodes', label: 'Episodes' },
+  { href: '/dashboard/compliance', label: 'Compliance' },
   { href: '/dashboard/jobs', label: 'Jobs' },
   { href: '/dashboard/activity', label: 'Activity' },
   { href: '/dashboard/usage', label: 'Usage' },

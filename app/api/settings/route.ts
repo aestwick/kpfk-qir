@@ -3,8 +3,39 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url)
+    const resource = searchParams.get('resource')
+
+    // GET /api/settings?resource=shows — return show_keys
+    if (resource === 'shows') {
+      const { data, error } = await supabaseAdmin
+        .from('show_keys')
+        .select('*')
+        .order('show_name')
+
+      if (error) throw error
+
+      // Also get episode counts per show
+      const { data: counts } = await supabaseAdmin
+        .from('episode_log')
+        .select('show_key')
+
+      const countMap = new Map<string, number>()
+      for (const row of counts ?? []) {
+        countMap.set(row.show_key, (countMap.get(row.show_key) ?? 0) + 1)
+      }
+
+      const shows = (data ?? []).map((show) => ({
+        ...show,
+        episode_count: countMap.get(show.key) ?? 0,
+      }))
+
+      return NextResponse.json({ shows })
+    }
+
+    // Default: return qir_settings
     const { data, error } = await supabaseAdmin
       .from('qir_settings')
       .select('*')
@@ -47,5 +78,44 @@ export async function PUT(request: NextRequest) {
   } catch (err) {
     console.error('PUT /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to save setting' }, { status: 500 })
+  }
+}
+
+// PATCH /api/settings — update show_keys
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { resource, id, ...updates } = body
+
+    if (resource === 'show') {
+      if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
+
+      const allowedFields = ['show_name', 'category', 'default_category', 'active', 'email']
+      const safeUpdates: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(updates)) {
+        if (allowedFields.includes(key)) {
+          safeUpdates[key] = value
+        }
+      }
+
+      if (Object.keys(safeUpdates).length === 0) {
+        return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+      }
+
+      safeUpdates.updated_at = new Date().toISOString()
+
+      const { error } = await supabaseAdmin
+        .from('show_keys')
+        .update(safeUpdates)
+        .eq('id', id)
+
+      if (error) throw error
+      return NextResponse.json({ ok: true })
+    }
+
+    return NextResponse.json({ error: 'Unknown resource' }, { status: 400 })
+  } catch (err) {
+    console.error('PATCH /api/settings failed:', err)
+    return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
   }
 }

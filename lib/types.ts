@@ -32,10 +32,15 @@ export interface ShowKey {
   key: string
   show_name: string
   category: string | null
+  default_category: string | null
   active: boolean
   email: string | null
   created_at: string
   updated_at: string | null
+}
+
+export interface ShowKeyWithCount extends ShowKey {
+  episode_count: number
 }
 
 export interface Transcript {
@@ -111,6 +116,24 @@ export interface TranscriptCorrection {
   is_regex: boolean
   active: boolean
   notes: string | null
+  episode_id: number | null
   created_at: string
+}
+
+export interface ComplianceFlagWithEpisode extends ComplianceFlag {
+  episode_log: {
+    show_name: string | null
+    show_key: string
+    air_date: string | null
+    headline: string | null
+  }
+}
+
+export interface QualityFlag {
+  id: number
+  show_name: string | null
+  headline: string | null
+  air_date: string | null
+  reason: string
 }
 
