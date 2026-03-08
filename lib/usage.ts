@@ -50,6 +50,29 @@ export async function logSummarizationUsage(
   })
 }
 
+export async function logComplianceUsage(
+  episodeId: number,
+  inputTokens: number,
+  outputTokens: number,
+  metadata?: Record<string, unknown>
+) {
+  const estimatedCost =
+    inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
+    outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
+
+  await supabaseAdmin.from('usage_log').insert({
+    episode_id: episodeId,
+    service: 'openai',
+    model: 'gpt-4o-mini',
+    operation: 'compliance',
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    duration_seconds: null,
+    estimated_cost: estimatedCost,
+    metadata: metadata ?? {},
+  })
+}
+
 export async function logCurationUsage(
   inputTokens: number,
   outputTokens: number,

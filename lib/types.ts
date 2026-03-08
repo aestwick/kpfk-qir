@@ -8,7 +8,7 @@ export interface EpisodeLog {
   end_time: string | null
   duration: number | null
   mp3_url: string
-  status: 'pending' | 'transcribed' | 'summarized' | 'failed' | 'unavailable' | 'dead'
+  status: 'pending' | 'transcribed' | 'summarized' | 'compliance_checked' | 'failed' | 'unavailable' | 'dead'
   headline: string | null
   host: string | null
   guest: string | null
@@ -50,7 +50,7 @@ export interface UsageLog {
   episode_id: number | null
   service: 'groq' | 'openai'
   model: string
-  operation: 'transcribe' | 'summarize' | 'curate'
+  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance'
   input_tokens: number
   output_tokens: number
   duration_seconds: number | null
@@ -78,6 +78,28 @@ export interface QirDraft {
   version: number
   created_at: string
   updated_at: string
+}
+
+export interface ComplianceFlag {
+  id: number
+  episode_id: number
+  flag_type: 'profanity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id'
+  severity: 'info' | 'warning' | 'critical'
+  excerpt: string | null
+  timestamp_seconds: number | null
+  details: string | null
+  resolved: boolean
+  resolved_by: string | null
+  resolved_notes: string | null
+  created_at: string
+}
+
+export interface ComplianceWord {
+  id: number
+  word: string
+  severity: 'warning' | 'critical'
+  active: boolean
+  created_at: string
 }
 
 export interface TranscriptCorrection {

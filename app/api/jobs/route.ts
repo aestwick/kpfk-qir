@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { ingestQueue, transcribeQueue, summarizeQueue } from '@/lib/queue'
+import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,6 +19,10 @@ export async function POST(request: NextRequest) {
         await summarizeQueue.add('manual-summarize', {})
         return NextResponse.json({ ok: true, message: 'Summarize job queued' })
       }
+      case 'compliance': {
+        await complianceQueue.add('manual-compliance', {})
+        return NextResponse.json({ ok: true, message: 'Compliance check job queued' })
+      }
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
     }
@@ -30,16 +34,18 @@ export async function POST(request: NextRequest) {
 
 export async function GET() {
   try {
-    const [ingestCounts, transcribeCounts, summarizeCounts] = await Promise.all([
+    const [ingestCounts, transcribeCounts, summarizeCounts, complianceCounts] = await Promise.all([
       getQueueCounts(ingestQueue),
       getQueueCounts(transcribeQueue),
       getQueueCounts(summarizeQueue),
+      getQueueCounts(complianceQueue),
     ])
 
     return NextResponse.json({
       ingest: ingestCounts,
       transcribe: transcribeCounts,
       summarize: summarizeCounts,
+      compliance: complianceCounts,
     })
   } catch (err) {
     console.error('GET /api/jobs failed:', err)

@@ -40,6 +40,13 @@ export const generateQirQueue = new Queue('generate-qir', {
     backoff: { type: 'exponential', delay: 5000 },
   },
 })
+export const complianceQueue = new Queue('compliance', {
+  connection: connectionConfig,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
+})
 export const autoRetryQueue = new Queue('auto-retry', {
   connection: connectionConfig,
   defaultJobOptions: {

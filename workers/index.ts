@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq'
 import { processIngest } from './ingest'
 import { processTranscribe } from './transcribe'
 import { processSummarize } from './summarize'
+import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
 import { getSetting } from '../lib/settings'
@@ -41,6 +42,13 @@ const transcribeQueue = new Queue('transcribe', {
   },
 })
 const summarizeQueue = new Queue('summarize', {
+  connection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
+})
+const complianceQueue = new Queue('compliance', {
   connection,
   defaultJobOptions: {
     attempts: 2,
@@ -102,12 +110,29 @@ const summarizeWorker = new Worker('summarize', processSummarize, {
   concurrency: initialMode.summarize,
 })
 
-summarizeWorker.on('completed', (job) => {
+summarizeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.summarized ?? 0
   console.log(`[summarize] completed — ${count} episodes summarized`)
+  if (count > 0) {
+    await complianceQueue.add('compliance-batch', {})
+  }
 })
 summarizeWorker.on('failed', (job, err) => {
   console.error(`[summarize] failed:`, err.message)
+})
+
+// -- Compliance Worker --
+const complianceWorker = new Worker('compliance', processCompliance, {
+  connection,
+  concurrency: 1,
+})
+
+complianceWorker.on('completed', (job) => {
+  const count = job.returnvalue?.checked ?? 0
+  console.log(`[compliance] completed — ${count} episodes checked`)
+})
+complianceWorker.on('failed', (job, err) => {
+  console.error(`[compliance] failed:`, err.message)
 })
 
 // -- Generate QIR Worker --
@@ -208,6 +233,7 @@ async function shutdown() {
     ingestWorker.close(),
     transcribeWorker.close(),
     summarizeWorker.close(),
+    complianceWorker.close(),
     generateQirWorker.close(),
     autoRetryWorker.close(),
   ])
