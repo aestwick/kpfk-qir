@@ -31,7 +31,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="bg-white rounded-lg shadow p-8">
           <h1 className="text-xl font-bold text-center mb-1">QIR / KPFK</h1>
-          <p className="text-sm text-gray-500 text-center mb-6">Quarterly Issues Report Dashboard</p>
+          <p className="text-sm text-gray-500 text-center mb-1">Quarterly Issues Report Dashboard</p>
+          <p className="text-xs text-gray-400 text-center mb-6">Welcome back! Sign in to manage your FCC reports.</p>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
