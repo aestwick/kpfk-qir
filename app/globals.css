@@ -1,3 +1,111 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  /* Smooth rendering */
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Selection color */
+  ::selection {
+    background-color: rgba(196, 30, 58, 0.15);
+    color: #1a1a1a;
+  }
+
+  /* Custom scrollbar — warm, subtle */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #D4D0C9;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #A8A39B;
+  }
+
+  /* Tabular/monospace figures for numbers */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /* Card base */
+  .card {
+    @apply bg-white rounded-xl border border-warm-200 shadow-card;
+  }
+  .card:hover {
+    @apply shadow-card-hover;
+  }
+
+  /* Section header used in dashboard cards */
+  .section-header {
+    @apply text-2xs font-semibold uppercase tracking-wider text-warm-400;
+  }
+
+  /* Status badge base */
+  .badge {
+    @apply text-2xs px-2 py-0.5 rounded-md font-medium inline-flex items-center;
+  }
+
+  /* Interactive nav item */
+  .nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors duration-150;
+  }
+
+  /* Dot indicators */
+  .dot {
+    @apply inline-flex rounded-full shrink-0;
+  }
+  .dot-sm { @apply h-2 w-2; }
+  .dot-md { @apply h-2.5 w-2.5; }
+  .dot-lg { @apply h-3 w-3; }
+
+  /* Broadcast log entry */
+  .log-entry {
+    @apply flex items-center gap-3 px-5 py-2.5 transition-colors duration-150;
+  }
+  .log-entry:hover {
+    @apply bg-kpfk-cream/50;
+  }
+
+  /* Action buttons in status strip */
+  .action-btn {
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 disabled:opacity-40;
+  }
+  .action-btn-primary {
+    @apply action-btn bg-warm-800 text-white hover:bg-warm-700 active:bg-warm-900;
+  }
+  .action-btn-ghost {
+    @apply action-btn text-warm-600 hover:bg-warm-100 active:bg-warm-200;
+  }
+
+  /* Progress bar */
+  .progress-track {
+    @apply w-full rounded-full overflow-hidden;
+  }
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500 ease-out;
+  }
+}
+
+@layer utilities {
+  /* Fade-in for new content */
+  .animate-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  /* Smooth number transitions */
+  .transition-number {
+    transition: all 0.3s ease-out;
+  }
+}

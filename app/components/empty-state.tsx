@@ -10,14 +10,14 @@ export function EmptyState({
   action?: { label: string; onClick: () => void }
 }) {
   return (
-    <div className="bg-white rounded-lg shadow p-8 text-center">
-      <p className="text-gray-400 text-4xl mb-3">&#8709;</p>
-      <p className="text-lg text-gray-600 font-medium mb-1">{title}</p>
-      {description && <p className="text-sm text-gray-500 mb-4">{description}</p>}
+    <div className="bg-white rounded-xl border border-warm-200 shadow-card p-8 text-center">
+      <p className="text-warm-300 text-4xl mb-3">&#8709;</p>
+      <p className="text-lg text-warm-600 font-medium mb-1">{title}</p>
+      {description && <p className="text-sm text-warm-400 mb-4">{description}</p>}
       {action && (
         <button
           onClick={action.onClick}
-          className="px-4 py-2 text-sm bg-gray-900 text-white rounded hover:bg-gray-800"
+          className="px-4 py-2 text-sm bg-warm-800 text-white rounded-lg hover:bg-warm-700 transition-colors"
         >
           {action.label}
         </button>
