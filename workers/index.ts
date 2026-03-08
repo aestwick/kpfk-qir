@@ -200,6 +200,11 @@ async function setupCron() {
 
 setupCron().catch(console.error)
 
+// Run ingest immediately on startup
+ingestQueue.add('ingest-startup', {}).then(() => {
+  console.log('[workers] startup ingest queued')
+}).catch(console.error)
+
 // -- Pipeline Mode Polling --
 let currentMode = DEFAULT_MODE
 
