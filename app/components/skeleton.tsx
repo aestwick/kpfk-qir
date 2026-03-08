@@ -2,9 +2,9 @@
 
 export function SkeletonCard() {
   return (
-    <div className="bg-white rounded-xl border border-warm-200 p-4 animate-pulse">
-      <div className="h-3 bg-warm-100 rounded w-1/3 mb-3" />
-      <div className="h-6 bg-warm-100 rounded w-1/2" />
+    <div className="bg-white dark:bg-surface-raised rounded-xl border border-warm-200 dark:border-warm-700 p-4 animate-pulse">
+      <div className="h-3 bg-warm-100 dark:bg-warm-700 rounded w-1/3 mb-3" />
+      <div className="h-6 bg-warm-100 dark:bg-warm-700 rounded w-1/2" />
     </div>
   )
 }
@@ -12,12 +12,12 @@ export function SkeletonCard() {
 export function SkeletonRow() {
   return (
     <tr className="animate-pulse">
-      <td className="px-4 py-3"><div className="h-4 bg-warm-100 rounded w-32" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-warm-100 rounded w-20" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-warm-100 rounded w-12" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-warm-100 rounded-full w-16" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-warm-100 rounded w-40" /></td>
-      <td className="px-4 py-3"><div className="h-4 bg-warm-100 rounded w-24" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-32" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-20" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-12" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-warm-100 dark:bg-warm-700 rounded-full w-16" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-40" /></td>
+      <td className="px-4 py-3"><div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-24" /></td>
     </tr>
   )
 }
@@ -44,11 +44,11 @@ export function SkeletonCards({ count = 5 }: { count?: number }) {
 
 export function SkeletonBlock() {
   return (
-    <div className="bg-white rounded-xl border border-warm-200 p-4 animate-pulse space-y-3">
-      <div className="h-3 bg-warm-100 rounded w-1/4" />
-      <div className="h-4 bg-warm-100 rounded w-full" />
-      <div className="h-4 bg-warm-100 rounded w-3/4" />
-      <div className="h-4 bg-warm-100 rounded w-1/2" />
+    <div className="bg-white dark:bg-surface-raised rounded-xl border border-warm-200 dark:border-warm-700 p-4 animate-pulse space-y-3">
+      <div className="h-3 bg-warm-100 dark:bg-warm-700 rounded w-1/4" />
+      <div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-full" />
+      <div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-3/4" />
+      <div className="h-4 bg-warm-100 dark:bg-warm-700 rounded w-1/2" />
     </div>
   )
 }

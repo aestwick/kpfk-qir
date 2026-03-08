@@ -68,30 +68,30 @@ export function TranscriptCorrections({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 space-y-4">
-      <h3 className="font-semibold text-sm text-gray-500 uppercase">Transcript Corrections</h3>
+    <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-4">
+      <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Transcript Corrections</h3>
 
       {/* Add/Edit Form */}
-      <div className="border rounded p-3 space-y-3 bg-gray-50">
+      <div className="border dark:border-warm-600 rounded p-3 space-y-3 bg-gray-50 dark:bg-warm-700">
         <p className="text-sm font-medium">{editingId ? 'Edit Correction' : 'Add Correction'}</p>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs text-gray-500">Wrong (what Whisper outputs)</label>
+            <label className="text-xs text-gray-500 dark:text-warm-400">Wrong (what Whisper outputs)</label>
             <input
               type="text"
               value={correctionForm.wrong}
               onChange={(e) => setCorrectionForm({ ...correctionForm, wrong: e.target.value })}
-              className="w-full border rounded px-2 py-1.5 text-sm"
+              className="w-full border dark:border-warm-600 rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
               placeholder="e.g. Kay PFK"
             />
           </div>
           <div>
-            <label className="text-xs text-gray-500">Correct (what it should be)</label>
+            <label className="text-xs text-gray-500 dark:text-warm-400">Correct (what it should be)</label>
             <input
               type="text"
               value={correctionForm.correct}
               onChange={(e) => setCorrectionForm({ ...correctionForm, correct: e.target.value })}
-              className="w-full border rounded px-2 py-1.5 text-sm"
+              className="w-full border dark:border-warm-600 rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
               placeholder="e.g. KPFK"
             />
           </div>
@@ -102,7 +102,7 @@ export function TranscriptCorrections({
             type="text"
             value={correctionForm.notes}
             onChange={(e) => setCorrectionForm({ ...correctionForm, notes: e.target.value })}
-            className="w-full border rounded px-2 py-1.5 text-sm"
+            className="w-full border dark:border-warm-600 rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
             placeholder="e.g. station call letters"
           />
         </div>
@@ -127,14 +127,14 @@ export function TranscriptCorrections({
           {editingId && (
             <button
               onClick={() => { setEditingId(null); setCorrectionForm({ wrong: '', correct: '', case_sensitive: false, is_regex: false, notes: '' }) }}
-              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900"
+              className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 dark:text-warm-400 dark:hover:text-warm-200"
             >
               Cancel
             </button>
           )}
           <button
             onClick={handleSave}
-            className="px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+            className="px-4 py-1.5 text-sm bg-green-600 dark:bg-green-700 text-white rounded hover:bg-green-700 dark:hover:bg-green-600"
           >
             {editingId ? 'Update' : 'Add'}
           </button>
@@ -144,7 +144,7 @@ export function TranscriptCorrections({
       {/* Corrections Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b">
+          <thead className="bg-gray-50 dark:bg-warm-700 border-b dark:border-warm-600">
             <tr>
               <th className="text-left px-3 py-2 font-medium">Wrong</th>
               <th className="text-left px-3 py-2 font-medium">Correct</th>
@@ -154,29 +154,29 @@ export function TranscriptCorrections({
               <th className="text-right px-3 py-2 font-medium">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y dark:divide-warm-700">
             {corrections.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">No corrections yet</td></tr>
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">No corrections yet</td></tr>
             ) : corrections.map((c) => (
               <tr key={c.id} className={c.active ? '' : 'opacity-50'}>
                 <td className="px-3 py-2 font-mono">{c.wrong}</td>
                 <td className="px-3 py-2 font-mono">{c.correct}</td>
                 <td className="px-3 py-2">
-                  {c.case_sensitive && <span className="text-xs bg-gray-100 px-1 rounded mr-1">CS</span>}
-                  {c.is_regex && <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded">Regex</span>}
+                  {c.case_sensitive && <span className="text-xs bg-gray-100 dark:bg-warm-700 px-1 rounded mr-1">CS</span>}
+                  {c.is_regex && <span className="text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 px-1 rounded">Regex</span>}
                 </td>
-                <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate">{c.notes ?? ''}</td>
+                <td className="px-3 py-2 text-gray-500 dark:text-warm-400 max-w-[200px] truncate">{c.notes ?? ''}</td>
                 <td className="px-3 py-2">
                   <button
                     onClick={() => onToggleCorrection(c.id, c.active)}
-                    className={`text-xs px-2 py-0.5 rounded ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                    className={`text-xs px-2 py-0.5 rounded ${c.active ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-gray-100 text-gray-500 dark:bg-warm-700 dark:text-warm-400'}`}
                   >
                     {c.active ? 'On' : 'Off'}
                   </button>
                 </td>
                 <td className="px-3 py-2 text-right">
-                  <button onClick={() => startEdit(c)} className="text-xs text-blue-600 hover:underline mr-2">Edit</button>
-                  <button onClick={() => onDeleteCorrection(c.id)} className="text-xs text-red-600 hover:underline">Delete</button>
+                  <button onClick={() => startEdit(c)} className="text-xs text-blue-600 dark:text-blue-400 hover:underline mr-2">Edit</button>
+                  <button onClick={() => onDeleteCorrection(c.id)} className="text-xs text-red-600 dark:text-red-400 hover:underline">Delete</button>
                 </td>
               </tr>
             ))}
@@ -185,23 +185,23 @@ export function TranscriptCorrections({
       </div>
 
       {/* Test Area */}
-      <div className="border rounded p-3 space-y-2 bg-gray-50">
+      <div className="border dark:border-warm-600 rounded p-3 space-y-2 bg-gray-50 dark:bg-warm-700">
         <p className="text-sm font-medium">Test Corrections</p>
         <textarea
           value={testInput}
           onChange={(e) => setTestInput(e.target.value)}
           placeholder="Paste sample text here to test corrections..."
           rows={3}
-          className="w-full border rounded px-2 py-1.5 text-sm"
+          className="w-full border dark:border-warm-600 rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
         />
         <button
           onClick={testCorrections}
-          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+          className="px-3 py-1.5 text-sm bg-blue-600 dark:bg-blue-700 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600"
         >
           Test
         </button>
         {testOutput && (
-          <div className="bg-white border rounded p-2 text-sm whitespace-pre-wrap">{testOutput}</div>
+          <div className="bg-white dark:bg-warm-800 border dark:border-warm-600 rounded p-2 text-sm whitespace-pre-wrap">{testOutput}</div>
         )}
       </div>
     </div>

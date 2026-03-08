@@ -8,7 +8,7 @@ import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
 /* ─── lazy-loaded corrections component ─── */
 const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-corrections').then(m => ({ default: m.TranscriptCorrections })), {
-  loading: () => <div className="bg-white rounded-lg shadow p-4"><div className="h-48 bg-gray-100 rounded animate-pulse" /></div>,
+  loading: () => <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark"><div className="h-48 bg-gray-100 rounded animate-pulse dark:bg-warm-700" /></div>,
   ssr: false,
 })
 
@@ -494,20 +494,20 @@ export default function SettingsPage() {
       <h2 className="text-2xl font-bold">Settings</h2>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b dark:border-warm-700">
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === tab.key
-                ? 'border-gray-900 text-gray-900'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'border-gray-900 text-gray-900 dark:border-warm-100 dark:text-warm-100'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-warm-400 dark:hover:text-warm-300 dark:hover:border-warm-500'
             }`}
           >
             {tab.label}
             {tab.count != null && (
-              <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full">{tab.count}</span>
+              <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded-full dark:bg-warm-700 dark:text-warm-400">{tab.count}</span>
             )}
           </button>
         ))}
@@ -519,8 +519,8 @@ export default function SettingsPage() {
       {activeTab === 'pipeline' && (
         <div className="space-y-8">
           {/* Pipeline Processing Mode */}
-          <div className="bg-white rounded-lg shadow p-4 space-y-3">
-            <h3 className="font-semibold text-sm text-gray-500 uppercase">Processing Mode</h3>
+          <div className="bg-white rounded-lg shadow p-4 space-y-3 dark:bg-surface-raised dark:shadow-card-dark">
+            <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Processing Mode</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {PIPELINE_MODES.map((mode) => {
                 const isActive = pipelineMode === mode.key
@@ -530,15 +530,15 @@ export default function SettingsPage() {
                     onClick={() => !isActive && savePipelineMode(mode.key)}
                     disabled={savingMode}
                     className={`text-left p-4 rounded-lg border-2 transition-colors ${
-                      isActive ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-400'
+                      isActive ? 'border-gray-900 bg-gray-50 dark:border-warm-100 dark:bg-warm-700' : 'border-gray-200 hover:border-gray-400 dark:border-warm-600 dark:hover:border-warm-400'
                     } disabled:opacity-50`}
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      <div className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-300'}`} />
-                      <span className="font-semibold text-gray-900">{mode.label}</span>
+                      <div className={`w-2.5 h-2.5 rounded-full ${isActive ? 'bg-green-500' : 'bg-gray-300 dark:bg-warm-500'}`} />
+                      <span className="font-semibold text-gray-900 dark:text-warm-100">{mode.label}</span>
                     </div>
-                    <p className="text-sm text-gray-600">{mode.description}</p>
-                    <div className="mt-2 flex gap-3 text-xs text-gray-500">
+                    <p className="text-sm text-gray-600 dark:text-warm-400">{mode.description}</p>
+                    <div className="mt-2 flex gap-3 text-xs text-gray-500 dark:text-warm-400">
                       <span>Transcribe: {mode.transcribe} concurrent</span>
                       <span>Summarize: {mode.summarize} concurrent</span>
                     </div>
@@ -546,19 +546,19 @@ export default function SettingsPage() {
                 )
               })}
             </div>
-            <p className="text-xs text-gray-400">Workers check for mode changes every 30 seconds.</p>
+            <p className="text-xs text-gray-400 dark:text-warm-500">Workers check for mode changes every 30 seconds.</p>
           </div>
 
           {/* QIR Settings */}
-          <div className="bg-white rounded-lg shadow p-4 space-y-4">
-            <h3 className="font-semibold text-sm text-gray-500 uppercase">QIR Settings</h3>
+          <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
+            <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">QIR Settings</h3>
             {settingFields.map((field) => {
               const isDirty = (field.type === 'textarea' || field.type === 'json') && editValues[field.key] !== savedValues[field.key]
               const isAutoSave = field.autoSave
               return (
                 <div key={field.key} className="flex flex-col gap-1">
                   <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium text-gray-700">{field.label}</label>
+                    <label className="text-sm font-medium text-gray-700 dark:text-warm-300">{field.label}</label>
                     {savedFlash === field.key && (
                       <span className="text-xs text-green-600 font-medium animate-pulse">Saved</span>
                     )}
@@ -569,14 +569,14 @@ export default function SettingsPage() {
                         value={editValues[field.key] ?? ''}
                         onChange={(e) => setEditValues({ ...editValues, [field.key]: e.target.value })}
                         rows={field.type === 'textarea' ? 4 : 3}
-                        className="flex-1 border rounded px-2 py-1.5 text-sm font-mono"
+                        className="flex-1 border rounded px-2 py-1.5 text-sm font-mono dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                       />
                     ) : (
                       <input
                         type={field.type === 'number' ? 'number' : 'text'}
                         value={editValues[field.key] ?? ''}
                         onChange={(e) => handleAutoSaveChange(field.key, e.target.value)}
-                        className="flex-1 border rounded px-2 py-1.5 text-sm"
+                        className="flex-1 border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                       />
                     )}
                     {!isAutoSave && (
@@ -584,14 +584,14 @@ export default function SettingsPage() {
                         <button
                           onClick={() => saveSetting(field.key)}
                           disabled={saving === field.key || !isDirty}
-                          className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50"
+                          className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
                         >
                           {saving === field.key ? 'Saving...' : 'Save'}
                         </button>
                         {isDirty && (
                           <button
                             onClick={() => resetSetting(field.key)}
-                            className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700"
+                            className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-300"
                           >
                             Reset
                           </button>
@@ -610,21 +610,21 @@ export default function SettingsPage() {
       {/* Shows Tab */}
       {/* ════════════════════════════════════════════════════ */}
       {activeTab === 'shows' && (
-        <div className="bg-white rounded-lg shadow p-4 space-y-4">
+        <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-sm text-gray-500 uppercase">Shows ({shows.length})</h3>
+            <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Shows ({shows.length})</h3>
             <input
               type="text"
               value={showSearch}
               onChange={(e) => setShowSearch(e.target.value)}
               placeholder="Search shows..."
-              className="border rounded px-3 py-1.5 text-sm w-64"
+              className="border rounded px-3 py-1.5 text-sm w-64 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             />
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b">
+              <thead className="bg-gray-50 border-b dark:bg-warm-700 dark:border-warm-600">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">Key</th>
                   <th className="text-left px-3 py-2 font-medium">Name</th>
@@ -633,14 +633,14 @@ export default function SettingsPage() {
                   <th className="text-right px-3 py-2 font-medium">Episodes</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">
+                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
                 ) : filteredShows.map((show) => (
                   <tr key={show.id} className={`${!show.active ? 'opacity-50' : ''} ${savingShow === show.id ? 'opacity-70' : ''}`}>
-                    <td className="px-3 py-2 font-mono text-xs text-gray-500">{show.key}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-gray-500 dark:text-warm-400">{show.key}</td>
                     <td className="px-3 py-2">
                       {editingShow?.id === show.id && editingShow.field === 'show_name' ? (
                         <input
@@ -656,12 +656,12 @@ export default function SettingsPage() {
                               ;(e.target as HTMLInputElement).blur()
                             }
                           }}
-                          className="border rounded px-2 py-0.5 text-sm w-full"
+                          className="border rounded px-2 py-0.5 text-sm w-full dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                         />
                       ) : (
                         <button
                           onClick={() => startShowEdit(show, 'show_name')}
-                          className="text-left hover:text-blue-600 hover:underline cursor-pointer"
+                          className="text-left hover:text-blue-600 hover:underline cursor-pointer dark:text-warm-100"
                           title="Click to edit"
                         >
                           {show.show_name}
@@ -693,7 +693,7 @@ export default function SettingsPage() {
                             }).catch(() => { toast('error', 'Network error'); setSavingShow(null) })
                           }}
                           onBlur={() => setEditingShow(null)}
-                          className="border rounded px-2 py-0.5 text-sm w-full"
+                          className="border rounded px-2 py-0.5 text-sm w-full dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                         >
                           <option value="">None</option>
                           {categories.map(cat => (
@@ -703,10 +703,10 @@ export default function SettingsPage() {
                       ) : (
                         <button
                           onClick={() => startShowEdit(show, 'default_category')}
-                          className="text-left hover:text-blue-600 cursor-pointer text-gray-600"
+                          className="text-left hover:text-blue-600 cursor-pointer text-gray-600 dark:text-warm-400"
                           title="Click to edit"
                         >
-                          {show.default_category || <span className="text-gray-300 italic">None</span>}
+                          {show.default_category || <span className="text-gray-300 italic dark:text-warm-500">None</span>}
                         </button>
                       )}
                     </td>
@@ -716,8 +716,8 @@ export default function SettingsPage() {
                         disabled={savingShow === show.id}
                         className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
                           show.active
-                            ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-warm-700 dark:text-warm-400 dark:hover:bg-warm-600'
                         }`}
                       >
                         {show.active ? 'Active' : 'Inactive'}
@@ -726,7 +726,7 @@ export default function SettingsPage() {
                     <td className="px-3 py-2 text-right">
                       <a
                         href={`/dashboard/episodes?show=${encodeURIComponent(show.key)}`}
-                        className="text-blue-600 hover:underline"
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {show.episode_count}
                       </a>
@@ -743,8 +743,8 @@ export default function SettingsPage() {
       {/* Compliance Tab */}
       {/* ════════════════════════════════════════════════════ */}
       {activeTab === 'compliance' && (
-        <div className="bg-white rounded-lg shadow p-4 space-y-4">
-          <h3 className="font-semibold text-sm text-gray-500 uppercase">Compliance Checks</h3>
+        <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
+          <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Compliance Checks</h3>
 
           {/* Check toggles */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -760,21 +760,21 @@ export default function SettingsPage() {
                 key={key}
                 onClick={() => toggleComplianceCheck(key)}
                 className={`text-left p-3 rounded-lg border-2 transition-colors ${
-                  complianceChecks[key] ? 'border-emerald-500 bg-emerald-50' : 'border-gray-200 bg-gray-50'
+                  complianceChecks[key] ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-400' : 'border-gray-200 bg-gray-50 dark:border-warm-600 dark:bg-warm-700'
                 }`}
               >
                 <div className="flex items-center gap-2 mb-0.5">
-                  <div className={`w-2 h-2 rounded-full ${complianceChecks[key] ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                  <span className="text-sm font-medium text-gray-900">{label}</span>
+                  <div className={`w-2 h-2 rounded-full ${complianceChecks[key] ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-warm-500'}`} />
+                  <span className="text-sm font-medium text-gray-900 dark:text-warm-100">{label}</span>
                 </div>
-                <span className="text-[10px] text-gray-400">{cost}</span>
+                <span className="text-[10px] text-gray-400 dark:text-warm-500">{cost}</span>
               </button>
             ))}
           </div>
 
           {/* Profanity Wordlist */}
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">Profanity Wordlist</h4>
+          <div className="border-t pt-4 dark:border-warm-700">
+            <h4 className="text-sm font-medium text-gray-700 mb-2 dark:text-warm-300">Profanity Wordlist</h4>
             <div className="flex gap-2 mb-3">
               <input
                 type="text"
@@ -782,17 +782,17 @@ export default function SettingsPage() {
                 onChange={(e) => setNewWord(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && addWord()}
                 placeholder="Add word..."
-                className="flex-1 border rounded px-2 py-1.5 text-sm"
+                className="flex-1 border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
               />
               <select
                 value={newWordSeverity}
                 onChange={(e) => setNewWordSeverity(e.target.value as 'critical' | 'warning')}
-                className="border rounded px-2 py-1.5 text-sm"
+                className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
               >
                 <option value="critical">Critical</option>
                 <option value="warning">Warning</option>
               </select>
-              <button onClick={addWord} className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-700">
+              <button onClick={addWord} className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-700 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100">
                 Add
               </button>
             </div>
@@ -802,8 +802,8 @@ export default function SettingsPage() {
                   <span
                     key={w.id}
                     className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border ${
-                      !w.active ? 'opacity-40 bg-gray-50 border-gray-200' :
-                      w.severity === 'critical' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-amber-50 border-amber-200 text-amber-700'
+                      !w.active ? 'opacity-40 bg-gray-50 border-gray-200 dark:bg-warm-700 dark:border-warm-600' :
+                      w.severity === 'critical' ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/30 dark:border-red-800 dark:text-red-300' : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/30 dark:border-amber-800 dark:text-amber-300'
                     }`}
                   >
                     {w.word}
@@ -815,33 +815,33 @@ export default function SettingsPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-400">No words in the profanity list.</p>
+              <p className="text-xs text-gray-400 dark:text-warm-500">No words in the profanity list.</p>
             )}
           </div>
 
           {/* AI Compliance Prompt */}
-          <div className="border-t pt-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-2">AI Compliance Prompt</h4>
+          <div className="border-t pt-4 dark:border-warm-700">
+            <h4 className="text-sm font-medium text-gray-700 mb-2 dark:text-warm-300">AI Compliance Prompt</h4>
             <div className={compliancePrompt !== savedCompliancePrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
               <textarea
                 value={compliancePrompt}
                 onChange={(e) => setCompliancePrompt(e.target.value)}
                 rows={6}
-                className="w-full border rounded px-2 py-1.5 text-sm font-mono"
+                className="w-full border rounded px-2 py-1.5 text-sm font-mono dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
               />
             </div>
             <div className="flex items-center gap-2 mt-2">
               <button
                 onClick={saveCompliancePrompt}
                 disabled={saving === 'compliance_prompt' || compliancePrompt === savedCompliancePrompt}
-                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50"
+                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
               >
                 {saving === 'compliance_prompt' ? 'Saving...' : 'Save Prompt'}
               </button>
               {compliancePrompt !== savedCompliancePrompt && (
                 <button
                   onClick={() => setCompliancePrompt(savedCompliancePrompt)}
-                  className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700"
+                  className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-300"
                 >
                   Reset to saved
                 </button>
@@ -868,11 +868,11 @@ export default function SettingsPage() {
             <button
               onClick={() => csvFileRef.current?.click()}
               disabled={csvImporting}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 dark:border-warm-600 dark:hover:bg-warm-700/50 dark:text-warm-200"
             >
               {csvImporting ? 'Importing...' : 'Import CSV'}
             </button>
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-gray-400 dark:text-warm-500">
               CSV format: wrong, correct, case_sensitive, is_regex, notes
             </span>
           </div>

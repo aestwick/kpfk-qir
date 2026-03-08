@@ -16,8 +16,8 @@ interface QirEntry {
 /* ─── Full Report Text View ─── */
 export function FullReportView({ text }: { text: string | null }) {
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <pre className="whitespace-pre-wrap text-sm font-mono text-gray-800 max-h-[600px] overflow-y-auto">
+    <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-6">
+      <pre className="whitespace-pre-wrap text-sm font-mono text-gray-800 dark:text-warm-200 max-h-[600px] overflow-y-auto">
         {text ?? 'No full report available'}
       </pre>
     </div>
@@ -47,16 +47,16 @@ export function CuratedEntriesView({
   return (
     <div className="space-y-6">
       {Object.entries(groupedEntries).map(([category, entries]) => (
-        <div key={category} className="bg-white rounded-lg shadow">
-          <div className="px-4 py-3 border-b bg-gray-50">
-            <h4 className="text-sm font-semibold uppercase text-gray-600">
+        <div key={category} className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark">
+          <div className="px-4 py-3 border-b dark:border-warm-700 bg-gray-50 dark:bg-warm-700">
+            <h4 className="text-sm font-semibold uppercase text-gray-600 dark:text-warm-300">
               {category}
-              <span className="ml-2 text-gray-400 font-normal">
+              <span className="ml-2 text-gray-400 dark:text-warm-500 font-normal">
                 ({entries.length} entries)
               </span>
             </h4>
           </div>
-          <div className="divide-y">
+          <div className="divide-y dark:divide-warm-700">
             {entries.map((entry) => (
               <div key={entry.episode_id} className="px-4 py-3">
                 <div className="flex items-start justify-between">
@@ -64,13 +64,13 @@ export function CuratedEntriesView({
                     <p className="text-sm font-medium">
                       {entry.show_name}
                       {entry.host && (
-                        <span className="text-gray-500 font-normal">
+                        <span className="text-gray-500 dark:text-warm-400 font-normal">
                           {' '}
                           — {entry.host}
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-500 dark:text-warm-400">
                       {entry.air_date} | {entry.start_time} |{' '}
                       {entry.duration} min
                       {entry.guest && ` | Guest: ${entry.guest}`}
@@ -83,26 +83,26 @@ export function CuratedEntriesView({
                         <textarea
                           value={editSummary}
                           onChange={(e) => onSetEditSummary(e.target.value)}
-                          className="w-full border rounded p-2 text-sm"
+                          className="w-full border dark:border-warm-600 rounded p-2 text-sm dark:bg-warm-800 dark:text-warm-100"
                           rows={4}
                         />
                         <div className="flex gap-2 mt-1">
                           <button
                             onClick={() => onSaveEdit(entry.episode_id)}
-                            className="text-xs px-2 py-1 bg-blue-600 text-white rounded"
+                            className="text-xs px-2 py-1 bg-blue-600 dark:bg-blue-700 text-white rounded"
                           >
                             Save
                           </button>
                           <button
                             onClick={() => onSetEditingEntry(null)}
-                            className="text-xs px-2 py-1 border rounded"
+                            className="text-xs px-2 py-1 border dark:border-warm-600 rounded dark:text-warm-300"
                           >
                             Cancel
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <p className="text-sm text-gray-700 mt-1">
+                      <p className="text-sm text-gray-700 dark:text-warm-300 mt-1">
                         {entry.summary}
                       </p>
                     )}
@@ -114,13 +114,13 @@ export function CuratedEntriesView({
                           onSetEditingEntry(entry.episode_id)
                           onSetEditSummary(entry.summary)
                         }}
-                        className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded"
+                        className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30 rounded"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => onRemoveEntry(entry.episode_id)}
-                        className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded"
+                        className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30 rounded"
                       >
                         Remove
                       </button>

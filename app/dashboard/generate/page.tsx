@@ -6,11 +6,11 @@ import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
 /* ─── lazy-loaded report components ─── */
 const FullReportView = dynamic(() => import('@/app/components/qir-report-view').then(m => ({ default: m.FullReportView })), {
-  loading: () => <div className="bg-white rounded-lg shadow p-6"><div className="h-48 bg-gray-100 rounded animate-pulse" /></div>,
+  loading: () => <div className="bg-white rounded-lg shadow dark:bg-surface-raised dark:shadow-card-dark p-6"><div className="h-48 bg-gray-100 dark:bg-warm-700 rounded animate-pulse" /></div>,
   ssr: false,
 })
 const CuratedEntriesView = dynamic(() => import('@/app/components/qir-report-view').then(m => ({ default: m.CuratedEntriesView })), {
-  loading: () => <div className="h-48 bg-gray-100 rounded animate-pulse" />,
+  loading: () => <div className="h-48 bg-gray-100 dark:bg-warm-700 rounded animate-pulse" />,
   ssr: false,
 })
 
@@ -150,9 +150,9 @@ function runValidation(draft: QirDraft, complianceSummary: Record<string, { coun
 }
 
 const CHECK_ICONS: Record<string, { icon: string; bg: string; text: string }> = {
-  pass: { icon: '\u2713', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700' },
-  warn: { icon: '!', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700' },
-  fail: { icon: '\u2717', bg: 'bg-red-50 border-red-200', text: 'text-red-700' },
+  pass: { icon: '\u2713', bg: 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800/40', text: 'text-emerald-700 dark:text-emerald-300' },
+  warn: { icon: '!', bg: 'bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800/40', text: 'text-amber-700 dark:text-amber-300' },
+  fail: { icon: '\u2717', bg: 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800/40', text: 'text-red-700 dark:text-red-300' },
 }
 
 export default function GenerateQirPage() {
@@ -317,7 +317,7 @@ export default function GenerateQirPage() {
               )
               if (opt) setSelectedQuarter(opt)
             }}
-            className="border rounded px-3 py-2 text-sm"
+            className="border rounded px-3 py-2 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
           >
             {quarterOptions.map((o) => (
               <option key={`${o.year}-${o.quarter}`} value={`${o.year}-${o.quarter}`}>
@@ -328,7 +328,7 @@ export default function GenerateQirPage() {
           <button
             onClick={handleGenerate}
             disabled={generating}
-            className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50"
+            className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 disabled:opacity-50"
           >
             {generating ? 'Generating...' : 'Generate Report'}
           </button>
@@ -337,16 +337,16 @@ export default function GenerateQirPage() {
 
       {/* ═══ Pre-finalization Validation Checklist ═══ */}
       {activeDraft && activeDraft.status === 'draft' && validationChecks.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border">
-          <div className="px-5 py-3 border-b flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Pre-Finalization Checklist</h3>
+        <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark">
+          <div className="px-5 py-3 border-b dark:border-warm-700 flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-gray-400 dark:text-warm-500 uppercase tracking-wide">Pre-Finalization Checklist</h3>
             {hasBlockers ? (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Issues found</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 font-medium">Issues found</span>
             ) : (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">Ready</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 font-medium">Ready</span>
             )}
           </div>
-          <div className="divide-y">
+          <div className="divide-y dark:divide-warm-700">
             {validationChecks.map((check) => {
               const style = CHECK_ICONS[check.status]
               return (
@@ -355,8 +355,8 @@ export default function GenerateQirPage() {
                     {style.icon}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{check.label}</p>
-                    <p className="text-xs text-gray-500">{check.detail}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-warm-100">{check.label}</p>
+                    <p className="text-xs text-gray-500 dark:text-warm-400">{check.detail}</p>
                   </div>
                 </div>
               )
@@ -367,18 +367,18 @@ export default function GenerateQirPage() {
 
       {/* Draft History */}
       {drafts.length > 0 && (
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-4 py-3 border-b">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase">
+        <div className="bg-white rounded-lg shadow dark:bg-surface-raised dark:shadow-card-dark">
+          <div className="px-4 py-3 border-b dark:border-warm-700">
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-warm-400 uppercase">
               Draft History
             </h3>
           </div>
-          <div className="divide-y">
+          <div className="divide-y dark:divide-warm-700">
             {drafts.map((draft) => (
               <div
                 key={draft.id}
-                className={`flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 ${
-                  activeDraft?.id === draft.id ? 'bg-blue-50' : ''
+                className={`flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-warm-700/50 ${
+                  activeDraft?.id === draft.id ? 'bg-blue-50 dark:bg-blue-900/30' : ''
                 }`}
                 onClick={() => setActiveDraft(draft)}
               >
@@ -386,10 +386,10 @@ export default function GenerateQirPage() {
                   <span className="text-sm font-medium">
                     Version {draft.version}
                   </span>
-                  <span className="text-xs text-gray-500 ml-2">
+                  <span className="text-xs text-gray-500 dark:text-warm-400 ml-2">
                     {new Date(draft.created_at).toLocaleDateString()}
                   </span>
-                  <span className="text-xs text-gray-500 ml-2">
+                  <span className="text-xs text-gray-500 dark:text-warm-400 ml-2">
                     {(draft.curated_entries as QirEntry[])?.length ?? 0} entries
                   </span>
                 </div>
@@ -397,8 +397,8 @@ export default function GenerateQirPage() {
                   <span
                     className={`text-xs px-2 py-0.5 rounded-full ${
                       draft.status === 'final'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-yellow-100 text-yellow-800'
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
                     }`}
                   >
                     {draft.status}
@@ -410,7 +410,7 @@ export default function GenerateQirPage() {
                         handleFinalize(draft.id, 'finalize')
                       }}
                       disabled={actionLoading !== null}
-                      className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                      className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-600 disabled:opacity-50"
                     >
                       Finalize
                     </button>
@@ -421,7 +421,7 @@ export default function GenerateQirPage() {
                         handleFinalize(draft.id, 'unfinalize')
                       }}
                       disabled={actionLoading !== null}
-                      className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 disabled:opacity-50"
+                      className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 dark:bg-warm-600 dark:hover:bg-warm-500 disabled:opacity-50"
                     >
                       Un-finalize
                     </button>
@@ -433,7 +433,7 @@ export default function GenerateQirPage() {
         </div>
       )}
 
-      {loading && <p className="text-gray-500">Loading drafts...</p>}
+      {loading && <p className="text-gray-500 dark:text-warm-400">Loading drafts...</p>}
 
       {/* Active Draft View */}
       {activeDraft && (
@@ -443,18 +443,18 @@ export default function GenerateQirPage() {
               <h3 className="text-lg font-semibold">
                 Q{activeDraft.quarter} {activeDraft.year} &mdash; v{activeDraft.version}
               </h3>
-              <span className="text-sm text-gray-500">
+              <span className="text-sm text-gray-500 dark:text-warm-400">
                 {totalCurated} curated entries
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex rounded border overflow-hidden text-sm">
+              <div className="flex rounded border dark:border-warm-600 overflow-hidden text-sm">
                 <button
                   onClick={() => setView('curated')}
                   className={`px-3 py-1.5 ${
                     view === 'curated'
-                      ? 'bg-gray-900 text-white'
-                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                      ? 'bg-gray-900 text-white dark:bg-warm-200 dark:text-warm-900'
+                      : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-surface-raised dark:text-warm-300 dark:hover:bg-warm-700'
                   }`}
                 >
                   Curated
@@ -463,8 +463,8 @@ export default function GenerateQirPage() {
                   onClick={() => setView('full')}
                   className={`px-3 py-1.5 ${
                     view === 'full'
-                      ? 'bg-gray-900 text-white'
-                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                      ? 'bg-gray-900 text-white dark:bg-warm-200 dark:text-warm-900'
+                      : 'bg-white text-gray-700 hover:bg-gray-100 dark:bg-surface-raised dark:text-warm-300 dark:hover:bg-warm-700'
                   }`}
                 >
                   Full Report
@@ -472,13 +472,13 @@ export default function GenerateQirPage() {
               </div>
               <a
                 href={`/api/qir/export?id=${activeDraft.id}&format=csv`}
-                className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50"
+                className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-700"
               >
                 Export CSV
               </a>
               <a
                 href={`/api/qir/export?id=${activeDraft.id}&format=text`}
-                className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50"
+                className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-700"
               >
                 Export Text
               </a>
@@ -503,7 +503,7 @@ export default function GenerateQirPage() {
       )}
 
       {!loading && drafts.length === 0 && (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500 dark:bg-surface-raised dark:shadow-card-dark dark:text-warm-400">
           <p className="text-lg mb-2">No drafts yet for {selectedQuarter.label}</p>
           <p className="text-sm">
             Click &quot;Generate Report&quot; to create a QIR draft from summarized

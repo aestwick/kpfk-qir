@@ -206,13 +206,13 @@ export default function JobsPage() {
     return (
       <div className="space-y-6">
         <h2 className="text-2xl font-bold">Jobs</h2>
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <p className="text-sm text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800/40 rounded-xl p-4">
+          <p className="text-sm text-amber-800 dark:text-amber-300">
             Unable to connect to live updates. Queue data may be stale.
           </p>
           <button
             onClick={() => { setSseTimedOut(false); window.location.reload() }}
-            className="mt-2 px-3 py-1 text-xs bg-amber-100 text-amber-800 rounded hover:bg-amber-200 transition-colors"
+            className="mt-2 px-3 py-1 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded hover:bg-amber-200 transition-colors"
           >
             Retry Connection
           </button>
@@ -222,13 +222,13 @@ export default function JobsPage() {
             {queueNames.map((name) => {
               const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
               return (
-                <div key={name} className="bg-white rounded-xl shadow-sm border p-4 space-y-3 opacity-75">
+                <div key={name} className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4 space-y-3 opacity-75">
                   <h3 className="font-semibold">{queueLabels[name]}</h3>
                   <div className="grid grid-cols-2 gap-2">
-                    <CountCell count={q.active} label="Active" bg="bg-blue-50" text="text-blue-700" sub="text-blue-600" />
-                    <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50" text="text-yellow-700" sub="text-yellow-600" />
-                    <CountCell count={q.completed} label="Completed" bg="bg-green-50" text="text-green-700" sub="text-green-600" />
-                    <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50' : 'bg-gray-50'} text={q.failed > 0 ? 'text-red-700' : 'text-gray-500'} sub={q.failed > 0 ? 'text-red-600' : 'text-gray-400'} />
+                    <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
+                    <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
+                    <CountCell count={q.completed} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
+                    <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={q.failed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={q.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
                   </div>
                 </div>
               )
@@ -304,28 +304,28 @@ export default function JobsPage() {
           const q = queues[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
           const backlogCount = getBacklogCount(name, queues?.backlog)
           return (
-            <div key={name} className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
+            <div key={name} className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold">{queueLabels[name]}</h3>
                 <button
                   onClick={() => triggerJob(name)}
                   disabled={anyLoading}
-                  className="px-3 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-colors"
+                  className="px-3 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 disabled:opacity-50 transition-colors"
                 >
                   {actionLoading === name ? 'Queuing...' : 'Run Now'}
                 </button>
               </div>
               {backlogCount !== null && backlogCount > 0 && (
-                <div className="bg-orange-50 border border-orange-200 rounded px-3 py-1.5 text-sm">
-                  <span className="font-semibold text-orange-700">{backlogCount}</span>
-                  <span className="text-orange-600 ml-1">episode{backlogCount !== 1 ? 's' : ''} waiting</span>
+                <div className="bg-orange-50 border border-orange-200 dark:bg-orange-900/20 dark:border-orange-800/40 rounded px-3 py-1.5 text-sm">
+                  <span className="font-semibold text-orange-700 dark:text-orange-300">{backlogCount}</span>
+                  <span className="text-orange-600 dark:text-orange-400 ml-1">episode{backlogCount !== 1 ? 's' : ''} waiting</span>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-2">
-                <CountCell count={q.active} label="Active" bg="bg-blue-50" text="text-blue-700" sub="text-blue-600" />
-                <CountCell count={q.waiting} label="Queued" bg="bg-yellow-50" text="text-yellow-700" sub="text-yellow-600" />
-                <CountCell count={q.completed} label="Completed" bg="bg-green-50" text="text-green-700" sub="text-green-600" />
-                <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50' : 'bg-gray-50'} text={q.failed > 0 ? 'text-red-700' : 'text-gray-500'} sub={q.failed > 0 ? 'text-red-600' : 'text-gray-400'} />
+                <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
+                <CountCell count={q.waiting} label="Queued" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
+                <CountCell count={q.completed} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
+                <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={q.failed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={q.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
               </div>
             </div>
           )
@@ -334,26 +334,26 @@ export default function JobsPage() {
 
       {/* Episode backlog summary */}
       {queues?.backlog && (queues.backlog.pendingTranscription > 0 || queues.backlog.pendingSummarization > 0 || queues.backlog.pendingCompliance > 0 || queues.backlog.failed > 0) && (
-        <div className="bg-white rounded-xl shadow-sm border p-4">
+        <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4">
           <h3 className="font-semibold mb-2">Episode Pipeline Backlog</h3>
           <div className="flex flex-wrap gap-4 text-sm">
             {queues.backlog.pendingTranscription > 0 && (
-              <span className="text-orange-700">
+              <span className="text-orange-700 dark:text-orange-300">
                 <span className="font-semibold">{queues.backlog.pendingTranscription}</span> awaiting transcription
               </span>
             )}
             {queues.backlog.pendingSummarization > 0 && (
-              <span className="text-orange-700">
+              <span className="text-orange-700 dark:text-orange-300">
                 <span className="font-semibold">{queues.backlog.pendingSummarization}</span> awaiting summarization
               </span>
             )}
             {queues.backlog.pendingCompliance > 0 && (
-              <span className="text-orange-700">
+              <span className="text-orange-700 dark:text-orange-300">
                 <span className="font-semibold">{queues.backlog.pendingCompliance}</span> awaiting QIR generation
               </span>
             )}
             {queues.backlog.failed > 0 && (
-              <span className="text-red-600">
+              <span className="text-red-600 dark:text-red-400">
                 <span className="font-semibold">{queues.backlog.failed}</span> failed episodes
               </span>
             )}
@@ -362,11 +362,11 @@ export default function JobsPage() {
       )}
 
       {/* Pipeline Mode Toggle */}
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold">Pipeline Mode</h3>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-sm text-gray-600 dark:text-warm-400 mt-1">
               {pipelineMode === 'steady'
                 ? 'Steady: 1 transcribe / 5 summarize concurrent.'
                 : 'Catch-up: 3 transcribe / 10 summarize concurrent.'}
@@ -375,15 +375,15 @@ export default function JobsPage() {
           <div className="flex items-center gap-3">
             <span className={`text-sm font-medium px-2 py-0.5 rounded ${
               pipelineMode === 'steady'
-                ? 'bg-green-100 text-green-800'
-                : 'bg-amber-100 text-amber-800'
+                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300'
             }`}>
               {pipelineMode === 'steady' ? 'Steady' : 'Catch-up'}
             </span>
             <button
               onClick={togglePipelineMode}
               disabled={anyLoading}
-              className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 transition-colors"
+              className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 disabled:opacity-50 transition-colors"
             >
               {actionLoading === 'pipeline-mode' ? 'Switching...' : `Switch to ${pipelineMode === 'steady' ? 'Catch-up' : 'Steady'}`}
             </button>
@@ -392,35 +392,35 @@ export default function JobsPage() {
       </div>
 
       {/* Cron Schedule Reference */}
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4">
         <h3 className="font-semibold mb-3">Cron Schedule</h3>
-        <div className="space-y-1.5 text-sm text-gray-600">
+        <div className="space-y-1.5 text-sm text-gray-600 dark:text-warm-400">
           <p>Ingest runs at minute :02 of every hour.</p>
           <p>Transcription triggers automatically after ingest finds new episodes.</p>
           <p>Summarization triggers after transcription completes.</p>
           <p>Compliance triggers after summarization completes.</p>
           <p>Auto-retry runs every 4 hours for failed episodes (max 3 retries).</p>
         </div>
-        <p className="text-xs text-gray-400 mt-3">
+        <p className="text-xs text-gray-400 dark:text-warm-500 mt-3">
           Live updates via server-sent events.
         </p>
       </div>
 
       {/* Failed Jobs Detail — collapsible */}
       {anyQueueHasFailed && (
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark">
           <button
             onClick={() => setFailedExpanded(!failedExpanded)}
-            className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors"
+            className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 dark:hover:bg-warm-700/50 transition-colors"
           >
             <div className="flex items-center gap-2">
               <h3 className="font-semibold">Failed Jobs</h3>
-              <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-medium">
+              <span className="text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 px-2 py-0.5 rounded-full font-medium">
                 {totalFailedJobs > 0 ? totalFailedJobs : '...'}
               </span>
             </div>
             <svg
-              className={`w-5 h-5 text-gray-400 transition-transform ${failedExpanded ? 'rotate-180' : ''}`}
+              className={`w-5 h-5 text-gray-400 dark:text-warm-500 transition-transform ${failedExpanded ? 'rotate-180' : ''}`}
               fill="none" viewBox="0 0 24 24" stroke="currentColor"
             >
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -428,7 +428,7 @@ export default function JobsPage() {
           </button>
 
           {failedExpanded && (
-            <div className="border-t px-4 pb-4 space-y-4">
+            <div className="border-t dark:border-warm-700 px-4 pb-4 space-y-4">
               {queueNames.map((name) => {
                 const q = failedDetails?.[name]
                 const jobs = q?.failedJobs ?? []
@@ -437,21 +437,21 @@ export default function JobsPage() {
                 return (
                   <div key={name} className="pt-4 first:pt-2">
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-sm font-semibold text-gray-700">
+                      <h4 className="text-sm font-semibold text-gray-700 dark:text-warm-300">
                         {queueLabels[name]} <span className="text-red-500 font-normal">({jobs.length} failed)</span>
                       </h4>
                       <div className="flex gap-2">
                         <button
                           onClick={() => retryFailed(name)}
                           disabled={anyLoading}
-                          className="px-2 py-1 text-xs bg-amber-100 text-amber-800 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors"
+                          className="px-2 py-1 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 rounded hover:bg-amber-200 disabled:opacity-50 transition-colors"
                         >
                           {actionLoading === `retry-${name}` ? 'Retrying...' : 'Retry All Failed'}
                         </button>
                         <button
                           onClick={() => setConfirmClear(name)}
                           disabled={anyLoading}
-                          className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 disabled:opacity-50 transition-colors"
+                          className="px-2 py-1 text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded hover:bg-red-200 disabled:opacity-50 transition-colors"
                         >
                           {actionLoading === `clear-${name}` ? 'Clearing...' : 'Clear Failed'}
                         </button>
@@ -459,12 +459,12 @@ export default function JobsPage() {
                     </div>
                     <div className="space-y-1">
                       {jobs.map((job) => (
-                        <div key={job.id} className="flex items-start gap-3 text-sm bg-red-50/50 rounded px-3 py-2">
-                          <span className="text-gray-400 font-mono text-xs shrink-0 pt-0.5">
+                        <div key={job.id} className="flex items-start gap-3 text-sm bg-red-50/50 dark:bg-red-900/15 rounded px-3 py-2">
+                          <span className="text-gray-400 dark:text-warm-500 font-mono text-xs shrink-0 pt-0.5">
                             #{job.id}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <p className="text-gray-700 truncate">
+                            <p className="text-gray-700 dark:text-warm-300 truncate">
                               {job.name}
                               {job.data?.episodeId ? (
                                 <span className="text-gray-400 ml-1">

@@ -20,12 +20,12 @@ interface Episode {
 }
 
 const statusColors: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  transcribed: 'bg-blue-100 text-blue-800',
-  summarized: 'bg-green-100 text-green-800',
-  compliance_checked: 'bg-emerald-100 text-emerald-800',
-  failed: 'bg-red-100 text-red-800',
-  unavailable: 'bg-gray-100 text-gray-600',
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  transcribed: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  summarized: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  compliance_checked: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  unavailable: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
 }
 
 export default function EpisodesPage() {
@@ -266,7 +266,7 @@ export default function EpisodesPage() {
   useEffect(() => { setSelectedRow(-1) }, [episodes])
 
   const SortIcon = ({ col }: { col: string }) => {
-    if (sort !== col) return <span className="text-gray-300 ml-1">&#8597;</span>
+    if (sort !== col) return <span className="text-gray-300 dark:text-warm-600 ml-1">&#8597;</span>
     return <span className="ml-1">{order === 'asc' ? '&#8593;' : '&#8595;'}</span>
   }
 
@@ -275,10 +275,10 @@ export default function EpisodesPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Episodes</h2>
         <div className="flex gap-2">
-          <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700">
+          <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 dark:bg-red-700">
             Retry Failed
           </button>
-          <button onClick={handleExportCSV} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+          <button onClick={handleExportCSV} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200">
             Export CSV
           </button>
         </div>
@@ -286,13 +286,13 @@ export default function EpisodesPage() {
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
           <option value="">All Statuses</option>
           {['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <select value={quarterFilter} onChange={(e) => setQuarterFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
+        <select value={quarterFilter} onChange={(e) => setQuarterFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
           <option value="">All Quarters</option>
           {quarterOptions.map((q) => (
             <option key={q} value={q}>{q}</option>
@@ -304,12 +304,12 @@ export default function EpisodesPage() {
           placeholder="Filter by show name... (press /)"
           value={showFilterLocal}
           onChange={(e) => setShowFilter(e.target.value)}
-          className="border rounded px-2 py-1.5 text-sm w-48"
+          className="border rounded px-2 py-1.5 text-sm w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         />
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilterValue(e.target.value)}
-          className="border rounded px-2 py-1.5 text-sm"
+          className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         >
           <option value="">All Categories</option>
           {issueCategories.map((cat) => (
@@ -319,9 +319,9 @@ export default function EpisodesPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <div className="bg-white rounded-lg shadow overflow-x-auto dark:bg-surface-raised dark:shadow-card-dark">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b">
+          <thead className="bg-gray-50 border-b dark:bg-warm-700 dark:border-warm-600">
             <tr>
               <th className="text-left px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort('show_name')}>
                 Show <SortIcon col="show_name" />
@@ -339,15 +339,15 @@ export default function EpisodesPage() {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y">
+          <tbody className="divide-y dark:divide-warm-700">
             {loading ? (
               <SkeletonTableRows rows={8} />
             ) : episodes.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No episodes found</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500 dark:text-warm-400">No episodes found</td></tr>
             ) : episodes.map((ep, i) => (
               <tr
                 key={ep.id}
-                className={`hover:bg-gray-50 cursor-pointer ${i === selectedRow ? 'bg-blue-50 ring-1 ring-blue-300' : ''}`}
+                className={`hover:bg-gray-50 dark:hover:bg-warm-700/50 cursor-pointer ${i === selectedRow ? 'bg-blue-50 ring-1 ring-blue-300 dark:bg-blue-900/30 dark:ring-blue-700' : ''}`}
                 onClick={(e) => {
                   // Don't navigate if clicking on the category cell editing area
                   const target = e.target as HTMLElement
@@ -367,14 +367,14 @@ export default function EpisodesPage() {
                 <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[ep.status] ?? 'bg-gray-100'}`}>{ep.status}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[ep.status] ?? 'bg-gray-100 dark:bg-warm-700'}`}>{ep.status}</span>
                 </td>
                 <td className="px-4 py-3 max-w-[250px] truncate">{ep.headline ?? '—'}</td>
                 <td className="px-4 py-3 max-w-[180px]" data-category-cell>
                   {editingCategoryId === ep.id ? (
                     <select
                       autoFocus
-                      className="border rounded px-1.5 py-0.5 text-sm w-full bg-white"
+                      className="border rounded px-1.5 py-0.5 text-sm w-full bg-white dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                       defaultValue={ep.issue_category ?? ''}
                       onChange={(e) => handleCategorySave(ep.id, e.target.value)}
                       onBlur={() => setEditingCategoryId(null)}
@@ -395,9 +395,9 @@ export default function EpisodesPage() {
                     >
                       <span className="truncate">{ep.issue_category ?? '—'}</span>
                       {savedCategoryId === ep.id ? (
-                        <span className="text-green-600 text-xs font-medium">&#10003;</span>
+                        <span className="text-green-600 dark:text-green-400 text-xs font-medium">&#10003;</span>
                       ) : (
-                        <span className="text-gray-300 group-hover:text-gray-500 text-xs opacity-0 group-hover:opacity-100 transition-opacity">&#9998;</span>
+                        <span className="text-gray-300 group-hover:text-gray-500 dark:text-warm-600 dark:group-hover:text-warm-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity">&#9998;</span>
                       )}
                     </span>
                   )}
@@ -409,19 +409,19 @@ export default function EpisodesPage() {
       </div>
 
       {/* Keyboard hints */}
-      <p className="text-[10px] text-gray-400">
-        Shortcuts: <kbd className="px-1 bg-gray-100 rounded">j</kbd>/<kbd className="px-1 bg-gray-100 rounded">k</kbd> navigate &middot; <kbd className="px-1 bg-gray-100 rounded">Enter</kbd> open &middot; <kbd className="px-1 bg-gray-100 rounded">/</kbd> search &middot; <kbd className="px-1 bg-gray-100 rounded">Esc</kbd> deselect &middot; <kbd className="px-1 bg-gray-100 rounded">r</kbd> retry failed
+      <p className="text-[10px] text-gray-400 dark:text-warm-500">
+        Shortcuts: <kbd className="px-1 bg-gray-100 dark:bg-warm-700 rounded">j</kbd>/<kbd className="px-1 bg-gray-100 dark:bg-warm-700 rounded">k</kbd> navigate &middot; <kbd className="px-1 bg-gray-100 dark:bg-warm-700 rounded">Enter</kbd> open &middot; <kbd className="px-1 bg-gray-100 dark:bg-warm-700 rounded">/</kbd> search &middot; <kbd className="px-1 bg-gray-100 dark:bg-warm-700 rounded">Esc</kbd> deselect &middot; <kbd className="px-1 bg-gray-100 dark:bg-warm-700 rounded">r</kbd> retry failed
       </p>
 
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500">{total} episodes total</p>
+          <p className="text-sm text-gray-500 dark:text-warm-400">{total} episodes total</p>
           <div className="flex gap-2">
             <button
               onClick={() => setPage(Math.max(1, page - 1))}
               disabled={page === 1}
-              className="px-3 py-1.5 text-sm border rounded disabled:opacity-50"
+              className="px-3 py-1.5 text-sm border rounded disabled:opacity-50 dark:border-warm-600 dark:text-warm-300"
             >
               Previous
             </button>
@@ -429,7 +429,7 @@ export default function EpisodesPage() {
             <button
               onClick={() => setPage(Math.min(totalPages, page + 1))}
               disabled={page === totalPages}
-              className="px-3 py-1.5 text-sm border rounded disabled:opacity-50"
+              className="px-3 py-1.5 text-sm border rounded disabled:opacity-50 dark:border-warm-600 dark:text-warm-300"
             >
               Next
             </button>

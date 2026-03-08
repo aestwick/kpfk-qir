@@ -92,8 +92,8 @@ export function AudioPlayerWithCaptions({
   }, [activeCueIdx])
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 space-y-3">
-      <h3 className="font-semibold text-sm text-gray-500 uppercase">Audio Player with Captions</h3>
+    <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
+      <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Audio Player with Captions</h3>
       <audio
         ref={audioRef}
         src={mp3Url}
@@ -103,17 +103,17 @@ export function AudioPlayerWithCaptions({
           if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
         }}
       />
-      <div ref={captionsRef} className="max-h-48 overflow-y-auto border rounded p-2 text-sm space-y-1">
+      <div ref={captionsRef} className="max-h-48 overflow-y-auto border dark:border-warm-600 rounded p-2 text-sm space-y-1">
         {vttCues.map((cue, i) => (
           <div
             key={i}
             ref={i === activeCueIdx ? activeCueRef : undefined}
             className={`px-2 py-1 rounded cursor-pointer ${
-              i === activeCueIdx ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'
+              i === activeCueIdx ? 'bg-blue-100 text-blue-900 font-medium dark:bg-blue-900/30 dark:text-blue-200' : 'hover:bg-gray-100 dark:hover:bg-warm-700/50'
             }`}
             onClick={() => seekTo(cue.start)}
           >
-            <span className="text-xs text-gray-400 mr-2">
+            <span className="text-xs text-gray-400 dark:text-warm-500 mr-2">
               {Math.floor(cue.start / 60)}:{String(Math.floor(cue.start % 60)).padStart(2, '0')}
             </span>
             {cue.text}
@@ -185,7 +185,7 @@ export function TranscriptViewer({
             return (
               <mark
                 key={i}
-                className={searchQuery ? 'bg-yellow-200' : 'bg-amber-200 ring-2 ring-amber-300'}
+                className={searchQuery ? 'bg-yellow-200 dark:bg-yellow-700/50 dark:text-yellow-100' : 'bg-amber-200 ring-2 ring-amber-300 dark:bg-amber-800/40 dark:ring-amber-600 dark:text-amber-100'}
                 data-highlight={isFirst && highlightText ? 'true' : undefined}
               >
                 {part}
@@ -199,15 +199,15 @@ export function TranscriptViewer({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-4 space-y-3">
+    <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm text-gray-500 uppercase">Transcript</h3>
+        <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Transcript</h3>
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search transcript..."
-          className="border rounded px-2 py-1 text-sm w-64"
+          className="border dark:border-warm-600 rounded px-2 py-1 text-sm w-64 dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
         />
       </div>
       <div ref={containerRef} className="max-h-96 overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap">
