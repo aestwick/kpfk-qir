@@ -7,11 +7,19 @@ interface QueueCounts {
   failed: number
 }
 
+export interface EpisodeBacklog {
+  pendingTranscription: number
+  pendingSummarization: number
+  pendingCompliance: number
+  failed: number
+}
+
 export interface QueueData {
   ingest: QueueCounts
   transcribe: QueueCounts
   summarize: QueueCounts
   compliance: QueueCounts
+  backlog?: EpisodeBacklog
 }
 
 export function useQueueSSE() {

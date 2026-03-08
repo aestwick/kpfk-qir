@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { SkeletonCard } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
-import { useQueueSSE } from '@/lib/use-sse'
+import { useQueueSSE, EpisodeBacklog } from '@/lib/use-sse'
 
 interface FailedJob {
   id: string
@@ -23,9 +23,28 @@ interface QueueWithFailed {
   failedJobs: FailedJob[]
 }
 
+// backlog is accessed separately from failedDetails via queues?.backlog (SSE) or polling
+
 type PipelineMode = 'steady' | 'catch-up'
 
 const queueNames = ['ingest', 'transcribe', 'summarize', 'compliance'] as const
+
+const queueLabels: Record<typeof queueNames[number], string> = {
+  ingest: 'Ingest',
+  transcribe: 'Transcribe',
+  summarize: 'Summarize',
+  compliance: 'Generate QIR',
+}
+
+function getBacklogCount(name: typeof queueNames[number], backlog?: EpisodeBacklog | null): number | null {
+  if (!backlog) return null
+  switch (name) {
+    case 'transcribe': return backlog.pendingTranscription
+    case 'summarize': return backlog.pendingSummarization
+    case 'compliance': return backlog.pendingCompliance
+    default: return null
+  }
+}
 
 export default function JobsPage() {
   const queues = useQueueSSE()
@@ -192,7 +211,7 @@ export default function JobsPage() {
               const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
               return (
                 <div key={name} className="bg-white rounded-xl shadow-sm border p-4 space-y-3 opacity-75">
-                  <h3 className="font-semibold capitalize">{name}</h3>
+                  <h3 className="font-semibold">{queueLabels[name]}</h3>
                   <div className="grid grid-cols-2 gap-2">
                     <CountCell count={q.active} label="Active" bg="bg-blue-50" text="text-blue-700" sub="text-blue-600" />
                     <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50" text="text-yellow-700" sub="text-yellow-600" />
@@ -236,10 +255,11 @@ export default function JobsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {queueNames.map((name) => {
           const q = queues[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
+          const backlogCount = getBacklogCount(name, queues?.backlog)
           return (
             <div key={name} className="bg-white rounded-xl shadow-sm border p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold capitalize">{name}</h3>
+                <h3 className="font-semibold">{queueLabels[name]}</h3>
                 <button
                   onClick={() => triggerJob(name)}
                   disabled={anyLoading}
@@ -248,9 +268,15 @@ export default function JobsPage() {
                   {actionLoading === name ? 'Queuing...' : 'Run Now'}
                 </button>
               </div>
+              {backlogCount !== null && backlogCount > 0 && (
+                <div className="bg-orange-50 border border-orange-200 rounded px-3 py-1.5 text-sm">
+                  <span className="font-semibold text-orange-700">{backlogCount}</span>
+                  <span className="text-orange-600 ml-1">episode{backlogCount !== 1 ? 's' : ''} waiting</span>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <CountCell count={q.active} label="Active" bg="bg-blue-50" text="text-blue-700" sub="text-blue-600" />
-                <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50" text="text-yellow-700" sub="text-yellow-600" />
+                <CountCell count={q.waiting} label="Queued" bg="bg-yellow-50" text="text-yellow-700" sub="text-yellow-600" />
                 <CountCell count={q.completed} label="Completed" bg="bg-green-50" text="text-green-700" sub="text-green-600" />
                 <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50' : 'bg-gray-50'} text={q.failed > 0 ? 'text-red-700' : 'text-gray-500'} sub={q.failed > 0 ? 'text-red-600' : 'text-gray-400'} />
               </div>
@@ -258,6 +284,35 @@ export default function JobsPage() {
           )
         })}
       </div>
+
+      {/* Episode backlog summary */}
+      {queues?.backlog && (queues.backlog.pendingTranscription > 0 || queues.backlog.pendingSummarization > 0 || queues.backlog.pendingCompliance > 0 || queues.backlog.failed > 0) && (
+        <div className="bg-white rounded-xl shadow-sm border p-4">
+          <h3 className="font-semibold mb-2">Episode Pipeline Backlog</h3>
+          <div className="flex flex-wrap gap-4 text-sm">
+            {queues.backlog.pendingTranscription > 0 && (
+              <span className="text-orange-700">
+                <span className="font-semibold">{queues.backlog.pendingTranscription}</span> awaiting transcription
+              </span>
+            )}
+            {queues.backlog.pendingSummarization > 0 && (
+              <span className="text-orange-700">
+                <span className="font-semibold">{queues.backlog.pendingSummarization}</span> awaiting summarization
+              </span>
+            )}
+            {queues.backlog.pendingCompliance > 0 && (
+              <span className="text-orange-700">
+                <span className="font-semibold">{queues.backlog.pendingCompliance}</span> awaiting QIR generation
+              </span>
+            )}
+            {queues.backlog.failed > 0 && (
+              <span className="text-red-600">
+                <span className="font-semibold">{queues.backlog.failed}</span> failed episodes
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Pipeline Mode Toggle */}
       <div className="bg-white rounded-xl shadow-sm border p-4">
@@ -335,8 +390,8 @@ export default function JobsPage() {
                 return (
                   <div key={name} className="pt-4 first:pt-2">
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-sm font-semibold capitalize text-gray-700">
-                        {name} <span className="text-red-500 font-normal">({jobs.length} failed)</span>
+                      <h4 className="text-sm font-semibold text-gray-700">
+                        {queueLabels[name]} <span className="text-red-500 font-normal">({jobs.length} failed)</span>
                       </h4>
                       <div className="flex gap-2">
                         <button

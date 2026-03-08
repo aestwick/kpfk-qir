@@ -78,32 +78,47 @@ export async function GET() {
     const queues = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
     const queueNames = Object.keys(queues) as (keyof typeof queues)[]
 
-    const results = await Promise.all(
-      queueNames.map(async (name) => {
-        const queue = queues[name]
-        const [counts, failed] = await Promise.all([
-          queue.getJobCounts(),
-          queue.getFailed(0, 20),
-        ])
-        return {
-          name,
-          counts: {
-            active: counts.active ?? 0,
-            waiting: counts.waiting ?? 0,
-            completed: counts.completed ?? 0,
-            failed: counts.failed ?? 0,
-          },
-          failedJobs: failed.map((job) => ({
-            id: job.id,
-            name: job.name,
-            data: job.data,
-            failedReason: job.failedReason,
-            timestamp: job.timestamp,
-            finishedOn: job.finishedOn,
-          })),
-        }
-      })
-    )
+    // Fetch BullMQ counts and episode backlog in parallel
+    const [results, backlogResult] = await Promise.all([
+      Promise.all(
+        queueNames.map(async (name) => {
+          const queue = queues[name]
+          const [counts, failed] = await Promise.all([
+            queue.getJobCounts(),
+            queue.getFailed(0, 20),
+          ])
+          return {
+            name,
+            counts: {
+              active: counts.active ?? 0,
+              waiting: counts.waiting ?? 0,
+              completed: counts.completed ?? 0,
+              failed: counts.failed ?? 0,
+            },
+            failedJobs: failed.map((job) => ({
+              id: job.id,
+              name: job.name,
+              data: job.data,
+              failedReason: job.failedReason,
+              timestamp: job.timestamp,
+              finishedOn: job.finishedOn,
+            })),
+          }
+        })
+      ),
+      supabaseAdmin
+        .from('episode_log')
+        .select('status')
+        .in('status', ['pending', 'transcribed', 'summarized', 'failed']),
+    ])
+
+    const episodes = backlogResult.data ?? []
+    const backlog = {
+      pendingTranscription: episodes.filter((e: { status: string }) => e.status === 'pending').length,
+      pendingSummarization: episodes.filter((e: { status: string }) => e.status === 'transcribed').length,
+      pendingCompliance: episodes.filter((e: { status: string }) => e.status === 'summarized').length,
+      failed: episodes.filter((e: { status: string }) => e.status === 'failed').length,
+    }
 
     const data: Record<string, unknown> = {}
     for (const result of results) {
@@ -112,6 +127,7 @@ export async function GET() {
         failedJobs: result.failedJobs,
       }
     }
+    data.backlog = backlog
 
     return NextResponse.json(data)
   } catch (err) {
