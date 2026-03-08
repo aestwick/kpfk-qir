@@ -439,6 +439,19 @@ export default function EpisodeDetailPage() {
     }
   }
 
+  function copyFlagDetails(flag: ComplianceFlag) {
+    const lines = [
+      `Show: ${episode?.show_name ?? 'Unknown'}`,
+      `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
+      `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
+      `URL: ${window.location.origin}/dashboard/episodes/${id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
+      flag.timestamp_seconds != null ? `Timestamp: ${formatTimestamp(flag.timestamp_seconds)}` : null,
+      `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
+      flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
+    ].filter(Boolean).join('\n')
+    navigator.clipboard.writeText(lines).then(() => setToast('Copied to clipboard'))
+  }
+
   function handleTextSelected(text: string, rect: DOMRect) {
     // rect is viewport-relative; position: fixed is also viewport-relative — no scroll offset needed
     setSelectionToolbar({
@@ -671,7 +684,14 @@ export default function EpisodeDetailPage() {
                       </button>
                     )}
                   </div>
-                  <div className="shrink-0">
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button
+                      onClick={() => copyFlagDetails(flag)}
+                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50 text-gray-400 hover:text-gray-600"
+                      title="Copy flag details to clipboard"
+                    >
+                      Copy
+                    </button>
                     {resolvingFlag === flag.id ? (
                       <div className="flex items-center gap-2">
                         <input
