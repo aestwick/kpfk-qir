@@ -159,13 +159,13 @@ export async function processTranscribe(job: Job) {
   const batchSize = await getTranscribeBatchSize()
   const { start, end } = getCurrentQuarterBounds()
 
-  // Get pending episodes from current quarter
+  // Get pending episodes from current quarter (including those with null air_date
+  // that were created during this quarter — older ingests didn't populate air_date)
   const { data: episodes, error } = await supabaseAdmin
     .from('episode_log')
     .select('*')
     .eq('status', 'pending')
-    .gte('air_date', start)
-    .lte('air_date', end)
+    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
     .limit(batchSize)
 
