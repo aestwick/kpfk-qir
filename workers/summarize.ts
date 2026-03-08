@@ -89,18 +89,24 @@ export async function processSummarize(job: Job) {
     (ep) => !excludedCategories.some((exc) => ep.category?.includes(exc))
   )
 
+  // Batch-fetch all transcripts upfront to avoid N+1 queries
+  const epIds = filteredEpisodes.map((ep) => ep.id)
+  const { data: transcriptsData } = await supabaseAdmin
+    .from('transcripts')
+    .select('episode_id, transcript')
+    .in('episode_id', epIds)
+
+  const transcriptMap = new Map(
+    (transcriptsData ?? []).map((t) => [t.episode_id, t.transcript])
+  )
+
   let summarized = 0
 
   for (const episode of filteredEpisodes) {
     try {
-      // Load transcript
-      const { data: transcript } = await supabaseAdmin
-        .from('transcripts')
-        .select('transcript')
-        .eq('episode_id', episode.id)
-        .single()
+      const transcriptText = transcriptMap.get(episode.id)
 
-      if (!transcript?.transcript) {
+      if (!transcriptText) {
         console.warn(`[summarize] no transcript for episode ${episode.id}`)
         continue
       }
@@ -109,7 +115,7 @@ export async function processSummarize(job: Job) {
 Host(s): ${episode.host || ''}
 Guest(s): ${episode.guest || ''}
 Transcript:
-${transcript.transcript}`
+${transcriptText}`
 
       // Retry with exponential backoff on transient errors
       let response: OpenAI.Chat.Completions.ChatCompletion | null = null
