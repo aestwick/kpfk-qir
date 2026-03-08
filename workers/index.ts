@@ -17,11 +17,10 @@ function parseRedisUrl(url: string) {
 
 const connection = parseRedisUrl(redisUrl)
 
-// Queues (with default job options for timeout/retry)
+// Queues (with default job options for retry)
 const ingestQueue = new Queue('ingest', {
   connection,
   defaultJobOptions: {
-    timeout: 5 * 60 * 1000, // 5 minutes
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   },
@@ -29,7 +28,6 @@ const ingestQueue = new Queue('ingest', {
 const transcribeQueue = new Queue('transcribe', {
   connection,
   defaultJobOptions: {
-    timeout: 10 * 60 * 1000, // 10 minutes
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   },
@@ -37,7 +35,6 @@ const transcribeQueue = new Queue('transcribe', {
 const summarizeQueue = new Queue('summarize', {
   connection,
   defaultJobOptions: {
-    timeout: 2 * 60 * 1000, // 2 minutes
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   },
@@ -45,7 +42,6 @@ const summarizeQueue = new Queue('summarize', {
 const generateQirQueue = new Queue('generate-qir', {
   connection,
   defaultJobOptions: {
-    timeout: 5 * 60 * 1000, // 5 minutes
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
   },
@@ -53,7 +49,6 @@ const generateQirQueue = new Queue('generate-qir', {
 const autoRetryQueue = new Queue('auto-retry', {
   connection,
   defaultJobOptions: {
-    timeout: 2 * 60 * 1000, // 2 minutes
     attempts: 1,
   },
 })
