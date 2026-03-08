@@ -120,6 +120,7 @@ export default function SettingsPage() {
   const [editingShowValue, setEditingShowValue] = useState('')
   const [savingShow, setSavingShow] = useState<number | null>(null)
   const showEditRef = useRef<HTMLInputElement | HTMLSelectElement>(null)
+  const showEditCancelled = useRef(false)
 
   // CSV import state
   const [csvImporting, setCsvImporting] = useState(false)
@@ -263,7 +264,7 @@ export default function SettingsPage() {
     setSaving(null)
   }
 
-  async function resetSetting(key: string) {
+  function resetSetting(key: string) {
     setEditValues(prev => ({ ...prev, [key]: savedValues[key] }))
   }
 
@@ -389,17 +390,28 @@ export default function SettingsPage() {
   }
 
   async function saveShowEdit(showId: number) {
-    if (!editingShow) return
-    setSavingShow(showId)
+    if (!editingShow || showEditCancelled.current) {
+      showEditCancelled.current = false
+      setEditingShow(null)
+      return
+    }
     const field = editingShow.field
+    // Don't allow saving empty show_name
+    if (field === 'show_name' && !editingShowValue.trim()) {
+      toast('error', 'Show name cannot be empty')
+      setEditingShow(null)
+      return
+    }
+    setSavingShow(showId)
+    const value = field === 'show_name' ? editingShowValue.trim() : (editingShowValue || null)
     try {
       const res = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ resource: 'show', id: showId, [field]: editingShowValue || null }),
+        body: JSON.stringify({ resource: 'show', id: showId, [field]: value }),
       })
       if (res.ok) {
-        setShows(prev => prev.map(s => s.id === showId ? { ...s, [field]: editingShowValue || null } : s))
+        setShows(prev => prev.map(s => s.id === showId ? { ...s, [field]: value } : s))
       } else {
         toast('error', 'Failed to update show')
       }
@@ -639,7 +651,10 @@ export default function SettingsPage() {
                           onBlur={() => saveShowEdit(show.id)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') saveShowEdit(show.id)
-                            if (e.key === 'Escape') setEditingShow(null)
+                            if (e.key === 'Escape') {
+                              showEditCancelled.current = true
+                              ;(e.target as HTMLInputElement).blur()
+                            }
                           }}
                           className="border rounded px-2 py-0.5 text-sm w-full"
                         />
