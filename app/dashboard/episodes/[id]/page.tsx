@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { useParams } from 'next/navigation'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
+import type { SeekToFn } from '@/app/components/episode-media'
 
 /* ─── lazy-loaded media components ─── */
 const AudioPlayerWithCaptions = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.AudioPlayerWithCaptions })), {
@@ -97,9 +98,231 @@ const statusColors: Record<string, string> = {
   unavailable: 'bg-gray-100 text-gray-600',
 }
 
+function formatTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')
+  const s = String(Math.floor(seconds % 60)).padStart(2, '0')
+  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`
+}
+
+/* ─── Inline Edit Field ─── */
+function InlineEditField({
+  value,
+  field,
+  episodeId,
+  onSaved,
+}: {
+  value: string
+  field: 'host' | 'guest'
+  episodeId: string
+  onSaved: (newValue: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState(value)
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const savingRef = useRef(false) // Prevent double save from blur+Enter race
+
+  useEffect(() => {
+    if (editing && inputRef.current) inputRef.current.focus()
+  }, [editing])
+
+  async function save() {
+    if (savingRef.current) return // Already saving — skip duplicate
+    if (editValue === value) {
+      setEditing(false)
+      return
+    }
+    savingRef.current = true
+    setSaving(true)
+    const res = await fetch(`/api/episodes/${episodeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [field]: editValue || null }),
+    })
+    savingRef.current = false
+    setSaving(false)
+    if (res.ok) {
+      onSaved(editValue)
+      setEditing(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); save() }
+          if (e.key === 'Escape') { setEditValue(value); setEditing(false) }
+        }}
+        disabled={saving}
+        className="text-sm font-medium w-full border-b border-blue-400 outline-none bg-transparent py-0"
+        placeholder={`Enter ${field}...`}
+      />
+    )
+  }
+
+  return (
+    <p
+      className="text-sm font-medium truncate cursor-pointer hover:text-blue-600 group"
+      onClick={() => { setEditValue(value); setEditing(true) }}
+      title={`Click to edit ${field}`}
+    >
+      {value || '\u2014'}
+      <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-100 text-xs">✎</span>
+    </p>
+  )
+}
+
+/* ─── Floating Correction Toolbar ─── */
+function CorrectionToolbar({
+  selectedText,
+  position,
+  episodeId,
+  onClose,
+  onSaved,
+}: {
+  selectedText: string
+  position: { top: number; left: number }
+  episodeId: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [replacement, setReplacement] = useState('')
+  const [isRegex, setIsRegex] = useState(false)
+  const [scope, setScope] = useState<'global' | 'episode'>('global')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [onClose])
+
+  async function handleSave() {
+    if (!replacement.trim()) {
+      setError('Replacement text is required')
+      return
+    }
+    setError(null)
+    setSaving(true)
+    const body: Record<string, unknown> = {
+      wrong: selectedText,
+      correct: replacement,
+      is_regex: isRegex,
+      case_sensitive: false,
+      active: true,
+    }
+    if (scope === 'episode') body.episode_id = Number(episodeId)
+    const res = await fetch('/api/corrections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    setSaving(false)
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setError(data.error ?? 'Failed to save correction')
+      return
+    }
+    onSaved()
+    onClose()
+  }
+
+  return (
+    <div
+      ref={toolbarRef}
+      className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-2"
+      style={{ top: position.top, left: position.left }}
+    >
+      {!expanded ? (
+        <button
+          onClick={() => setExpanded(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 rounded whitespace-nowrap"
+        >
+          <span className="text-base leading-none">+</span> Add Transcript Correction
+        </button>
+      ) : (
+        <div className="space-y-2 w-72">
+          <div>
+            <label className="text-[10px] text-gray-500 uppercase">Pattern</label>
+            <div className="text-xs bg-gray-50 rounded px-2 py-1 font-mono break-all">{selectedText}</div>
+          </div>
+          <div>
+            <label className="text-[10px] text-gray-500 uppercase">Replacement</label>
+            <input
+              type="text"
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+              className="w-full border rounded px-2 py-1 text-xs"
+              placeholder="Replace with..."
+              autoFocus
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1 text-xs text-gray-600">
+              <input type="checkbox" checked={isRegex} onChange={(e) => setIsRegex(e.target.checked)} className="rounded" />
+              Regex
+            </label>
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value as 'global' | 'episode')}
+              className="text-xs border rounded px-1.5 py-0.5"
+            >
+              <option value="global">All episodes</option>
+              <option value="episode">This episode only</option>
+            </select>
+          </div>
+          {error && <p className="text-[10px] text-red-600">{error}</p>}
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Cancel</button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving...' : 'Save Correction'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Toast message ─── */
+function InlineToast({ message, onDone }: { message: string; onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 3000)
+    return () => clearTimeout(t)
+  }, [onDone])
+  return (
+    <div className="fixed bottom-4 right-4 z-50 bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
+      {message}
+    </div>
+  )
+}
+
 export default function EpisodeDetailPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const id = params.id as string
+  const seekParam = searchParams.get('seek')
+  const parsedSeek = seekParam != null ? parseFloat(seekParam) : NaN
+  const initialSeek = isFinite(parsedSeek) && parsedSeek >= 0 ? parsedSeek : undefined
+
   const [episode, setEpisode] = useState<Episode | null>(null)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
   const [complianceFlags, setComplianceFlags] = useState<ComplianceFlag[]>([])
@@ -112,6 +335,16 @@ export default function EpisodeDetailPage() {
   const [resolvingFlag, setResolvingFlag] = useState<number | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
   const [showResolved, setShowResolved] = useState(false)
+  const [highlightText, setHighlightText] = useState<string | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+
+  // Text selection correction toolbar state
+  const [selectionToolbar, setSelectionToolbar] = useState<{
+    text: string
+    position: { top: number; left: number }
+  } | null>(null)
+
+  const seekToRef = useRef<SeekToFn | null>(null)
 
   const fetchEpisode = useCallback(async () => {
     const [epRes, flagsRes] = await Promise.all([
@@ -191,6 +424,31 @@ export default function EpisodeDetailPage() {
     fetchEpisode()
   }
 
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function jumpToTimestamp(seconds: number, excerpt?: string | null) {
+    if (seekToRef.current) {
+      seekToRef.current(seconds)
+    }
+    if (excerpt) {
+      // Clear any previous highlight timer to prevent stacking
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+      setHighlightText(excerpt)
+      highlightTimerRef.current = setTimeout(() => setHighlightText(null), 5000)
+    }
+  }
+
+  function handleTextSelected(text: string, rect: DOMRect) {
+    // rect is viewport-relative; position: fixed is also viewport-relative — no scroll offset needed
+    setSelectionToolbar({
+      text,
+      position: {
+        top: rect.bottom + 4,
+        left: rect.left,
+      },
+    })
+  }
+
   function downloadFile(content: string, filename: string, mime: string) {
     const blob = new Blob([content], { type: mime })
     const url = URL.createObjectURL(blob)
@@ -221,6 +479,18 @@ export default function EpisodeDetailPage() {
   const unresolvedFlags = complianceFlags.filter((f) => !f.resolved)
   const resolvedFlags = complianceFlags.filter((f) => f.resolved)
 
+  // Build metadata grid items — Host and Guest use inline editing
+  const metadataItems: { label: string; value: string; editable?: 'host' | 'guest' }[] = [
+    { label: 'Air Date', value: episode.air_date ?? episode.date ?? '\u2014' },
+    { label: 'Time', value: episode.start_time ? `${episode.start_time} - ${episode.end_time ?? ''}` : '\u2014' },
+    { label: 'Duration', value: episode.duration ? `${episode.duration} min` : '\u2014' },
+    { label: 'Show Key', value: episode.show_key },
+    { label: 'Category', value: episode.category ?? '\u2014' },
+    { label: 'Host', value: episode.host ?? '', editable: 'host' },
+    { label: 'Guest', value: episode.guest ?? '', editable: 'guest' },
+    { label: 'Created', value: new Date(episode.created_at).toLocaleDateString() },
+  ]
+
   return (
     <div className="space-y-6">
       <Breadcrumbs episodeName={episode.show_name ?? `Episode ${episode.id}`} />
@@ -248,21 +518,23 @@ export default function EpisodeDetailPage() {
         </div>
       )}
 
-      {/* Metadata Grid */}
+      {/* Metadata Grid — Host/Guest are inline-editable */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {([
-          ['Air Date', episode.air_date ?? episode.date ?? '\u2014'],
-          ['Time', episode.start_time ? `${episode.start_time} - ${episode.end_time ?? ''}` : '\u2014'],
-          ['Duration', episode.duration ? `${episode.duration} min` : '\u2014'],
-          ['Show Key', episode.show_key],
-          ['Category', episode.category ?? '\u2014'],
-          ['Host', episode.host ?? '\u2014'],
-          ['Guest', episode.guest ?? '\u2014'],
-          ['Created', new Date(episode.created_at).toLocaleDateString()],
-        ] as [string, string][]).map(([label, value]) => (
-          <div key={label} className="bg-white rounded shadow p-3">
-            <p className="text-xs text-gray-500">{label}</p>
-            <p className="text-sm font-medium truncate">{value}</p>
+        {metadataItems.map((item) => (
+          <div key={item.label} className="bg-white rounded shadow p-3">
+            <p className="text-xs text-gray-500">{item.label}</p>
+            {item.editable ? (
+              <InlineEditField
+                value={item.value}
+                field={item.editable}
+                episodeId={id}
+                onSaved={(newValue) => {
+                  setEpisode((prev) => prev ? { ...prev, [item.editable!]: newValue || null } : prev)
+                }}
+              />
+            ) : (
+              <p className="text-sm font-medium truncate">{item.value}</p>
+            )}
           </div>
         ))}
       </div>
@@ -363,9 +635,28 @@ export default function EpisodeDetailPage() {
                       </p>
                     )}
                     {flag.timestamp_seconds !== null && (
-                      <p className="text-[10px] text-gray-400 mt-1">
-                        At {Math.floor(flag.timestamp_seconds / 3600)}:{String(Math.floor((flag.timestamp_seconds % 3600) / 60)).padStart(2, '0')}:{String(flag.timestamp_seconds % 60).padStart(2, '0')}
-                      </p>
+                      <button
+                        onClick={() => jumpToTimestamp(flag.timestamp_seconds!, flag.excerpt)}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
+                        title="Jump to this timestamp in audio and transcript"
+                      >
+                        <span>&#9654;</span> Jump to {formatTimestamp(flag.timestamp_seconds)}
+                      </button>
+                    )}
+                    {/* "Not a real word" shortcut for profanity flags */}
+                    {flag.flag_type === 'profanity' && flag.excerpt && (
+                      <button
+                        onClick={(e) => {
+                          const rect = (e.target as HTMLElement).getBoundingClientRect()
+                          setSelectionToolbar({
+                            text: flag.excerpt!,
+                            position: { top: rect.bottom + 4, left: rect.left },
+                          })
+                        }}
+                        className="text-[10px] text-gray-400 hover:text-gray-600 mt-1"
+                      >
+                        Not a real word — add correction
+                      </button>
                     )}
                   </div>
                   <div className="shrink-0">
@@ -423,13 +714,38 @@ export default function EpisodeDetailPage() {
 
       {/* VTT Audio Player (lazy-loaded) */}
       {transcript?.vtt && (
-        <AudioPlayerWithCaptions mp3Url={episode.mp3_url} vtt={transcript.vtt} />
+        <AudioPlayerWithCaptions
+          mp3Url={episode.mp3_url}
+          vtt={transcript.vtt}
+          initialSeek={initialSeek}
+          onReady={(fn) => { seekToRef.current = fn }}
+        />
       )}
 
       {/* Transcript Viewer (lazy-loaded) */}
       {transcript?.transcript && (
-        <TranscriptViewer transcript={transcript.transcript} />
+        <TranscriptViewer
+          transcript={transcript.transcript}
+          onTextSelected={handleTextSelected}
+          highlightText={highlightText}
+        />
       )}
+
+      {/* Floating correction toolbar */}
+      {selectionToolbar && (
+        <CorrectionToolbar
+          selectedText={selectionToolbar.text}
+          position={selectionToolbar.position}
+          episodeId={id}
+          onClose={() => setSelectionToolbar(null)}
+          onSaved={() => {
+            setToast('Correction saved! Re-transcribe to apply.')
+          }}
+        />
+      )}
+
+      {/* Toast notification */}
+      {toast && <InlineToast message={toast} onDone={() => setToast(null)} />}
 
       {/* Confirm dialog */}
       <ConfirmDialog
