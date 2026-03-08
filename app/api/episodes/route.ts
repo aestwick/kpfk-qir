@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
       query = query.gte('air_date', start).lte('air_date', end)
     }
 
+    const since = searchParams.get('since')
+    if (since) query = query.gte('updated_at', since)
+
     const { data, error, count } = await query
 
     if (error) {

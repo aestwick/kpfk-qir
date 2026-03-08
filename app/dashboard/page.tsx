@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
+import { useQueueSSE } from '@/lib/use-sse'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
@@ -214,6 +215,7 @@ export default function DashboardOverview() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const { toast } = useToast()
+  const liveQueues = useQueueSSE()
 
   const fetchData = useCallback(async () => {
     try {
@@ -226,9 +228,9 @@ export default function DashboardOverview() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Poll every 5s
+  // Poll dashboard data every 30s (queue data comes via SSE)
   useEffect(() => {
-    const interval = setInterval(fetchData, 5000)
+    const interval = setInterval(fetchData, 30000)
     return () => clearInterval(interval)
   }, [fetchData])
 
@@ -266,7 +268,8 @@ export default function DashboardOverview() {
 
   if (!data) return <div className="text-red-600">Failed to load dashboard data.</div>
 
-  const { counts, queues, cost, categories, shows, recentEpisodes, activity24h, avgProcessingTimes } = data
+  const { counts, queues: polledQueues, cost, categories, shows, recentEpisodes, activity24h, avgProcessingTimes } = data
+  const queues = liveQueues ?? polledQueues
   const qtrTotal = Object.values(counts.quarter).reduce((a, b) => a + b, 0)
   const qtrSummarized = counts.quarter.summarized ?? 0
   const qtrPct = qtrTotal > 0 ? Math.round((qtrSummarized / qtrTotal) * 100) : 0

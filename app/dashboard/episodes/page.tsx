@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 
@@ -129,6 +129,40 @@ export default function EpisodesPage() {
     }
   }
 
+  const [selectedRow, setSelectedRow] = useState(-1)
+  const showFilterRef = useRef<HTMLInputElement>(null)
+
+  // Keyboard shortcuts: j/k navigate, Enter opens, / focuses search, r retries
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA'
+
+      if (e.key === '/' && !isInput) {
+        e.preventDefault()
+        showFilterRef.current?.focus()
+        return
+      }
+
+      if (isInput) return
+
+      if (e.key === 'j') {
+        setSelectedRow((r) => Math.min(r + 1, episodes.length - 1))
+      } else if (e.key === 'k') {
+        setSelectedRow((r) => Math.max(r - 1, 0))
+      } else if (e.key === 'Enter' && selectedRow >= 0 && selectedRow < episodes.length) {
+        router.push(`/dashboard/episodes/${episodes[selectedRow].id}`)
+      } else if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
+        handleBulkRetry()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [episodes, selectedRow, router])
+
+  // Reset selected row when episodes change
+  useEffect(() => { setSelectedRow(-1) }, [episodes])
+
   const SortIcon = ({ col }: { col: string }) => {
     if (sort !== col) return <span className="text-gray-300 ml-1">&#8597;</span>
     return <span className="ml-1">{order === 'asc' ? '&#8593;' : '&#8595;'}</span>
@@ -163,8 +197,9 @@ export default function EpisodesPage() {
           ))}
         </select>
         <input
+          ref={showFilterRef}
           type="text"
-          placeholder="Filter by show name..."
+          placeholder="Filter by show name... (press /)"
           value={showFilter}
           onChange={(e) => { setShowFilter(e.target.value); setPage(1) }}
           className="border rounded px-2 py-1.5 text-sm w-48"
@@ -202,8 +237,8 @@ export default function EpisodesPage() {
               <SkeletonTableRows rows={8} />
             ) : episodes.length === 0 ? (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No episodes found</td></tr>
-            ) : episodes.map((ep) => (
-              <tr key={ep.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => window.location.href = `/dashboard/episodes/${ep.id}`}>
+            ) : episodes.map((ep, i) => (
+              <tr key={ep.id} className={`hover:bg-gray-50 cursor-pointer ${i === selectedRow ? 'bg-blue-50 ring-1 ring-blue-300' : ''}`} onClick={() => window.location.href = `/dashboard/episodes/${ep.id}`}>
                 <td className="px-4 py-3 max-w-[200px] truncate">{ep.show_name ?? ep.id}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
@@ -217,6 +252,11 @@ export default function EpisodesPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Keyboard hints */}
+      <p className="text-[10px] text-gray-400">
+        Shortcuts: <kbd className="px-1 bg-gray-100 rounded">j</kbd>/<kbd className="px-1 bg-gray-100 rounded">k</kbd> navigate &middot; <kbd className="px-1 bg-gray-100 rounded">Enter</kbd> open &middot; <kbd className="px-1 bg-gray-100 rounded">/</kbd> search &middot; <kbd className="px-1 bg-gray-100 rounded">r</kbd> retry failed
+      </p>
 
       {/* Pagination */}
       {totalPages > 1 && (

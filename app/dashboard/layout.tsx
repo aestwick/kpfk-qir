@@ -10,6 +10,7 @@ const navItems = [
   { href: '/dashboard', label: 'Overview' },
   { href: '/dashboard/episodes', label: 'Episodes' },
   { href: '/dashboard/jobs', label: 'Jobs' },
+  { href: '/dashboard/activity', label: 'Activity' },
   { href: '/dashboard/usage', label: 'Usage' },
   { href: '/dashboard/generate', label: 'Generate QIR' },
   { href: '/dashboard/downloads', label: 'Downloads' },

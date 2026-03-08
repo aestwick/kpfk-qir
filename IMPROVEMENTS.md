@@ -73,9 +73,9 @@ Episodes that fail 3+ times are promoted to `dead` status by the auto-retry work
 
 ## P2/P3 — Nice to Have
 
-### 11. SSE Instead of Polling
+### 11. SSE Instead of Polling ✅
 
-The dashboard and jobs page poll every 5 seconds regardless of activity. Server-Sent Events would reduce unnecessary API calls and provide instant updates. Not worth the complexity until you have multiple concurrent users.
+Added `/api/events` SSE endpoint that streams queue status every 5 seconds over a persistent connection. Jobs page uses `useQueueSSE()` hook for live updates without polling. Dashboard uses SSE for pipeline visualization (live queue data) and reduced polling interval (30s instead of 5s) for the full dashboard data.
 
 ### 12. URL-Persisted Filters ✅
 
@@ -89,21 +89,21 @@ Extracted `app/components/toast.tsx` with `ToastProvider` and `useToast()` hook.
 
 RSS feeds are now fetched in parallel batches of 5 using `Promise.allSettled()`. Per-show logic extracted into `processShow()` helper.
 
-### 15. Lazy-Load Dashboard Pages
+### 15. Lazy-Load Dashboard Pages ✅
 
-All dashboard pages use `'use client'` and are bundled together. Use `next/dynamic` to lazy-load heavier pages (episode detail, QIR generator, settings). Low impact — the bundle is already small (~5KB per page).
+Next.js App Router already code-splits each route segment into its own chunk. No additional `next/dynamic` needed — build output confirms each page is 1–5KB independently loaded.
 
 ### 16. ISR for Public QIR Page ✅
 
 Public QIR page (`/[year]/q[quarter]`) now uses `revalidate = 86400` (24 hours). Finalized reports are cached and served statically.
 
-### 17. Keyboard Shortcuts
+### 17. Keyboard Shortcuts ✅
 
-Power users (station staff checking daily) would benefit from `J/K` to navigate episodes, `R` to retry, `/` to search. Pure convenience feature.
+Episodes page now supports: `j`/`k` to navigate rows, `Enter` to open selected episode, `/` to focus the show filter, `r` to retry all failed. Selected row is highlighted with a blue ring. Shortcut hints shown below the table.
 
-### 18. Timeline/Activity Log View
+### 18. Timeline/Activity Log View ✅
 
-A historical timeline of all pipeline events. The 24h feed on the new dashboard covers the immediate need. A full history view can wait.
+New `/dashboard/activity` page shows a full historical timeline of pipeline events grouped by day. Supports 24h, 3-day, 7-day, and 30-day ranges. Each entry links to the episode detail page. Added to sidebar navigation.
 
 ---
 
