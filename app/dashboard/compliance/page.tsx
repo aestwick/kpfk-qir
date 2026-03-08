@@ -54,7 +54,7 @@ interface Stats {
   total: number
 }
 
-const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id'] as const
+const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency'] as const
 const SEVERITIES = ['info', 'warning', 'critical']
 
 function getQuarterOptions(): { label: string; value: string }[] {
@@ -81,6 +81,7 @@ const typeLabels: Record<string, string> = {
   technical: 'Technical',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
+  indecency: 'Indecency',
 }
 
 function formatTimestamp(seconds: number | null): string {
@@ -142,7 +143,7 @@ export default function CompliancePage() {
 
   // Check toggles — per-flag-type map matching DB schema
   const [checkToggles, setCheckToggles] = useState<Record<string, boolean>>({
-    profanity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true,
+    profanity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true, indecency: true,
   })
   const [blocking, setBlocking] = useState(false)
 

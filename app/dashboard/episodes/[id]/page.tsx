@@ -70,6 +70,7 @@ const FLAG_TYPE_LABELS: Record<string, string> = {
   technical: 'Technical Issue',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID Missing',
+  indecency: 'Indecency',
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
