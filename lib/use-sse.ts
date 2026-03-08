@@ -11,6 +11,7 @@ export interface QueueData {
   ingest: QueueCounts
   transcribe: QueueCounts
   summarize: QueueCounts
+  compliance: QueueCounts
 }
 
 export function useQueueSSE() {

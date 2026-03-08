@@ -1,4 +1,4 @@
-import { ingestQueue, transcribeQueue, summarizeQueue } from '@/lib/queue'
+import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,13 +22,14 @@ export async function GET() {
       async function push() {
         if (closed) return
         try {
-          const [ingest, transcribe, summarize] = await Promise.all([
+          const [ingest, transcribe, summarize, compliance] = await Promise.all([
             getQueueCounts(ingestQueue),
             getQueueCounts(transcribeQueue),
             getQueueCounts(summarizeQueue),
+            getQueueCounts(complianceQueue),
           ])
 
-          const data = { ingest, transcribe, summarize }
+          const data = { ingest, transcribe, summarize, compliance }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         } catch {
           // Silently skip on error — client will reconnect
