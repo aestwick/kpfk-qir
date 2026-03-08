@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
-import type { AudioPlayerHandle } from '@/app/components/episode-media'
+import type { SeekToFn } from '@/app/components/episode-media'
 
 /* ─── lazy-loaded media components ─── */
 const AudioPlayerWithCaptions = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.AudioPlayerWithCaptions })), {
@@ -121,22 +121,26 @@ function InlineEditField({
   const [editValue, setEditValue] = useState(value)
   const [saving, setSaving] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const savingRef = useRef(false) // Prevent double save from blur+Enter race
 
   useEffect(() => {
     if (editing && inputRef.current) inputRef.current.focus()
   }, [editing])
 
   async function save() {
+    if (savingRef.current) return // Already saving — skip duplicate
     if (editValue === value) {
       setEditing(false)
       return
     }
+    savingRef.current = true
     setSaving(true)
     const res = await fetch(`/api/episodes/${episodeId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [field]: editValue || null }),
     })
+    savingRef.current = false
     setSaving(false)
     if (res.ok) {
       onSaved(editValue)
@@ -153,7 +157,7 @@ function InlineEditField({
         onChange={(e) => setEditValue(e.target.value)}
         onBlur={save}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') save()
+          if (e.key === 'Enter') { e.preventDefault(); save() }
           if (e.key === 'Escape') { setEditValue(value); setEditing(false) }
         }}
         disabled={saving}
@@ -194,6 +198,7 @@ function CorrectionToolbar({
   const [isRegex, setIsRegex] = useState(false)
   const [scope, setScope] = useState<'global' | 'episode'>('global')
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -207,6 +212,11 @@ function CorrectionToolbar({
   }, [onClose])
 
   async function handleSave() {
+    if (!replacement.trim()) {
+      setError('Replacement text is required')
+      return
+    }
+    setError(null)
     setSaving(true)
     const body: Record<string, unknown> = {
       wrong: selectedText,
@@ -215,13 +225,18 @@ function CorrectionToolbar({
       case_sensitive: false,
       active: true,
     }
-    if (scope === 'episode') body.episode_id = episodeId
-    await fetch('/api/corrections', {
+    if (scope === 'episode') body.episode_id = Number(episodeId)
+    const res = await fetch('/api/corrections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     setSaving(false)
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setError(data.error ?? 'Failed to save correction')
+      return
+    }
     onSaved()
     onClose()
   }
@@ -270,6 +285,7 @@ function CorrectionToolbar({
               <option value="episode">This episode only</option>
             </select>
           </div>
+          {error && <p className="text-[10px] text-red-600">{error}</p>}
           <div className="flex justify-end gap-2">
             <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Cancel</button>
             <button
@@ -304,7 +320,8 @@ export default function EpisodeDetailPage() {
   const searchParams = useSearchParams()
   const id = params.id as string
   const seekParam = searchParams.get('seek')
-  const initialSeek = seekParam != null ? parseFloat(seekParam) : undefined
+  const parsedSeek = seekParam != null ? parseFloat(seekParam) : NaN
+  const initialSeek = isFinite(parsedSeek) && parsedSeek >= 0 ? parsedSeek : undefined
 
   const [episode, setEpisode] = useState<Episode | null>(null)
   const [transcript, setTranscript] = useState<Transcript | null>(null)
@@ -327,7 +344,7 @@ export default function EpisodeDetailPage() {
     position: { top: number; left: number }
   } | null>(null)
 
-  const audioPlayerRef = useRef<AudioPlayerHandle>(null)
+  const seekToRef = useRef<SeekToFn | null>(null)
 
   const fetchEpisode = useCallback(async () => {
     const [epRes, flagsRes] = await Promise.all([
@@ -407,23 +424,27 @@ export default function EpisodeDetailPage() {
     fetchEpisode()
   }
 
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   function jumpToTimestamp(seconds: number, excerpt?: string | null) {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.seekTo(seconds)
+    if (seekToRef.current) {
+      seekToRef.current(seconds)
     }
     if (excerpt) {
+      // Clear any previous highlight timer to prevent stacking
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
       setHighlightText(excerpt)
-      // Clear highlight after 5 seconds
-      setTimeout(() => setHighlightText(null), 5000)
+      highlightTimerRef.current = setTimeout(() => setHighlightText(null), 5000)
     }
   }
 
   function handleTextSelected(text: string, rect: DOMRect) {
+    // rect is viewport-relative; position: fixed is also viewport-relative — no scroll offset needed
     setSelectionToolbar({
       text,
       position: {
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
+        top: rect.bottom + 4,
+        left: rect.left,
       },
     })
   }
@@ -625,10 +646,11 @@ export default function EpisodeDetailPage() {
                     {/* "Not a real word" shortcut for profanity flags */}
                     {flag.flag_type === 'profanity' && flag.excerpt && (
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          const rect = (e.target as HTMLElement).getBoundingClientRect()
                           setSelectionToolbar({
                             text: flag.excerpt!,
-                            position: { top: window.innerHeight / 2, left: window.innerWidth / 3 },
+                            position: { top: rect.bottom + 4, left: rect.left },
                           })
                         }}
                         className="text-[10px] text-gray-400 hover:text-gray-600 mt-1"
@@ -693,10 +715,10 @@ export default function EpisodeDetailPage() {
       {/* VTT Audio Player (lazy-loaded) */}
       {transcript?.vtt && (
         <AudioPlayerWithCaptions
-          ref={audioPlayerRef}
           mp3Url={episode.mp3_url}
           vtt={transcript.vtt}
           initialSeek={initialSeek}
+          onReady={(fn) => { seekToRef.current = fn }}
         />
       )}
 

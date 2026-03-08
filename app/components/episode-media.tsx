@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 
 interface VttCue {
   start: number
@@ -26,90 +26,103 @@ function parseVtt(vtt: string): VttCue[] {
   return cues
 }
 
-export interface AudioPlayerHandle {
-  seekTo: (seconds: number) => void
-}
+export type SeekToFn = (seconds: number) => void
 
 /* ─── Audio Player with VTT Captions ─── */
-export const AudioPlayerWithCaptions = forwardRef<AudioPlayerHandle, { mp3Url: string; vtt: string; initialSeek?: number }>(
-  function AudioPlayerWithCaptions({ mp3Url, vtt, initialSeek }, ref) {
-    const [currentTime, setCurrentTime] = useState(0)
-    const audioRef = useRef<HTMLAudioElement>(null)
-    const activeCueRef = useRef<HTMLDivElement>(null)
-    const captionsRef = useRef<HTMLDivElement>(null)
-    const didInitialSeek = useRef(false)
+export function AudioPlayerWithCaptions({
+  mp3Url,
+  vtt,
+  initialSeek,
+  onReady,
+}: {
+  mp3Url: string
+  vtt: string
+  initialSeek?: number
+  onReady?: (seekTo: SeekToFn) => void
+}) {
+  const [currentTime, setCurrentTime] = useState(0)
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const activeCueRef = useRef<HTMLDivElement>(null)
+  const captionsRef = useRef<HTMLDivElement>(null)
+  const didInitialSeek = useRef(false)
+  const didRegister = useRef(false)
 
-    const vttCues = parseVtt(vtt)
-    const activeCueIdx = vttCues.findIndex((c) => currentTime >= c.start && currentTime < c.end)
+  const vttCues = parseVtt(vtt)
+  const activeCueIdx = vttCues.findIndex((c) => currentTime >= c.start && currentTime < c.end)
 
-    const seekTo = useCallback((seconds: number) => {
-      if (audioRef.current) {
-        audioRef.current.currentTime = seconds
-        audioRef.current.play()
+  const seekTo = useCallback((seconds: number) => {
+    if (audioRef.current) {
+      audioRef.current.currentTime = seconds
+      audioRef.current.play()
+    }
+  }, [])
+
+  // Register seekTo callback with parent (replaces forwardRef which doesn't work through next/dynamic)
+  useEffect(() => {
+    if (onReady && !didRegister.current) {
+      didRegister.current = true
+      onReady(seekTo)
+    }
+  }, [onReady, seekTo])
+
+  // Handle initial seek from URL param
+  useEffect(() => {
+    if (initialSeek == null || !isFinite(initialSeek) || initialSeek < 0) return
+    if (didInitialSeek.current || !audioRef.current) return
+    const handleCanPlay = () => {
+      if (!didInitialSeek.current && audioRef.current) {
+        didInitialSeek.current = true
+        audioRef.current.currentTime = initialSeek
       }
-    }, [])
+    }
+    const audio = audioRef.current
+    if (audio.readyState >= 2) {
+      handleCanPlay()
+    } else {
+      audio.addEventListener('canplay', handleCanPlay, { once: true })
+      return () => audio.removeEventListener('canplay', handleCanPlay)
+    }
+  }, [initialSeek])
 
-    useImperativeHandle(ref, () => ({ seekTo }), [seekTo])
+  // Auto-scroll captions to active cue
+  useEffect(() => {
+    if (activeCueRef.current && captionsRef.current) {
+      activeCueRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [activeCueIdx])
 
-    // Handle initial seek from URL param
-    useEffect(() => {
-      if (initialSeek != null && !didInitialSeek.current && audioRef.current) {
-        const handleCanPlay = () => {
-          if (!didInitialSeek.current && audioRef.current) {
-            didInitialSeek.current = true
-            audioRef.current.currentTime = initialSeek
-          }
-        }
-        const audio = audioRef.current
-        if (audio.readyState >= 2) {
-          handleCanPlay()
-        } else {
-          audio.addEventListener('canplay', handleCanPlay, { once: true })
-          return () => audio.removeEventListener('canplay', handleCanPlay)
-        }
-      }
-    }, [initialSeek])
-
-    // Auto-scroll captions to active cue
-    useEffect(() => {
-      if (activeCueRef.current && captionsRef.current) {
-        activeCueRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-      }
-    }, [activeCueIdx])
-
-    return (
-      <div className="bg-white rounded-lg shadow p-4 space-y-3">
-        <h3 className="font-semibold text-sm text-gray-500 uppercase">Audio Player with Captions</h3>
-        <audio
-          ref={audioRef}
-          src={mp3Url}
-          controls
-          className="w-full"
-          onTimeUpdate={() => {
-            if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
-          }}
-        />
-        <div ref={captionsRef} className="max-h-48 overflow-y-auto border rounded p-2 text-sm space-y-1">
-          {vttCues.map((cue, i) => (
-            <div
-              key={i}
-              ref={i === activeCueIdx ? activeCueRef : undefined}
-              className={`px-2 py-1 rounded cursor-pointer ${
-                i === activeCueIdx ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'
-              }`}
-              onClick={() => seekTo(cue.start)}
-            >
-              <span className="text-xs text-gray-400 mr-2">
-                {Math.floor(cue.start / 60)}:{String(Math.floor(cue.start % 60)).padStart(2, '0')}
-              </span>
-              {cue.text}
-            </div>
-          ))}
-        </div>
+  return (
+    <div className="bg-white rounded-lg shadow p-4 space-y-3">
+      <h3 className="font-semibold text-sm text-gray-500 uppercase">Audio Player with Captions</h3>
+      <audio
+        ref={audioRef}
+        src={mp3Url}
+        controls
+        className="w-full"
+        onTimeUpdate={() => {
+          if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
+        }}
+      />
+      <div ref={captionsRef} className="max-h-48 overflow-y-auto border rounded p-2 text-sm space-y-1">
+        {vttCues.map((cue, i) => (
+          <div
+            key={i}
+            ref={i === activeCueIdx ? activeCueRef : undefined}
+            className={`px-2 py-1 rounded cursor-pointer ${
+              i === activeCueIdx ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'
+            }`}
+            onClick={() => seekTo(cue.start)}
+          >
+            <span className="text-xs text-gray-400 mr-2">
+              {Math.floor(cue.start / 60)}:{String(Math.floor(cue.start % 60)).padStart(2, '0')}
+            </span>
+            {cue.text}
+          </div>
+        ))}
       </div>
-    )
-  }
-)
+    </div>
+  )
+}
 
 /* ─── Transcript Viewer with Search and Text Selection ─── */
 export function TranscriptViewer({
@@ -123,26 +136,28 @@ export function TranscriptViewer({
 }) {
   const [searchQuery, setSearchQuery] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
+  const onTextSelectedRef = useRef(onTextSelected)
+  onTextSelectedRef.current = onTextSelected
 
   // Handle text selection for "Add Correction" toolbar
   useEffect(() => {
-    if (!onTextSelected) return
     const container = containerRef.current
     if (!container) return
 
     function handleMouseUp() {
+      if (!onTextSelectedRef.current) return
       const selection = window.getSelection()
       if (!selection || selection.isCollapsed || !selection.toString().trim()) return
       // Only trigger if selection is within the transcript container
       if (!container!.contains(selection.anchorNode)) return
       const range = selection.getRangeAt(0)
       const rect = range.getBoundingClientRect()
-      onTextSelected!(selection.toString().trim(), rect)
+      onTextSelectedRef.current(selection.toString().trim(), rect)
     }
 
     container.addEventListener('mouseup', handleMouseUp)
     return () => container.removeEventListener('mouseup', handleMouseUp)
-  }, [onTextSelected])
+  }, []) // Stable — uses ref for callback
 
   // Scroll to highlighted text when it changes
   useEffect(() => {
@@ -157,13 +172,14 @@ export function TranscriptViewer({
     const query = searchQuery || highlightText
     if (!query) return <span>{transcript}</span>
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(`(${escaped})`, 'gi')
-    const parts = transcript.split(regex)
+    // Use capturing group split — odd indexes are matches, even indexes are non-matches
+    const parts = transcript.split(new RegExp(`(${escaped})`, 'gi'))
+    const testRegex = new RegExp(`^${escaped}$`, 'i') // No g flag — avoids stateful lastIndex bug
     let firstHighlight = true
     return (
       <>
         {parts.map((part, i) => {
-          if (regex.test(part)) {
+          if (testRegex.test(part)) {
             const isFirst = firstHighlight
             firstHighlight = false
             return (
