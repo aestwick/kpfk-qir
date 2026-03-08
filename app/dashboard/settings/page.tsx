@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { SkeletonBlock } from '@/app/components/skeleton'
+import { useToast } from '@/app/components/toast'
 
 interface Correction {
   id: number
@@ -72,16 +73,15 @@ export default function SettingsPage() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const [saveError, setSaveError] = useState<string | null>(null)
+  const { toast } = useToast()
 
   async function saveSetting(key: string) {
     setSaving(key)
-    setSaveError(null)
     const field = settingFields.find((f) => f.key === key)
     let value: unknown = editValues[key]
     if (field?.type === 'number') value = Number(value)
     else if (field?.type === 'json') {
-      try { value = JSON.parse(value as string) } catch { setSaving(null); setSaveError(`Invalid JSON for ${key}`); return }
+      try { value = JSON.parse(value as string) } catch { setSaving(null); toast('error', `Invalid JSON for ${key}`); return }
     }
     try {
       const res = await fetch('/api/settings', {
@@ -91,18 +91,16 @@ export default function SettingsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setSaveError(data.error ?? `Failed to save ${key}`)
+        toast('error', data.error ?? `Failed to save ${key}`)
       }
     } catch {
-      setSaveError('Network error: could not reach server')
+      toast('error', 'Network error: could not reach server')
     }
     setSaving(null)
   }
 
   async function saveCorrection() {
     if (!correctionForm.wrong || !correctionForm.correct) return
-    setSaveError(null)
-
     try {
       const res = editingId
         ? await fetch('/api/corrections', {
@@ -118,11 +116,11 @@ export default function SettingsPage() {
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setSaveError(data.error ?? 'Failed to save correction')
+        toast('error',data.error ?? 'Failed to save correction')
         return
       }
     } catch {
-      setSaveError('Network error: could not reach server')
+      toast('error','Network error: could not reach server')
       return
     }
 
@@ -140,11 +138,11 @@ export default function SettingsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setSaveError(data.error ?? 'Failed to toggle correction')
+        toast('error',data.error ?? 'Failed to toggle correction')
         return
       }
     } catch {
-      setSaveError('Network error: could not reach server')
+      toast('error','Network error: could not reach server')
       return
     }
     fetchAll()
@@ -156,11 +154,11 @@ export default function SettingsPage() {
       const res = await fetch(`/api/corrections?id=${id}`, { method: 'DELETE' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setSaveError(data.error ?? 'Failed to delete correction')
+        toast('error',data.error ?? 'Failed to delete correction')
         return
       }
     } catch {
-      setSaveError('Network error: could not reach server')
+      toast('error','Network error: could not reach server')
       return
     }
     fetchAll()
@@ -207,13 +205,6 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Settings</h2>
-
-      {saveError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 flex items-center justify-between">
-          {saveError}
-          <button onClick={() => setSaveError(null)} className="text-red-600 hover:text-red-800 ml-3 text-xs">Dismiss</button>
-        </div>
-      )}
 
       {/* QIR Settings */}
       <div className="bg-white rounded-lg shadow p-4 space-y-4">

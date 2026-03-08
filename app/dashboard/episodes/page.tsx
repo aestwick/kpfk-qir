@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 
 interface Episode {
@@ -25,17 +26,41 @@ const statusColors: Record<string, string> = {
 }
 
 export default function EpisodesPage() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
   const [episodes, setEpisodes] = useState<Episode[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState('')
-  const [quarterFilter, setQuarterFilter] = useState('')
-  const [showFilter, setShowFilter] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [sort, setSort] = useState('created_at')
-  const [order, setOrder] = useState('desc')
+
+  // Read initial state from URL params
+  const statusFilter = searchParams.get('status') ?? ''
+  const quarterFilter = searchParams.get('quarter') ?? ''
+  const showFilter = searchParams.get('show') ?? ''
+  const categoryFilter = searchParams.get('category') ?? ''
+  const sort = searchParams.get('sort') ?? 'created_at'
+  const order = searchParams.get('order') ?? 'desc'
+  const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
   const limit = 50
+
+  function updateParams(updates: Record<string, string>) {
+    const params = new URLSearchParams(searchParams.toString())
+    for (const [key, value] of Object.entries(updates)) {
+      if (value) {
+        params.set(key, value)
+      } else {
+        params.delete(key)
+      }
+    }
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }
+
+  function setStatusFilter(v: string) { updateParams({ status: v, page: '' }) }
+  function setQuarterFilter(v: string) { updateParams({ quarter: v, page: '' }) }
+  function setShowFilter(v: string) { updateParams({ show: v, page: '' }) }
+  function setCategoryFilter(v: string) { updateParams({ category: v, page: '' }) }
+  function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
 
   const fetchEpisodes = useCallback(async () => {
     setLoading(true)
@@ -58,12 +83,10 @@ export default function EpisodesPage() {
 
   function handleSort(col: string) {
     if (sort === col) {
-      setOrder(order === 'asc' ? 'desc' : 'asc')
+      updateParams({ order: order === 'asc' ? 'desc' : 'asc', page: '' })
     } else {
-      setSort(col)
-      setOrder('desc')
+      updateParams({ sort: col, order: 'desc', page: '' })
     }
-    setPage(1)
   }
 
   async function handleBulkRetry() {

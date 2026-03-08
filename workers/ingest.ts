@@ -57,6 +57,127 @@ function toPacificDate(utcDateStr: string): {
   }
 }
 
+async function processShow(show: { key: string; show_name: string; category: string }): Promise<number> {
+  let newCount = 0
+  try {
+    const rssUrl = `https://archive.kpfk.org/getrss.php?id=${show.key}`
+    const response = await fetch(rssUrl, { signal: AbortSignal.timeout(30000) })
+
+    if (!response.ok) {
+      console.warn(`[ingest] RSS fetch failed for ${show.key}: ${response.status}`)
+      return 0
+    }
+
+    const xml = await response.text()
+    const parsed = parser.parse(xml)
+    const items = parsed?.rss?.channel?.item
+
+    if (!items?.length) return 0
+
+    for (const item of items) {
+      const mp3Url =
+        item.enclosure?.['@_url'] || item.enclosure?.url || null
+
+      if (!mp3Url) continue
+
+      const pubDate = item.pubDate || null
+      const itunesDuration =
+        item['itunes:duration'] || item.duration || null
+      const durationMinutes = itunesDuration
+        ? Math.round(Number(itunesDuration) / 60)
+        : null
+
+      // Check for existing episode by mp3_url
+      const { data: existing } = await supabaseAdmin
+        .from('episode_log')
+        .select('id')
+        .eq('mp3_url', mp3Url)
+        .limit(1)
+
+      if (existing?.length) continue
+
+      // Parse date/time
+      let dateInfo = {
+        date: null as string | null,
+        airDate: null as string | null,
+        startTime: null as string | null,
+        endTime: null as string | null,
+        airStart: null as string | null,
+        airEnd: null as string | null,
+      }
+      if (pubDate) {
+        const p = toPacificDate(pubDate)
+        dateInfo = {
+          date: p.date,
+          airDate: p.airDate,
+          startTime: p.startTime,
+          endTime: p.endTime,
+          airStart: p.airStart,
+          airEnd: p.airEnd,
+        }
+
+        // Calculate end time from duration
+        if (durationMinutes && pubDate) {
+          const endDate = new Date(new Date(pubDate).getTime() + durationMinutes * 60 * 1000)
+          const endTimeFmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/Los_Angeles',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          }).format(endDate)
+          const endTime24 = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'America/Los_Angeles',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          }).format(endDate)
+          dateInfo.endTime = endTimeFmt
+          dateInfo.airEnd = endTime24
+        }
+      }
+
+      const { error: insertErr } = await supabaseAdmin
+        .from('episode_log')
+        .insert({
+          show_key: show.key,
+          show_name: show.show_name,
+          category: show.category,
+          date: dateInfo.date,
+          start_time: dateInfo.startTime,
+          end_time: dateInfo.endTime,
+          duration: durationMinutes,
+          mp3_url: mp3Url,
+          status: 'pending',
+          air_date: dateInfo.airDate,
+          air_start: dateInfo.airStart,
+          air_end: dateInfo.airEnd,
+          headline: null,
+          host: null,
+          guest: null,
+          summary: null,
+          transcript_url: null,
+          compliance_status: null,
+          compliance_report: null,
+          issue_category: null,
+          error_message: null,
+          retry_count: 0,
+        })
+
+      if (insertErr) {
+        if (insertErr.code === '23505') continue
+        console.warn(`[ingest] insert error for ${mp3Url}:`, insertErr.message)
+        continue
+      }
+
+      newCount++
+    }
+  } catch (err) {
+    console.error(`[ingest] error processing show ${show.key}:`, err)
+  }
+  return newCount
+}
+
 export async function processIngest(job: Job) {
   console.log('[ingest] starting RSS fetch...')
 
@@ -75,128 +196,15 @@ export async function processIngest(job: Job) {
     (s) => !excludedCategories.some((exc) => s.category?.includes(exc))
   )
 
+  // Process shows in parallel batches of 5
+  const CONCURRENCY = 5
   let totalNew = 0
 
-  for (const show of activeShows) {
-    try {
-      const rssUrl = `https://archive.kpfk.org/getrss.php?id=${show.key}`
-      const response = await fetch(rssUrl, { signal: AbortSignal.timeout(30000) })
-
-      if (!response.ok) {
-        console.warn(`[ingest] RSS fetch failed for ${show.key}: ${response.status}`)
-        continue
-      }
-
-      const xml = await response.text()
-      const parsed = parser.parse(xml)
-      const items = parsed?.rss?.channel?.item
-
-      if (!items?.length) continue
-
-      for (const item of items) {
-        const title =
-          typeof item.title === 'object' ? item.title.__cdata?.trim() : String(item.title).trim()
-
-        const mp3Url =
-          item.enclosure?.['@_url'] || item.enclosure?.url || null
-
-        if (!mp3Url) continue
-
-        const pubDate = item.pubDate || null
-        const itunesDuration =
-          item['itunes:duration'] || item.duration || null
-        const durationMinutes = itunesDuration
-          ? Math.round(Number(itunesDuration) / 60)
-          : null
-
-        // Check for existing episode by mp3_url
-        const { data: existing } = await supabaseAdmin
-          .from('episode_log')
-          .select('id')
-          .eq('mp3_url', mp3Url)
-          .limit(1)
-
-        if (existing?.length) continue
-
-        // Parse date/time
-        let dateInfo = {
-          date: null as string | null,
-          airDate: null as string | null,
-          startTime: null as string | null,
-          endTime: null as string | null,
-          airStart: null as string | null,
-          airEnd: null as string | null,
-        }
-        if (pubDate) {
-          const parsed = toPacificDate(pubDate)
-          dateInfo = {
-            date: parsed.date,
-            airDate: parsed.airDate,
-            startTime: parsed.startTime,
-            endTime: parsed.endTime,
-            airStart: parsed.airStart,
-            airEnd: parsed.airEnd,
-          }
-
-          // Calculate end time from duration
-          if (durationMinutes && pubDate) {
-            const endDate = new Date(new Date(pubDate).getTime() + durationMinutes * 60 * 1000)
-            const endTimeFmt = new Intl.DateTimeFormat('en-US', {
-              timeZone: 'America/Los_Angeles',
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true,
-            }).format(endDate)
-            const endTime24 = new Intl.DateTimeFormat('en-GB', {
-              timeZone: 'America/Los_Angeles',
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            }).format(endDate)
-            dateInfo.endTime = endTimeFmt
-            dateInfo.airEnd = endTime24
-          }
-        }
-
-        const { error: insertErr } = await supabaseAdmin
-          .from('episode_log')
-          .insert({
-            show_key: show.key,
-            show_name: show.show_name,
-            category: show.category,
-            date: dateInfo.date,
-            start_time: dateInfo.startTime,
-            end_time: dateInfo.endTime,
-            duration: durationMinutes,
-            mp3_url: mp3Url,
-            status: 'pending',
-            air_date: dateInfo.airDate,
-            air_start: dateInfo.airStart,
-            air_end: dateInfo.airEnd,
-            headline: null,
-            host: null,
-            guest: null,
-            summary: null,
-            transcript_url: null,
-            compliance_status: null,
-            compliance_report: null,
-            issue_category: null,
-            error_message: null,
-            retry_count: 0,
-          })
-
-        if (insertErr) {
-          // Unique constraint violation means episode already exists
-          if (insertErr.code === '23505') continue
-          console.warn(`[ingest] insert error for ${mp3Url}:`, insertErr.message)
-          continue
-        }
-
-        totalNew++
-      }
-    } catch (err) {
-      console.error(`[ingest] error processing show ${show.key}:`, err)
+  for (let i = 0; i < activeShows.length; i += CONCURRENCY) {
+    const batch = activeShows.slice(i, i + CONCURRENCY)
+    const results = await Promise.allSettled(batch.map((show) => processShow(show)))
+    for (const result of results) {
+      if (result.status === 'fulfilled') totalNew += result.value
     }
   }
 

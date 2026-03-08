@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { SkeletonCard } from '@/app/components/skeleton'
+import { useToast } from '@/app/components/toast'
 
 interface QueueCounts {
   active: number
@@ -20,23 +21,21 @@ export default function JobsPage() {
   const [queues, setQueues] = useState<QueueData | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-
-  const [error, setError] = useState<string | null>(null)
+  const { toast } = useToast()
 
   const fetchQueues = useCallback(async () => {
     try {
       const res = await fetch('/api/jobs')
       if (res.ok) {
         setQueues(await res.json())
-        setError(null)
       } else {
-        setError('Failed to fetch queue status')
+        toast('error', 'Failed to fetch queue status')
       }
     } catch {
-      setError('Could not reach server')
+      toast('error', 'Could not reach server')
     }
     setLoading(false)
-  }, [])
+  }, [toast])
 
   useEffect(() => {
     fetchQueues()
@@ -54,10 +53,10 @@ export default function JobsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(data.error ?? `Failed to queue ${action}`)
+        toast('error', data.error ?? `Failed to queue ${action}`)
       }
     } catch {
-      setError('Network error: could not reach server')
+      toast('error', 'Network error: could not reach server')
     }
     setTimeout(() => {
       fetchQueues()
@@ -79,10 +78,6 @@ export default function JobsPage() {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Jobs</h2>
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">{error}</div>
-      )}
 
       {/* Queue Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

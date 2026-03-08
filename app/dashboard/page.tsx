@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
+import { useToast } from '@/app/components/toast'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
@@ -212,7 +213,7 @@ export default function DashboardOverview() {
   const [data, setData] = useState<DashData | null>(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [actionResult, setActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const { toast } = useToast()
 
   const fetchData = useCallback(async () => {
     try {
@@ -231,16 +232,8 @@ export default function DashboardOverview() {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // Auto-dismiss action result
-  useEffect(() => {
-    if (!actionResult) return
-    const timer = setTimeout(() => setActionResult(null), 5000)
-    return () => clearTimeout(timer)
-  }, [actionResult])
-
   async function triggerAction(action: string) {
     setActionLoading(action)
-    setActionResult(null)
     try {
       const res = await fetch('/api/jobs', {
         method: 'POST',
@@ -249,13 +242,13 @@ export default function DashboardOverview() {
       })
       if (!res.ok) {
         const d = await res.json().catch(() => ({}))
-        setActionResult({ type: 'error', message: d.error ?? `Failed to queue ${action}` })
+        toast('error', d.error ?? `Failed to queue ${action}`)
         return
       }
-      setActionResult({ type: 'success', message: `${action} job queued` })
+      toast('success', `${action} job queued`)
       setTimeout(fetchData, 2000)
     } catch {
-      setActionResult({ type: 'error', message: 'Network error' })
+      toast('error', 'Network error')
     } finally {
       setActionLoading(null)
     }
@@ -326,13 +319,6 @@ export default function DashboardOverview() {
               {label}
             </button>
           ))}
-          {actionResult && (
-            <span className={`text-xs px-2.5 py-1 rounded-md ${
-              actionResult.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'
-            }`}>
-              {actionResult.message}
-            </span>
-          )}
         </div>
       </div>
 

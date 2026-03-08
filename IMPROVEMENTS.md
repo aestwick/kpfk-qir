@@ -71,33 +71,31 @@ Episodes that fail 3+ times are promoted to `dead` status by the auto-retry work
 
 ---
 
-## P2/P3 — Nice to Have (Defer)
-
-Legitimate improvements but none are blocking you from getting the pipeline running and generating your first QIR.
+## P2/P3 — Nice to Have
 
 ### 11. SSE Instead of Polling
 
 The dashboard and jobs page poll every 5 seconds regardless of activity. Server-Sent Events would reduce unnecessary API calls and provide instant updates. Not worth the complexity until you have multiple concurrent users.
 
-### 12. URL-Persisted Filters
+### 12. URL-Persisted Filters ✅
 
-Episode filters (status, quarter, show, category, sort) reset on navigation. Store them in URL search params so users can bookmark filtered views. Nice for daily use once the system is stable.
+Episode filters (status, quarter, show, category, sort, page) are now stored in URL search params via `useSearchParams`. Users can bookmark filtered views and share links. Filters survive navigation.
 
-### 13. Shared Toast/Notification System
+### 13. Shared Toast/Notification System ✅
 
-The toast pattern is copy-pasted across pages (component-local state). Extract a shared context/provider. Low priority — it works, it's just not DRY.
+Extracted `app/components/toast.tsx` with `ToastProvider` and `useToast()` hook. Toasts auto-dismiss after 5 seconds with manual dismiss option. Replaced per-page state in dashboard overview, jobs, and settings pages.
 
-### 14. Parallelize RSS Ingest
+### 14. Parallelize RSS Ingest ✅
 
-Currently fetches each show's RSS feed sequentially. Could use `Promise.allSettled()` with concurrency limit. Saves maybe 10 seconds on a job that runs hourly. Not worth the complexity right now.
+RSS feeds are now fetched in parallel batches of 5 using `Promise.allSettled()`. Per-show logic extracted into `processShow()` helper.
 
 ### 15. Lazy-Load Dashboard Pages
 
 All dashboard pages use `'use client'` and are bundled together. Use `next/dynamic` to lazy-load heavier pages (episode detail, QIR generator, settings). Low impact — the bundle is already small (~5KB per page).
 
-### 16. ISR for Public QIR Page
+### 16. ISR for Public QIR Page ✅
 
-The public report page (`/[year]/q[quarter]`) makes a fresh DB query on every request. Since finalized reports never change, use Next.js ISR with `revalidate`. Low traffic, so this barely matters.
+Public QIR page (`/[year]/q[quarter]`) now uses `revalidate = 86400` (24 hours). Finalized reports are cached and served statically.
 
 ### 17. Keyboard Shortcuts
 

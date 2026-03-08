@@ -3,6 +3,9 @@ import { notFound } from 'next/navigation'
 import PrintButton from './print-button'
 import type { Metadata } from 'next'
 
+// Revalidate finalized reports once per day — they rarely change
+export const revalidate = 86400
+
 export async function generateMetadata({
   params,
 }: {

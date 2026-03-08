@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { createBrowserClient } from '@/lib/supabase'
 import { usePathname } from 'next/navigation'
 import { ErrorBoundary } from '@/app/components/error-boundary'
+import { ToastProvider } from '@/app/components/toast'
 
 const navItems = [
   { href: '/dashboard', label: 'Overview' },
@@ -127,7 +128,9 @@ export default function DashboardLayout({
 
       <main className="flex-1 p-6 overflow-auto pt-16 md:pt-6">
         <ErrorBoundary>
-          {children}
+          <ToastProvider>
+            {children}
+          </ToastProvider>
         </ErrorBoundary>
       </main>
     </div>
