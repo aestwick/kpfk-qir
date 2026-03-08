@@ -48,6 +48,9 @@ interface Episode {
 interface Transcript {
   transcript: string | null
   vtt: string | null
+  language: string | null
+  english_transcript: string | null
+  english_vtt: string | null
 }
 
 interface ComplianceFlag {
@@ -332,6 +335,8 @@ export default function EpisodeDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [editSummary, setEditSummary] = useState('')
   const [editCategory, setEditCategory] = useState('')
+  const [viewLang, setViewLang] = useState<'original' | 'english'>('original')
+  const [translating, setTranslating] = useState(false)
   const [confirmAction, setConfirmAction] = useState<{ action: string; message: string } | null>(null)
   const [resolvingFlag, setResolvingFlag] = useState<number | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
@@ -444,7 +449,8 @@ export default function EpisodeDetailPage() {
       `Show: ${episode?.show_name ?? 'Unknown'}`,
       `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
       `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
-      `URL: ${window.location.origin}/dashboard/episodes/${id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
+      `MP3: ${episode?.mp3_url ?? 'Unknown'}`,
+      `Review: ${window.location.origin}/dashboard/episodes/${id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
       flag.timestamp_seconds != null ? `Timestamp: ${formatTimestamp(flag.timestamp_seconds)}` : null,
       `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
       flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
@@ -472,6 +478,37 @@ export default function EpisodeDetailPage() {
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  async function handleTranslate() {
+    if (transcript?.english_transcript) {
+      setViewLang('english')
+      return
+    }
+    setTranslating(true)
+    try {
+      const res = await fetch(`/api/episodes/${id}/translate`, { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        setTranscript((prev) =>
+          prev
+            ? { ...prev, english_transcript: data.english_transcript, english_vtt: data.english_vtt }
+            : prev
+        )
+        setViewLang('english')
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setToast(data.error ?? 'Translation failed')
+      }
+    } catch {
+      setToast('Translation request failed')
+    } finally {
+      setTranslating(false)
+    }
+  }
+
+  const isNonEnglish = transcript?.language != null && transcript.language !== 'en'
+  const showTranscript = viewLang === 'english' && transcript?.english_transcript ? transcript.english_transcript : transcript?.transcript
+  const showVtt = viewLang === 'english' && transcript?.english_vtt ? transcript.english_vtt : transcript?.vtt
 
   if (loading) return (
     <div className="space-y-6">
@@ -756,20 +793,48 @@ export default function EpisodeDetailPage() {
         </div>
       )}
 
+      {/* Language toggle for non-English episodes */}
+      {isNonEnglish && transcript?.transcript && (
+        <div className="flex items-center gap-3 bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark px-4 py-3">
+          <span className="text-xs text-gray-500 dark:text-warm-400 uppercase font-semibold">Language</span>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 font-medium">
+            {transcript.language === 'es' ? 'Spanish' : transcript.language?.toUpperCase()}
+          </span>
+          <div className="flex rounded-md border dark:border-warm-600 overflow-hidden text-sm">
+            <button
+              onClick={() => setViewLang('original')}
+              className={`px-3 py-1 ${viewLang === 'original' ? 'bg-blue-600 text-white dark:bg-blue-700' : 'bg-white dark:bg-warm-800 text-gray-700 dark:text-warm-300 hover:bg-gray-50 dark:hover:bg-warm-700'}`}
+            >
+              Original
+            </button>
+            <button
+              onClick={handleTranslate}
+              disabled={translating}
+              className={`px-3 py-1 ${viewLang === 'english' ? 'bg-blue-600 text-white dark:bg-blue-700' : 'bg-white dark:bg-warm-800 text-gray-700 dark:text-warm-300 hover:bg-gray-50 dark:hover:bg-warm-700'} disabled:opacity-50`}
+            >
+              {translating ? 'Translating...' : 'English'}
+            </button>
+          </div>
+          {viewLang === 'english' && transcript.english_transcript && (
+            <span className="text-[10px] text-gray-400 dark:text-warm-500">AI-translated</span>
+          )}
+        </div>
+      )}
+
       {/* VTT Audio Player (lazy-loaded) */}
-      {transcript?.vtt && (
+      {showVtt && (
         <AudioPlayerWithCaptions
           mp3Url={episode.mp3_url}
-          vtt={transcript.vtt}
+          vtt={showVtt}
           initialSeek={initialSeek}
           onReady={(fn) => { seekToRef.current = fn }}
         />
       )}
 
       {/* Transcript Viewer (lazy-loaded) */}
-      {transcript?.transcript && (
+      {showTranscript && (
         <TranscriptViewer
-          transcript={transcript.transcript}
+          transcript={showTranscript}
           onTextSelected={handleTextSelected}
           highlightText={highlightText}
         />

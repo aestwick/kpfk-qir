@@ -48,6 +48,9 @@ export interface Transcript {
   episode_id: number
   transcript: string | null
   vtt: string | null
+  language: string | null
+  english_transcript: string | null
+  english_vtt: string | null
   created_at: string
 }
 
