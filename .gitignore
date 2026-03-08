@@ -24,7 +24,7 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
-# deploy (lives on VPS only)
-deploy-qir.sh
+# deploy
+# deploy-qir.sh is now tracked for CI/CD
 # temp audio files
 /tmp/qir-audio/

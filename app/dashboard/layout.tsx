@@ -29,16 +29,7 @@ export default function DashboardLayout({
     setSidebarOpen(false)
   }, [pathname])
 
-  // TODO: Re-enable auth once end-to-end testing is complete
-  // To restore: remove the early return below and uncomment the auth check
   useEffect(() => {
-    // Auth bypass: skip session check for local/e2e testing
-    setAuthed(true)
-    setUserEmail('dev@test.local')
-    return
-
-    // Original auth logic — kept intact for re-enabling later
-    /* eslint-disable no-unreachable */
     const supabase = createBrowserClient()
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
@@ -56,7 +47,6 @@ export default function DashboardLayout({
     })
 
     return () => subscription.unsubscribe()
-    /* eslint-enable no-unreachable */
   }, [])
 
   async function handleLogout() {

@@ -3,6 +3,7 @@ import { processIngest } from './ingest'
 import { processTranscribe } from './transcribe'
 import { processSummarize } from './summarize'
 import { processGenerateQir } from './generate-qir'
+import { processAutoRetry } from './auto-retry'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -21,11 +22,17 @@ const ingestQueue = new Queue('ingest', { connection })
 const transcribeQueue = new Queue('transcribe', { connection })
 const summarizeQueue = new Queue('summarize', { connection })
 const generateQirQueue = new Queue('generate-qir', { connection })
+const autoRetryQueue = new Queue('auto-retry', { connection })
 
 // -- Ingest Worker --
 const ingestWorker = new Worker('ingest', processIngest, {
   connection,
   concurrency: 1,
+  defaultJobOptions: {
+    timeout: 5 * 60 * 1000, // 5 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 ingestWorker.on('completed', async (job) => {
@@ -43,6 +50,11 @@ ingestWorker.on('failed', (job, err) => {
 const transcribeWorker = new Worker('transcribe', processTranscribe, {
   connection,
   concurrency: 1, // ffmpeg is heavy, run one at a time
+  defaultJobOptions: {
+    timeout: 10 * 60 * 1000, // 10 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 transcribeWorker.on('completed', async (job) => {
@@ -60,6 +72,11 @@ transcribeWorker.on('failed', (job, err) => {
 const summarizeWorker = new Worker('summarize', processSummarize, {
   connection,
   concurrency: 3,
+  defaultJobOptions: {
+    timeout: 2 * 60 * 1000, // 2 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 summarizeWorker.on('completed', (job) => {
@@ -74,6 +91,11 @@ summarizeWorker.on('failed', (job, err) => {
 const generateQirWorker = new Worker('generate-qir', processGenerateQir, {
   connection,
   concurrency: 1,
+  defaultJobOptions: {
+    timeout: 5 * 60 * 1000, // 5 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 generateQirWorker.on('completed', (job) => {
@@ -84,12 +106,37 @@ generateQirWorker.on('failed', (job, err) => {
   console.error(`[generate-qir] failed:`, err.message)
 })
 
-// -- Hourly Ingest Cron (minute :02) --
+// -- Auto-Retry Worker --
+const autoRetryWorker = new Worker('auto-retry', processAutoRetry, {
+  connection,
+  concurrency: 1,
+  defaultJobOptions: {
+    timeout: 2 * 60 * 1000, // 2 minutes
+    attempts: 1,
+  },
+})
+
+autoRetryWorker.on('completed', async (job) => {
+  const { retried, dead } = job.returnvalue ?? {}
+  console.log(`[auto-retry] completed — ${retried ?? 0} retried, ${dead ?? 0} moved to dead`)
+  if (retried > 0) {
+    await transcribeQueue.add('transcribe-batch', {})
+  }
+})
+autoRetryWorker.on('failed', (job, err) => {
+  console.error(`[auto-retry] failed:`, err.message)
+})
+
+// -- Cron Schedules --
 async function setupCron() {
   // Remove any existing repeatable jobs first
-  const existing = await ingestQueue.getRepeatableJobs()
-  for (const job of existing) {
+  const existingIngest = await ingestQueue.getRepeatableJobs()
+  for (const job of existingIngest) {
     await ingestQueue.removeRepeatableByKey(job.key)
+  }
+  const existingRetry = await autoRetryQueue.getRepeatableJobs()
+  for (const job of existingRetry) {
+    await autoRetryQueue.removeRepeatableByKey(job.key)
   }
 
   await ingestQueue.add(
@@ -99,7 +146,17 @@ async function setupCron() {
       repeat: { pattern: '2 * * * *' }, // minute :02 of every hour
     }
   )
+
+  await autoRetryQueue.add(
+    'auto-retry-cron',
+    {},
+    {
+      repeat: { pattern: '17 */4 * * *' }, // every 4 hours at minute :17
+    }
+  )
+
   console.log('[cron] hourly ingest scheduled at minute :02')
+  console.log('[cron] auto-retry scheduled every 4 hours at minute :17')
 }
 
 setupCron().catch(console.error)
@@ -114,6 +171,7 @@ async function shutdown() {
     transcribeWorker.close(),
     summarizeWorker.close(),
     generateQirWorker.close(),
+    autoRetryWorker.close(),
   ])
   process.exit(0)
 }
