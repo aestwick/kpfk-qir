@@ -37,14 +37,16 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
 
     if (body.action === 'generate') {
-      const { year, quarter } = body
+      const { year, quarter, includedShows, guidance } = body
       if (!year || !quarter) {
         return NextResponse.json({ error: 'year and quarter required' }, { status: 400 })
       }
 
       // Import dynamically to avoid loading worker deps in API context
       const { processGenerateQir } = await import('@/workers/generate-qir')
-      const result = await processGenerateQir({ data: { year, quarter } } as any)
+      const result = await processGenerateQir({
+        data: { year, quarter, includedShows, guidance },
+      } as any)
       return NextResponse.json(result)
     }
 
