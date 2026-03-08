@@ -358,7 +358,7 @@ export default function EpisodesPage() {
                 <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[ep.status] ?? 'bg-gray-100'}`}>{ep.status}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[ep.status] ?? 'bg-gray-100 dark:bg-warm-700'}`}>{ep.status}</span>
                 </td>
                 <td className="px-4 py-3 max-w-[250px] truncate">{ep.headline ?? '—'}</td>
                 <td className="px-4 py-3 max-w-[180px]" data-category-cell>

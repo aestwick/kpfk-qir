@@ -726,7 +726,7 @@ export default function SettingsPage() {
                     <td className="px-3 py-2 text-right">
                       <a
                         href={`/dashboard/episodes?show=${encodeURIComponent(show.key)}`}
-                        className="text-blue-600 hover:underline"
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {show.episode_count}
                       </a>

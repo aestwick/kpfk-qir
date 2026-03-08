@@ -162,7 +162,7 @@ function InlineEditField({
           if (e.key === 'Escape') { setEditValue(value); setEditing(false) }
         }}
         disabled={saving}
-        className="text-sm font-medium w-full border-b border-blue-400 outline-none bg-transparent py-0"
+        className="text-sm font-medium w-full border-b border-blue-400 dark:border-blue-500 outline-none bg-transparent py-0 dark:text-warm-100"
         placeholder={`Enter ${field}...`}
       />
     )
@@ -280,15 +280,15 @@ function CorrectionToolbar({
             <select
               value={scope}
               onChange={(e) => setScope(e.target.value as 'global' | 'episode')}
-              className="text-xs border rounded px-1.5 py-0.5"
+              className="text-xs border rounded px-1.5 py-0.5 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
             >
               <option value="global">All episodes</option>
               <option value="episode">This episode only</option>
             </select>
           </div>
-          {error && <p className="text-[10px] text-red-600">{error}</p>}
+          {error && <p className="text-[10px] text-red-600 dark:text-red-400">{error}</p>}
           <div className="flex justify-end gap-2">
-            <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 px-2 py-1">Cancel</button>
+            <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200 px-2 py-1">Cancel</button>
             <button
               onClick={handleSave}
               disabled={saving}
@@ -499,7 +499,7 @@ export default function EpisodeDetailPage() {
       <div className="flex items-center gap-3">
         <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; Episodes</a>
         <h2 className="text-2xl font-bold">{episode.show_name ?? `Episode ${episode.id}`}</h2>
-        <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[episode.status] ?? 'bg-gray-100'}`}>
+        <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[episode.status] ?? 'bg-gray-100 dark:bg-warm-700'}`}>
           {episode.status}
         </span>
       </div>
@@ -553,21 +553,21 @@ export default function EpisodeDetailPage() {
         <button onClick={() => handleAction('re-summarize')} disabled={actionLoading !== null || !transcript?.transcript} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
           {actionLoading === 're-summarize' ? 'Queuing...' : 'Re-Summarize'}
         </button>
-        <a href={episode.mp3_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
+        <a href={episode.mp3_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300 dark:hover:bg-warm-600">
           Download MP3
         </a>
         {transcript?.transcript && (
-          <button onClick={() => downloadFile(transcript.transcript!, `episode-${id}.txt`, 'text/plain')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
+          <button onClick={() => downloadFile(transcript.transcript!, `episode-${id}.txt`, 'text/plain')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300 dark:hover:bg-warm-600">
             Download Transcript
           </button>
         )}
         {transcript?.vtt && (
-          <button onClick={() => downloadFile(transcript.vtt!, `episode-${id}.vtt`, 'text/vtt')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
+          <button onClick={() => downloadFile(transcript.vtt!, `episode-${id}.vtt`, 'text/vtt')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300 dark:hover:bg-warm-600">
             Download VTT
           </button>
         )}
         {episode.transcript_url && (
-          <a href={episode.transcript_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
+          <a href={episode.transcript_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300 dark:hover:bg-warm-600">
             Legacy Drive Link
           </a>
         )}
@@ -608,12 +608,12 @@ export default function EpisodeDetailPage() {
             <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Compliance Flags</h3>
             <div className="flex items-center gap-2">
               {unresolvedFlags.length > 0 && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">{unresolvedFlags.length} unresolved</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 font-medium">{unresolvedFlags.length} unresolved</span>
               )}
               {resolvedFlags.length > 0 && (
                 <button
                   onClick={() => setShowResolved(!showResolved)}
-                  className="text-xs text-gray-400 hover:text-gray-600"
+                  className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200"
                 >
                   {showResolved ? 'Hide' : 'Show'} {resolvedFlags.length} resolved
                 </button>
@@ -638,7 +638,7 @@ export default function EpisodeDetailPage() {
                     {flag.timestamp_seconds !== null && (
                       <button
                         onClick={() => jumpToTimestamp(flag.timestamp_seconds!, flag.excerpt)}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
+                        className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
                         title="Jump to this timestamp in audio and transcript"
                       >
                         <span>&#9654;</span> Jump to {formatTimestamp(flag.timestamp_seconds)}
@@ -654,7 +654,7 @@ export default function EpisodeDetailPage() {
                             position: { top: rect.bottom + 4, left: rect.left },
                           })
                         }}
-                        className="text-[10px] text-gray-400 hover:text-gray-600 mt-1"
+                        className="text-[10px] text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200 mt-1"
                       >
                         Not a real word — add correction
                       </button>
@@ -673,7 +673,7 @@ export default function EpisodeDetailPage() {
                         <button onClick={() => resolveFlag(flag.id)} className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">
                           Resolve
                         </button>
-                        <button onClick={() => setResolvingFlag(null)} className="text-xs text-gray-400 hover:text-gray-600">
+                        <button onClick={() => setResolvingFlag(null)} className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200">
                           Cancel
                         </button>
                       </div>
@@ -692,17 +692,17 @@ export default function EpisodeDetailPage() {
             {showResolved && resolvedFlags.map((flag) => (
               <div key={flag.id} className="px-4 py-3 opacity-60">
                 <div className="flex items-start gap-3">
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-gray-100 text-gray-500 border-gray-200 shrink-0 mt-0.5 line-through">
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-gray-100 text-gray-500 border-gray-200 dark:bg-warm-700 dark:text-warm-400 dark:border-warm-600 shrink-0 mt-0.5 line-through">
                     {flag.severity}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-500 line-through">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
-                    {flag.resolved_notes && <p className="text-xs text-emerald-600 mt-0.5">Resolved: {flag.resolved_notes}</p>}
-                    {flag.resolved_by && <p className="text-[10px] text-gray-400 mt-0.5">by {flag.resolved_by}</p>}
+                    <p className="text-sm font-medium text-gray-500 dark:text-warm-400 line-through">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
+                    {flag.resolved_notes && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Resolved: {flag.resolved_notes}</p>}
+                    {flag.resolved_by && <p className="text-[10px] text-gray-400 dark:text-warm-500 mt-0.5">by {flag.resolved_by}</p>}
                   </div>
                   <button
                     onClick={() => unresolveFlag(flag.id)}
-                    className="text-[10px] text-gray-400 hover:text-gray-600 shrink-0"
+                    className="text-[10px] text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200 shrink-0"
                   >
                     Undo
                   </button>

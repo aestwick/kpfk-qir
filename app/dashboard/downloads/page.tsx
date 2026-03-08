@@ -147,7 +147,7 @@ export default function DownloadsPage() {
           href={`/${selected.year}/q${selected.quarter}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm text-blue-600 hover:underline"
+          className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
         >
           /{selected.year}/q{selected.quarter}
         </a>
