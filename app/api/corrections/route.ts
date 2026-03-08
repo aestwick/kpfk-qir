@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
             case_sensitive: parts[2]?.toLowerCase() === 'true',
             is_regex: parts[3]?.toLowerCase() === 'true',
             active: true,
-            notes: parts[4] ?? null,
+            notes: parts[4] || null,
+            episode_id: parts[5] ? parseInt(parts[5]) || null : null,
           })
         }
       }
