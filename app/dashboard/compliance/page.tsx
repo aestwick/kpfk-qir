@@ -707,8 +707,12 @@ export default function CompliancePage() {
                 </tr>
               ) : (
                 flags.map((flag) => (
-                  <tr key={flag.id} className={`hover:bg-gray-50 ${selected.has(flag.id) ? 'bg-blue-50' : ''}`}>
-                    <td className="px-4 py-3">
+                  <tr
+                    key={flag.id}
+                    className={`hover:bg-gray-50 cursor-pointer ${selected.has(flag.id) ? 'bg-blue-50' : ''}`}
+                    onClick={() => router.push(`/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`)}
+                  >
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selected.has(flag.id)}
@@ -718,7 +722,8 @@ export default function CompliancePage() {
                     </td>
                     <td className="px-4 py-3">
                       <a
-                        href={`/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`}
+                        href={`/dashboard/shows/${encodeURIComponent(flag.episode_log?.show_key ?? '')}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="text-blue-600 hover:underline font-medium"
                       >
                         {flag.episode_log?.show_name ?? `Episode #${flag.episode_id}`}
@@ -759,7 +764,7 @@ export default function CompliancePage() {
                         <span className="text-xs text-amber-600 font-medium">Open</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       {!flag.resolved && (
                         <>
                           {resolveTarget === flag.id ? (

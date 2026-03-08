@@ -434,5 +434,17 @@ export async function processCompliance(job: Job) {
     }
   }
 
-  return { checked }
+  // Check if more summarized episodes remain after this batch
+  const { count: remainingCount } = await supabaseAdmin
+    .from('episode_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'summarized')
+    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+
+  const remaining = (remainingCount ?? 0) > 0
+  if (remaining) {
+    console.log(`[compliance] ${remainingCount} more summarized episodes — will continue`)
+  }
+
+  return { checked, remaining }
 }

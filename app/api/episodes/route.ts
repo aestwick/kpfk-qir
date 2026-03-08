@@ -24,7 +24,9 @@ export async function GET(request: NextRequest) {
       .range(offset, offset + limit - 1)
 
     if (status) query = query.eq('status', status)
-    if (show) query = query.ilike('show_name', `%${show}%`)
+    const showKey = searchParams.get('show_key')
+    if (showKey) query = query.eq('show_key', showKey)
+    else if (show) query = query.ilike('show_name', `%${show}%`)
     if (category) query = query.eq('issue_category', category)
 
     if (quarter) {
@@ -33,7 +35,8 @@ export async function GET(request: NextRequest) {
       const startMonth = (qNum - 1) * 3
       const start = new Date(parseInt(year), startMonth, 1).toISOString().slice(0, 10)
       const end = new Date(parseInt(year), startMonth + 3, 0).toISOString().slice(0, 10)
-      query = query.gte('air_date', start).lte('air_date', end)
+      // Match episodes by air_date, or by created_at for episodes with null air_date
+      query = query.or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     }
 
     const since = searchParams.get('since')

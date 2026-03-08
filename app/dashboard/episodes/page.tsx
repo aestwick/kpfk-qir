@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
 interface Episode {
   id: number
+  show_key: string
   show_name: string | null
   category: string | null
   status: string
@@ -287,7 +288,7 @@ export default function EpisodesPage() {
       <div className="flex gap-3 flex-wrap">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
           <option value="">All Statuses</option>
-          {['pending', 'transcribed', 'summarized', 'failed', 'unavailable'].map((s) => (
+          {['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
@@ -354,7 +355,15 @@ export default function EpisodesPage() {
                   router.push(`/dashboard/episodes/${ep.id}`)
                 }}
               >
-                <td className="px-4 py-3 max-w-[200px] truncate">{ep.show_name ?? ep.id}</td>
+                <td className="px-4 py-3 max-w-[200px] truncate">
+                  <a
+                    href={`/dashboard/shows/${encodeURIComponent(ep.show_key)}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="hover:text-blue-600 hover:underline"
+                  >
+                    {ep.show_name ?? ep.id}
+                  </a>
+                </td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
                 <td className="px-4 py-3">

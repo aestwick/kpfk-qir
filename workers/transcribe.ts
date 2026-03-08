@@ -306,5 +306,17 @@ export async function processTranscribe(job: Job) {
     }
   }
 
-  return { transcribed }
+  // Check if more pending episodes remain after this batch
+  const { count: remainingCount } = await supabaseAdmin
+    .from('episode_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending')
+    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+
+  const remaining = (remainingCount ?? 0) > 0
+  if (remaining) {
+    console.log(`[transcribe] ${remainingCount} more pending episodes — will continue`)
+  }
+
+  return { transcribed, remaining }
 }
