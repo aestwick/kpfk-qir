@@ -105,6 +105,13 @@ export default function JobsPage() {
   }, [queues])
 
   async function triggerJob(action: string) {
+    // Check if there are episodes to process before queueing
+    const backlogCount = getBacklogCount(action as typeof queueNames[number], queues?.backlog)
+    if (action !== 'ingest' && backlogCount !== null && backlogCount === 0) {
+      toast('success', `No episodes to ${action} this quarter`)
+      return
+    }
+
     setActionLoading(action)
     try {
       const res = await fetch('/api/jobs', {
@@ -113,7 +120,12 @@ export default function JobsPage() {
         body: JSON.stringify({ action }),
       })
       if (res.ok) {
-        toast('success', `${action} job queued`)
+        const msg = backlogCount && backlogCount > 0
+          ? `${queueLabels[action as typeof queueNames[number]] ?? action} job queued — ${backlogCount} episode${backlogCount !== 1 ? 's' : ''} to process`
+          : `${queueLabels[action as typeof queueNames[number]] ?? action} job queued`
+        toast('success', msg)
+        // Refresh data to show updated queue counts
+        await fetchDetails()
       } else {
         const data = await res.json().catch(() => ({}))
         toast('error', data.error ?? `Failed to queue ${action}`)
