@@ -38,15 +38,30 @@ export default function EpisodesPage() {
   // Read initial state from URL params
   const statusFilter = searchParams.get('status') ?? ''
   const quarterFilter = searchParams.get('quarter') ?? ''
-  const showFilter = searchParams.get('show') ?? ''
-  const categoryFilter = searchParams.get('category') ?? ''
+  const showFilterParam = searchParams.get('show') ?? ''
+  const categoryFilterParam = searchParams.get('category') ?? ''
   const sort = searchParams.get('sort') ?? 'created_at'
   const order = searchParams.get('order') ?? 'desc'
   const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
   const limit = 50
 
-  function updateParams(updates: Record<string, string>) {
-    const params = new URLSearchParams(searchParams.toString())
+  // Local state for text inputs (decoupled from URL for responsive typing)
+  const [showFilterLocal, setShowFilterLocal] = useState(showFilterParam)
+  const [categoryFilterLocal, setCategoryFilterLocal] = useState(categoryFilterParam)
+
+  // Sync local state when URL params change externally (e.g. browser back/forward)
+  useEffect(() => { setShowFilterLocal(showFilterParam) }, [showFilterParam])
+  useEffect(() => { setCategoryFilterLocal(categoryFilterParam) }, [categoryFilterParam])
+
+  // Use URL param values for API calls (these are the "committed" filter values)
+  const showFilter = showFilterParam
+  const categoryFilter = categoryFilterParam
+
+  const updateParamsRef = useRef(searchParams)
+  updateParamsRef.current = searchParams
+
+  const updateParams = useCallback((updates: Record<string, string>) => {
+    const params = new URLSearchParams(updateParamsRef.current.toString())
     for (const [key, value] of Object.entries(updates)) {
       if (value) {
         params.set(key, value)
@@ -55,13 +70,31 @@ export default function EpisodesPage() {
       }
     }
     router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-  }
+  }, [router, pathname])
 
   function setStatusFilter(v: string) { updateParams({ status: v, page: '' }) }
   function setQuarterFilter(v: string) { updateParams({ quarter: v, page: '' }) }
-  function setShowFilter(v: string) { updateParams({ show: v, page: '' }) }
-  function setCategoryFilter(v: string) { updateParams({ category: v, page: '' }) }
   function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
+
+  // Debounce text filter updates to URL
+  const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const categoryDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+
+  function setShowFilter(v: string) {
+    setShowFilterLocal(v)
+    clearTimeout(showDebounceRef.current)
+    showDebounceRef.current = setTimeout(() => {
+      updateParams({ show: v, page: '' })
+    }, 350)
+  }
+
+  function setCategoryFilter(v: string) {
+    setCategoryFilterLocal(v)
+    clearTimeout(categoryDebounceRef.current)
+    categoryDebounceRef.current = setTimeout(() => {
+      updateParams({ category: v, page: '' })
+    }, 350)
+  }
 
   const fetchEpisodes = useCallback(async () => {
     setLoading(true)
@@ -185,13 +218,13 @@ export default function EpisodesPage() {
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }} className="border rounded px-2 py-1.5 text-sm">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
           <option value="">All Statuses</option>
           {['pending', 'transcribed', 'summarized', 'failed', 'unavailable'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <select value={quarterFilter} onChange={(e) => { setQuarterFilter(e.target.value); setPage(1) }} className="border rounded px-2 py-1.5 text-sm">
+        <select value={quarterFilter} onChange={(e) => setQuarterFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm">
           <option value="">All Quarters</option>
           {quarterOptions.map((q) => (
             <option key={q} value={q}>{q}</option>
@@ -201,15 +234,15 @@ export default function EpisodesPage() {
           ref={showFilterRef}
           type="text"
           placeholder="Filter by show name... (press /)"
-          value={showFilter}
-          onChange={(e) => { setShowFilter(e.target.value); setPage(1) }}
+          value={showFilterLocal}
+          onChange={(e) => setShowFilter(e.target.value)}
           className="border rounded px-2 py-1.5 text-sm w-48"
         />
         <input
           type="text"
           placeholder="Filter by category..."
-          value={categoryFilter}
-          onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
+          value={categoryFilterLocal}
+          onChange={(e) => setCategoryFilter(e.target.value)}
           className="border rounded px-2 py-1.5 text-sm w-48"
         />
       </div>
