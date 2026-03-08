@@ -1,6 +1,17 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
+
+/* ─── lazy-loaded report components ─── */
+const FullReportView = dynamic(() => import('@/app/components/qir-report-view').then(m => ({ default: m.FullReportView })), {
+  loading: () => <div className="bg-white rounded-lg shadow p-6"><div className="h-48 bg-gray-100 rounded animate-pulse" /></div>,
+  ssr: false,
+})
+const CuratedEntriesView = dynamic(() => import('@/app/components/qir-report-view').then(m => ({ default: m.CuratedEntriesView })), {
+  loading: () => <div className="h-48 bg-gray-100 rounded animate-pulse" />,
+  ssr: false,
+})
 
 interface QirEntry {
   episode_id: number
@@ -327,104 +338,18 @@ export default function GenerateQirPage() {
           </div>
 
           {view === 'full' ? (
-            <div className="bg-white rounded-lg shadow p-6">
-              <pre className="whitespace-pre-wrap text-sm font-mono text-gray-800 max-h-[600px] overflow-y-auto">
-                {activeDraft.full_text ?? 'No full report available'}
-              </pre>
-            </div>
+            <FullReportView text={activeDraft.full_text} />
           ) : (
-            <div className="space-y-6">
-              {Object.entries(curatedGrouped).map(([category, entries]) => (
-                <div key={category} className="bg-white rounded-lg shadow">
-                  <div className="px-4 py-3 border-b bg-gray-50">
-                    <h4 className="text-sm font-semibold uppercase text-gray-600">
-                      {category}
-                      <span className="ml-2 text-gray-400 font-normal">
-                        ({entries.length} entries)
-                      </span>
-                    </h4>
-                  </div>
-                  <div className="divide-y">
-                    {entries.map((entry) => (
-                      <div key={entry.episode_id} className="px-4 py-3">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium">
-                              {entry.show_name}
-                              {entry.host && (
-                                <span className="text-gray-500 font-normal">
-                                  {' '}
-                                  — {entry.host}
-                                </span>
-                              )}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {entry.air_date} | {entry.start_time} |{' '}
-                              {entry.duration} min
-                              {entry.guest && ` | Guest: ${entry.guest}`}
-                            </p>
-                            <p className="text-sm font-medium mt-1">
-                              {entry.headline}
-                            </p>
-                            {editingEntry === entry.episode_id ? (
-                              <div className="mt-1">
-                                <textarea
-                                  value={editSummary}
-                                  onChange={(e) => setEditSummary(e.target.value)}
-                                  className="w-full border rounded p-2 text-sm"
-                                  rows={4}
-                                />
-                                <div className="flex gap-2 mt-1">
-                                  <button
-                                    onClick={() =>
-                                      handleSaveEditEntry(entry.episode_id)
-                                    }
-                                    className="text-xs px-2 py-1 bg-blue-600 text-white rounded"
-                                  >
-                                    Save
-                                  </button>
-                                  <button
-                                    onClick={() => setEditingEntry(null)}
-                                    className="text-xs px-2 py-1 border rounded"
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="text-sm text-gray-700 mt-1">
-                                {entry.summary}
-                              </p>
-                            )}
-                          </div>
-                          {activeDraft.status === 'draft' && (
-                            <div className="flex gap-1 ml-3 shrink-0">
-                              <button
-                                onClick={() => {
-                                  setEditingEntry(entry.episode_id)
-                                  setEditSummary(entry.summary)
-                                }}
-                                className="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleRemoveEntry(entry.episode_id)
-                                }
-                                className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <CuratedEntriesView
+              groupedEntries={curatedGrouped}
+              isDraft={activeDraft.status === 'draft'}
+              editingEntry={editingEntry}
+              editSummary={editSummary}
+              onSetEditingEntry={setEditingEntry}
+              onSetEditSummary={setEditSummary}
+              onSaveEdit={handleSaveEditEntry}
+              onRemoveEntry={handleRemoveEntry}
+            />
           )}
         </div>
       )}
