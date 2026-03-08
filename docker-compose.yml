@@ -1,7 +1,7 @@
 version: "3.8"
 services:
   qir-app:
-    build: .
+    image: ghcr.io/aestwick/kpfk-qir:latest
     container_name: qir-app
     restart: unless-stopped
     command: ["npm", "run", "start"]
@@ -29,7 +29,7 @@ services:
       - default
 
   qir-worker:
-    build: .
+    image: ghcr.io/aestwick/kpfk-qir:latest
     container_name: qir-worker
     restart: unless-stopped
     command: ["npm", "run", "workers"]
