@@ -450,8 +450,7 @@ export default function EpisodeDetailPage() {
       `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
       `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
       `MP3: ${episode?.mp3_url ?? 'Unknown'}`,
-      `Review: ${window.location.origin}/dashboard/episodes/${id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
-      flag.timestamp_seconds != null ? `Timestamp: ${formatTimestamp(flag.timestamp_seconds)}` : null,
+      flag.timestamp_seconds != null ? `Violation at: ${formatTimestamp(flag.timestamp_seconds)}` : null,
       `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
       flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
     ].filter(Boolean).join('\n')
@@ -566,8 +565,22 @@ export default function EpisodeDetailPage() {
 
       {/* Discrepancy notes */}
       {episode.compliance_report && (
-        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300">
-          <strong>Discrepancy:</strong> {episode.compliance_report}
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300 flex items-start justify-between gap-2">
+          <span><strong>Discrepancy:</strong> {episode.compliance_report}</span>
+          <button
+            onClick={async () => {
+              await fetch(`/api/episodes/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ compliance_report: null }),
+              })
+              fetchEpisode()
+            }}
+            className="text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 shrink-0 text-xs underline"
+            title="Dismiss this discrepancy"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
