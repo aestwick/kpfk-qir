@@ -80,6 +80,11 @@ async function processShow(show: { key: string; show_name: string; category: str
 
       if (!mp3Url) continue
 
+      const rawTitle = item.title
+      const title = typeof rawTitle === 'object' && rawTitle?.__cdata
+        ? String(rawTitle.__cdata).trim()
+        : rawTitle ? String(rawTitle).trim() : null
+
       const pubDate = item.pubDate || null
       const itunesDuration =
         item['itunes:duration'] || item.duration || null
@@ -143,6 +148,7 @@ async function processShow(show: { key: string; show_name: string; category: str
           show_key: show.key,
           show_name: show.show_name,
           category: show.category,
+          title,
           date: dateInfo.date,
           start_time: dateInfo.startTime,
           end_time: dateInfo.endTime,
