@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonBlock } from '@/app/components/skeleton'
 
@@ -64,6 +64,13 @@ export default function ActivityPage() {
   const [typeFilter, setTypeFilter] = useState(urlType)
   const [showSearch, setShowSearch] = useState(urlShow)
 
+  // Sync local state when URL params change externally (browser back/forward)
+  useEffect(() => { setTypeFilter(urlType) }, [urlType])
+  useEffect(() => { setShowSearch(urlShow) }, [urlShow])
+  useEffect(() => {
+    if (urlRange) setRange(parseInt(urlRange))
+  }, [urlRange])
+
   // Persist filters to URL
   const updateUrl = useCallback((newRange: number, newType: string, newShow: string) => {
     const params = new URLSearchParams()
@@ -73,6 +80,9 @@ export default function ActivityPage() {
     const qs = params.toString()
     router.replace(`/dashboard/activity${qs ? `?${qs}` : ''}`, { scroll: false })
   }, [router])
+
+  // Debounce show search URL updates
+  const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   const fetchActivity = useCallback(async () => {
     setLoading(true)
@@ -177,7 +187,10 @@ export default function ActivityPage() {
 
   function handleShowChange(value: string) {
     setShowSearch(value)
-    updateUrl(range, typeFilter, value)
+    clearTimeout(showDebounceRef.current)
+    showDebounceRef.current = setTimeout(() => {
+      updateUrl(range, typeFilter, value)
+    }, 350)
   }
 
   // Render right-column metadata based on episode status
