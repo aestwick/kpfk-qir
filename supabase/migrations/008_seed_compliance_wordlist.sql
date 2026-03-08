@@ -43,13 +43,10 @@ insert into compliance_wordlist (word, severity) values
   ('wetback',       'critical'),
   ('chink',         'critical'),
   ('raghead',       'critical'),
-  ('towelhead',     'critical'),
+  ('towelhead',     'critical')
 
-  -- Sexual — FCC indecency standard (graphic/explicit references)
-  ('blowjob',       'critical'),
-  ('handjob',       'critical'),
-  ('jerkoff',       'critical'),
-  ('jackoff',       'critical'),
-  ('cumshot',       'critical')
+  -- Sexual/explicit terms (blowjob, handjob, etc.) are intentionally excluded
+  -- from the wordlist — they are context-dependent and better handled by the
+  -- AI compliance prompt which can distinguish health education from indecency
 
 on conflict do nothing;
