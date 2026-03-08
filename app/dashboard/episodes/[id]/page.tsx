@@ -565,8 +565,22 @@ export default function EpisodeDetailPage() {
 
       {/* Discrepancy notes */}
       {episode.compliance_report && (
-        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300">
-          <strong>Discrepancy:</strong> {episode.compliance_report}
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300 flex items-start justify-between gap-2">
+          <span><strong>Discrepancy:</strong> {episode.compliance_report}</span>
+          <button
+            onClick={async () => {
+              await fetch(`/api/episodes/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ compliance_report: null }),
+              })
+              fetchEpisode()
+            }}
+            className="text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 shrink-0 text-xs underline"
+            title="Dismiss this discrepancy"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

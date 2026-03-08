@@ -79,7 +79,7 @@ export async function PATCH(
     }
 
     // Generic update (edit summary, issue_category, host, guest, etc.)
-    const allowedFields = ['summary', 'issue_category', 'headline', 'host', 'guest', 'status', 'error_message']
+    const allowedFields = ['summary', 'issue_category', 'headline', 'host', 'guest', 'status', 'error_message', 'air_date', 'compliance_report']
     const safeUpdates: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(updates)) {
       if (allowedFields.includes(key)) {
