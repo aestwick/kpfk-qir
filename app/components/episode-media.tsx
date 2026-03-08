@@ -55,6 +55,8 @@ export function AudioPlayerWithCaptions({
       audioRef.current.currentTime = seconds
       audioRef.current.play()
     }
+    // Update state immediately so captions highlight without waiting for onTimeUpdate
+    setCurrentTime(seconds)
   }, [])
 
   // Register seekTo callback with parent (replaces forwardRef which doesn't work through next/dynamic)
