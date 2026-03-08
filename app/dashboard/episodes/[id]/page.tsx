@@ -1,8 +1,19 @@
 'use client'
 
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
+
+/* ─── lazy-loaded media components ─── */
+const AudioPlayerWithCaptions = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.AudioPlayerWithCaptions })), {
+  loading: () => <div className="bg-white rounded-lg shadow p-4"><div className="h-32 bg-gray-100 rounded animate-pulse" /></div>,
+  ssr: false,
+})
+const TranscriptViewer = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.TranscriptViewer })), {
+  loading: () => <div className="bg-white rounded-lg shadow p-4"><div className="h-48 bg-gray-100 rounded animate-pulse" /></div>,
+  ssr: false,
+})
 
 interface Episode {
   id: number
@@ -36,29 +47,6 @@ interface Transcript {
   vtt: string | null
 }
 
-interface VttCue {
-  start: number
-  end: number
-  text: string
-}
-
-function parseVtt(vtt: string): VttCue[] {
-  const cues: VttCue[] = []
-  const blocks = vtt.split(/\n\n+/)
-  for (const block of blocks) {
-    const lines = block.trim().split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const match = lines[i].match(/(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[.,](\d{3})/)
-      if (match) {
-        const start = +match[1] * 3600 + +match[2] * 60 + +match[3] + +match[4] / 1000
-        const end = +match[5] * 3600 + +match[6] * 60 + +match[7] + +match[8] / 1000
-        const text = lines.slice(i + 1).join(' ').trim()
-        if (text) cues.push({ start, end, text })
-      }
-    }
-  }
-  return cues
-}
 
 const issueCategories = [
   'Civil Rights / Social Justice',
@@ -89,10 +77,6 @@ export default function EpisodeDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [editSummary, setEditSummary] = useState('')
   const [editCategory, setEditCategory] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [currentTime, setCurrentTime] = useState(0)
-  const audioRef = useRef<HTMLAudioElement>(null)
-  const activeCueRef = useRef<HTMLDivElement>(null)
 
   const fetchEpisode = useCallback(async () => {
     const res = await fetch(`/api/episodes/${id}`)
@@ -164,30 +148,6 @@ export default function EpisodeDetailPage() {
     </div>
   )
   if (!episode) return <p className="text-red-600">Episode not found</p>
-
-  const vttCues = transcript?.vtt ? parseVtt(transcript.vtt) : []
-  const activeCueIdx = vttCues.findIndex((c) => currentTime >= c.start && currentTime < c.end)
-
-  const transcriptText = transcript?.transcript ?? ''
-
-  // Highlight search matches safely (no dangerouslySetInnerHTML)
-  function renderTranscript() {
-    if (!searchQuery) return <span>{transcriptText}</span>
-    const escaped = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regex = new RegExp(`(${escaped})`, 'gi')
-    const parts = transcriptText.split(regex)
-    return (
-      <>
-        {parts.map((part, i) =>
-          regex.test(part) ? (
-            <mark key={i} className="bg-yellow-200">{part}</mark>
-          ) : (
-            <span key={i}>{part}</span>
-          )
-        )}
-      </>
-    )
-  }
 
   return (
     <div className="space-y-6">
@@ -294,61 +254,14 @@ export default function EpisodeDetailPage() {
         </div>
       </div>
 
-      {/* VTT Audio Player */}
+      {/* VTT Audio Player (lazy-loaded) */}
       {transcript?.vtt && (
-        <div className="bg-white rounded-lg shadow p-4 space-y-3">
-          <h3 className="font-semibold text-sm text-gray-500 uppercase">Audio Player with Captions</h3>
-          <audio
-            ref={audioRef}
-            src={episode.mp3_url}
-            controls
-            className="w-full"
-            onTimeUpdate={() => {
-              if (audioRef.current) setCurrentTime(audioRef.current.currentTime)
-            }}
-          />
-          <div className="max-h-48 overflow-y-auto border rounded p-2 text-sm space-y-1">
-            {vttCues.map((cue, i) => (
-              <div
-                key={i}
-                ref={i === activeCueIdx ? activeCueRef : undefined}
-                className={`px-2 py-1 rounded cursor-pointer ${
-                  i === activeCueIdx ? 'bg-blue-100 text-blue-900 font-medium' : 'hover:bg-gray-100'
-                }`}
-                onClick={() => {
-                  if (audioRef.current) {
-                    audioRef.current.currentTime = cue.start
-                    audioRef.current.play()
-                  }
-                }}
-              >
-                <span className="text-xs text-gray-400 mr-2">
-                  {Math.floor(cue.start / 60)}:{String(Math.floor(cue.start % 60)).padStart(2, '0')}
-                </span>
-                {cue.text}
-              </div>
-            ))}
-          </div>
-        </div>
+        <AudioPlayerWithCaptions mp3Url={episode.mp3_url} vtt={transcript.vtt} />
       )}
 
-      {/* Transcript Viewer */}
+      {/* Transcript Viewer (lazy-loaded) */}
       {transcript?.transcript && (
-        <div className="bg-white rounded-lg shadow p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-sm text-gray-500 uppercase">Transcript</h3>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search transcript..."
-              className="border rounded px-2 py-1 text-sm w-64"
-            />
-          </div>
-          <div className="max-h-96 overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap">
-            {renderTranscript()}
-          </div>
-        </div>
+        <TranscriptViewer transcript={transcript.transcript} />
       )}
     </div>
   )

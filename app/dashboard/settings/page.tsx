@@ -1,8 +1,15 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
+
+/* ─── lazy-loaded corrections component ─── */
+const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-corrections').then(m => ({ default: m.TranscriptCorrections })), {
+  loading: () => <div className="bg-white rounded-lg shadow p-4"><div className="h-48 bg-gray-100 rounded animate-pulse" /></div>,
+  ssr: false,
+})
 
 interface Correction {
   id: number
@@ -40,10 +47,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState<string | null>(null)
   const [corrections, setCorrections] = useState<Correction[]>([])
   const [loading, setLoading] = useState(true)
-  const [correctionForm, setCorrectionForm] = useState({ wrong: '', correct: '', case_sensitive: false, is_regex: false, notes: '' })
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [testInput, setTestInput] = useState('')
-  const [testOutput, setTestOutput] = useState('')
 
   const fetchAll = useCallback(async () => {
     const [settingsRes, correctionsRes] = await Promise.all([
@@ -99,37 +102,35 @@ export default function SettingsPage() {
     setSaving(null)
   }
 
-  async function saveCorrection() {
-    if (!correctionForm.wrong || !correctionForm.correct) return
+  async function handleSaveCorrection(
+    form: { wrong: string; correct: string; case_sensitive: boolean; is_regex: boolean; notes: string },
+    editingId: number | null
+  ) {
     try {
       const res = editingId
         ? await fetch('/api/corrections', {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: editingId, ...correctionForm }),
+            body: JSON.stringify({ id: editingId, ...form }),
           })
         : await fetch('/api/corrections', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(correctionForm),
+            body: JSON.stringify(form),
           })
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        toast('error',data.error ?? 'Failed to save correction')
+        toast('error', data.error ?? 'Failed to save correction')
         return
       }
     } catch {
-      toast('error','Network error: could not reach server')
+      toast('error', 'Network error: could not reach server')
       return
     }
-
-    setCorrectionForm({ wrong: '', correct: '', case_sensitive: false, is_regex: false, notes: '' })
-    setEditingId(null)
     fetchAll()
   }
 
-  async function toggleCorrection(id: number, active: boolean) {
+  async function handleToggleCorrection(id: number, active: boolean) {
     try {
       const res = await fetch('/api/corrections', {
         method: 'PATCH',
@@ -138,60 +139,30 @@ export default function SettingsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        toast('error',data.error ?? 'Failed to toggle correction')
+        toast('error', data.error ?? 'Failed to toggle correction')
         return
       }
     } catch {
-      toast('error','Network error: could not reach server')
+      toast('error', 'Network error: could not reach server')
       return
     }
     fetchAll()
   }
 
-  async function deleteCorrection(id: number) {
+  async function handleDeleteCorrection(id: number) {
     if (!confirm('Delete this correction?')) return
     try {
       const res = await fetch(`/api/corrections?id=${id}`, { method: 'DELETE' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        toast('error',data.error ?? 'Failed to delete correction')
+        toast('error', data.error ?? 'Failed to delete correction')
         return
       }
     } catch {
-      toast('error','Network error: could not reach server')
+      toast('error', 'Network error: could not reach server')
       return
     }
     fetchAll()
-  }
-
-  function startEdit(c: Correction) {
-    setEditingId(c.id)
-    setCorrectionForm({
-      wrong: c.wrong,
-      correct: c.correct,
-      case_sensitive: c.case_sensitive,
-      is_regex: c.is_regex,
-      notes: c.notes ?? '',
-    })
-  }
-
-  function testCorrections() {
-    let output = testInput
-    for (const c of corrections.filter((x) => x.active)) {
-      try {
-        if (c.is_regex) {
-          const flags = c.case_sensitive ? 'g' : 'gi'
-          output = output.replace(new RegExp(c.wrong, flags), c.correct)
-        } else if (c.case_sensitive) {
-          output = output.split(c.wrong).join(c.correct)
-        } else {
-          output = output.replace(new RegExp(c.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), c.correct)
-        }
-      } catch {
-        // skip invalid regex
-      }
-    }
-    setTestOutput(output)
   }
 
   if (loading) return (
@@ -247,144 +218,13 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {/* Transcript Corrections */}
-      <div className="bg-white rounded-lg shadow p-4 space-y-4">
-        <h3 className="font-semibold text-sm text-gray-500 uppercase">Transcript Corrections</h3>
-
-        {/* Add/Edit Form */}
-        <div className="border rounded p-3 space-y-3 bg-gray-50">
-          <p className="text-sm font-medium">{editingId ? 'Edit Correction' : 'Add Correction'}</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Wrong (what Whisper outputs)</label>
-              <input
-                type="text"
-                value={correctionForm.wrong}
-                onChange={(e) => setCorrectionForm({ ...correctionForm, wrong: e.target.value })}
-                className="w-full border rounded px-2 py-1.5 text-sm"
-                placeholder="e.g. Kay PFK"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">Correct (what it should be)</label>
-              <input
-                type="text"
-                value={correctionForm.correct}
-                onChange={(e) => setCorrectionForm({ ...correctionForm, correct: e.target.value })}
-                className="w-full border rounded px-2 py-1.5 text-sm"
-                placeholder="e.g. KPFK"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Notes (optional)</label>
-            <input
-              type="text"
-              value={correctionForm.notes}
-              onChange={(e) => setCorrectionForm({ ...correctionForm, notes: e.target.value })}
-              className="w-full border rounded px-2 py-1.5 text-sm"
-              placeholder="e.g. station call letters"
-            />
-          </div>
-          <div className="flex gap-4 items-center">
-            <label className="flex items-center gap-1.5 text-sm">
-              <input
-                type="checkbox"
-                checked={correctionForm.case_sensitive}
-                onChange={(e) => setCorrectionForm({ ...correctionForm, case_sensitive: e.target.checked })}
-              />
-              Case sensitive
-            </label>
-            <label className="flex items-center gap-1.5 text-sm">
-              <input
-                type="checkbox"
-                checked={correctionForm.is_regex}
-                onChange={(e) => setCorrectionForm({ ...correctionForm, is_regex: e.target.checked })}
-              />
-              Regex
-            </label>
-            <div className="flex-1" />
-            {editingId && (
-              <button
-                onClick={() => { setEditingId(null); setCorrectionForm({ wrong: '', correct: '', case_sensitive: false, is_regex: false, notes: '' }) }}
-                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900"
-              >
-                Cancel
-              </button>
-            )}
-            <button
-              onClick={saveCorrection}
-              className="px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              {editingId ? 'Update' : 'Add'}
-            </button>
-          </div>
-        </div>
-
-        {/* Corrections Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium">Wrong</th>
-                <th className="text-left px-3 py-2 font-medium">Correct</th>
-                <th className="text-left px-3 py-2 font-medium">Flags</th>
-                <th className="text-left px-3 py-2 font-medium">Notes</th>
-                <th className="text-left px-3 py-2 font-medium">Active</th>
-                <th className="text-right px-3 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {corrections.length === 0 ? (
-                <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">No corrections yet</td></tr>
-              ) : corrections.map((c) => (
-                <tr key={c.id} className={c.active ? '' : 'opacity-50'}>
-                  <td className="px-3 py-2 font-mono">{c.wrong}</td>
-                  <td className="px-3 py-2 font-mono">{c.correct}</td>
-                  <td className="px-3 py-2">
-                    {c.case_sensitive && <span className="text-xs bg-gray-100 px-1 rounded mr-1">CS</span>}
-                    {c.is_regex && <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded">Regex</span>}
-                  </td>
-                  <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate">{c.notes ?? ''}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      onClick={() => toggleCorrection(c.id, c.active)}
-                      className={`text-xs px-2 py-0.5 rounded ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
-                    >
-                      {c.active ? 'On' : 'Off'}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <button onClick={() => startEdit(c)} className="text-xs text-blue-600 hover:underline mr-2">Edit</button>
-                    <button onClick={() => deleteCorrection(c.id)} className="text-xs text-red-600 hover:underline">Delete</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Test Area */}
-        <div className="border rounded p-3 space-y-2 bg-gray-50">
-          <p className="text-sm font-medium">Test Corrections</p>
-          <textarea
-            value={testInput}
-            onChange={(e) => setTestInput(e.target.value)}
-            placeholder="Paste sample text here to test corrections..."
-            rows={3}
-            className="w-full border rounded px-2 py-1.5 text-sm"
-          />
-          <button
-            onClick={testCorrections}
-            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Test
-          </button>
-          {testOutput && (
-            <div className="bg-white border rounded p-2 text-sm whitespace-pre-wrap">{testOutput}</div>
-          )}
-        </div>
-      </div>
+      {/* Transcript Corrections (lazy-loaded) */}
+      <TranscriptCorrections
+        corrections={corrections}
+        onSaveCorrection={handleSaveCorrection}
+        onToggleCorrection={handleToggleCorrection}
+        onDeleteCorrection={handleDeleteCorrection}
+      />
     </div>
   )
 }
