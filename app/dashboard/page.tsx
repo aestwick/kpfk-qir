@@ -77,6 +77,7 @@ const FLAG_LABELS: Record<string, string> = {
   technical: 'Technical',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
+  indecency: 'Indecency',
 }
 
 /* ─── helpers ─── */

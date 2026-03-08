@@ -42,6 +42,7 @@ export async function getComplianceChecksEnabled(): Promise<Record<string, boole
     technical: true,
     payola_plugola: true,
     sponsor_id: true,
+    indecency: true,
   }
 }
 

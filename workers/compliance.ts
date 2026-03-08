@@ -262,7 +262,7 @@ async function runAiComplianceCheck(
 
   const aiFlags: ComplianceFlagInsert[] = (parsed.flags ?? []).map((f) => ({
     episode_id: episodeId,
-    flag_type: f.type === 'payola_plugola' || f.type === 'sponsor_id' ? f.type : 'payola_plugola',
+    flag_type: ['payola_plugola', 'sponsor_id', 'indecency'].includes(f.type) ? f.type : 'payola_plugola',
     severity: f.severity ?? 'warning',
     excerpt: f.excerpt?.slice(0, 200) ?? null,
     timestamp_seconds: null,
@@ -320,7 +320,7 @@ export async function processCompliance(job: Job) {
   const wordlist = (wordlistData ?? []).map((w) => ({ word: w.word, severity: w.severity }))
 
   // Set up OpenAI if AI checks are enabled
-  const needsAi = checksEnabled.payola_plugola || checksEnabled.sponsor_id
+  const needsAi = checksEnabled.payola_plugola || checksEnabled.sponsor_id || checksEnabled.indecency
   let openai: OpenAI | null = null
   if (needsAi) {
     const openaiKey = process.env.OPENAI_API_KEY

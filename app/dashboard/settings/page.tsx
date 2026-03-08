@@ -754,6 +754,7 @@ export default function SettingsPage() {
               { key: 'technical', label: 'Technical Issues', cost: 'Free' },
               { key: 'payola_plugola', label: 'Payola/Plugola', cost: '~$0.002/ep' },
               { key: 'sponsor_id', label: 'Sponsor ID', cost: '~$0.002/ep' },
+              { key: 'indecency', label: 'Indecency/Sexual Content', cost: '~$0.002/ep' },
             ].map(({ key, label, cost }) => (
               <button
                 key={key}
