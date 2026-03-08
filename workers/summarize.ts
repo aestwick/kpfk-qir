@@ -157,6 +157,10 @@ ${transcriptText}`
         throw new Error(`Invalid JSON from OpenAI: ${content.slice(0, 200)}`)
       }
 
+      if (!parsed.headline || !parsed.summary) {
+        throw new Error(`OpenAI returned incomplete summary (missing headline or summary): ${content.slice(0, 200)}`)
+      }
+
       // Update episode with summary data
       await supabaseAdmin
         .from('episode_log')

@@ -107,57 +107,37 @@ New `/dashboard/activity` page shows a full historical timeline of pipeline even
 
 ---
 
-## Known Issues (Not Yet Fixed)
+## Known Issues — Fixed ✅
 
-Pre-existing bugs and code smells discovered during development. None are blockers for production use, but should be addressed over time.
+All known issues documented during development have been resolved.
 
-### Dashboard `workersRunning` check is always true
+### Dashboard `workersRunning` check is always true ✅
 
-**File:** `app/dashboard/page.tsx:735`
+Fixed `>= 0` to `> 0` in `app/dashboard/page.tsx`. Badge now correctly shows "idle" (red) when no workers are active.
 
-The condition `queues.ingest.active + queues.transcribe.active + queues.summarize.active + queues.compliance.active >= 0` is always true — any sum of non-negative integers is `>= 0`. The "Workers: running" badge never turns red, making it useless as a health indicator. Should use `> 0` or a proper worker heartbeat check.
+### SSE `: connected` comment is misleading ✅
 
-### SSE `: connected` comment is misleading
+Changed from SSE comment (`: connected`) to a proper named event (`event: connected\ndata: {}\n\n`) in `app/api/events/route.ts`.
 
-**File:** `app/api/events/route.ts:55`
+### Invalid regex in transcript corrections can crash transcription worker ✅
 
-The SSE stream sends `: connected\n\n` as its first message. In SSE protocol, lines starting with `:` are comments (ignored by `EventSource`). The label "connected" suggests it's a signal the client can act on, but clients never see it. Not a bug — just confusing for anyone reading the code. If a client-visible connection signal is needed, it should be sent as `event: connected\ndata: {}\n\n` instead.
+Added try/catch around `new RegExp()` in `workers/transcribe.ts`. Invalid patterns are now logged and skipped instead of crashing the worker.
 
-### Invalid regex in transcript corrections can crash transcription worker
+### No schema validation on OpenAI JSON responses ✅
 
-**File:** `workers/transcribe.ts:56-72`
+Added validation in `workers/summarize.ts` (requires headline + summary) and `workers/generate-qir.ts` (requires non-empty object). Jobs now fail with descriptive errors instead of storing empty data.
 
-`applyCorrections()` creates `RegExp` from user-supplied patterns without a try/catch around `new RegExp()`. A malformed regex correction (e.g., `[invalid(regex`) will throw and crash the transcription job. Should wrap in try/catch and skip or warn on invalid patterns.
+### N+1 query in settings API ✅
 
-### No schema validation on OpenAI JSON responses
+Replaced full-table scan with `get_episode_counts_by_show()` RPC function (migration `007_episode_counts_rpc.sql`) that uses `GROUP BY` at the database level.
 
-**Files:** `workers/summarize.ts:154-157`, `workers/generate-qir.ts:113-115`
+### No upper bound on episodes pagination limit ✅
 
-When OpenAI returns JSON, the code catches parse errors but doesn't validate that the parsed object matches the expected schema. OpenAI could return all-null fields that pass without flagging, leading to empty data in the database.
+Added `Math.min(..., 500)` cap on the `limit` query param in `app/api/episodes/route.ts`.
 
-### N+1 query in settings API
+### Hardcoded FCC issue categories in multiple files ✅
 
-**File:** `app/api/settings/route.ts:20-28`
-
-Fetching show episode counts loads all `episode_log` rows with `select('show_key')` and counts in memory. Should use a `GROUP BY` query instead. Will degrade as the episode table grows.
-
-### No upper bound on episodes pagination limit
-
-**File:** `app/api/episodes/route.ts:16`
-
-The `limit` query param is parsed from user input with no max cap. A request like `?limit=1000000` forces a massive database query. Should clamp to a reasonable maximum (e.g., 500).
-
-### Hardcoded FCC issue categories in multiple files
-
-**Files:** `app/dashboard/generate/page.tsx:49-53`, `workers/generate-qir.ts:40-50`, `app/dashboard/page.tsx:307-311`
-
-Issue categories are duplicated across UI and worker code instead of being fetched from the `qir_settings` table. Category changes require code edits and redeployment.
-
-### Silent error swallowing in compliance worker
-
-**File:** `workers/compliance.ts:258`
-
-One catch block silently continues without logging, unlike all other error handlers in the workers. Should at minimum log a warning.
+Dashboard API (`app/api/dashboard/route.ts`) now uses `getIssueCategories()` from `lib/settings.ts`. Generate page (`app/dashboard/generate/page.tsx`) fetches categories from settings API. `workers/generate-qir.ts` already used `getSetting('issue_categories')`.
 
 ---
 

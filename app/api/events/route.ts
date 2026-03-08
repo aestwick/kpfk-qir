@@ -52,7 +52,7 @@ export async function GET() {
         controller.close()
       }, 5 * 60 * 1000)
 
-      controller.enqueue(encoder.encode(': connected\n\n'))
+      controller.enqueue(encoder.encode('event: connected\ndata: {}\n\n'))
     },
     cancel() {
       // Clean up when client disconnects

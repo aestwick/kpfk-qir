@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const sort = searchParams.get('sort') ?? 'created_at'
     const order = searchParams.get('order') ?? 'desc'
     const page = parseInt(searchParams.get('page') ?? '1')
-    const limit = parseInt(searchParams.get('limit') ?? '50')
+    const limit = Math.min(parseInt(searchParams.get('limit') ?? '50') || 50, 500)
     const offset = (page - 1) * limit
     const format = searchParams.get('format')
 

@@ -46,7 +46,7 @@ interface ValidationCheck {
   detail: string
 }
 
-const ALL_CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   'Civil Rights / Social Justice', 'Immigration', 'Economy / Labor',
   'Environment / Climate', 'Government / Politics', 'Health',
   'International Affairs / War & Peace', 'Arts & Culture',
@@ -77,7 +77,7 @@ function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
   return grouped
 }
 
-function runValidation(draft: QirDraft, complianceSummary: Record<string, { count: number; critical: number }>): ValidationCheck[] {
+function runValidation(draft: QirDraft, complianceSummary: Record<string, { count: number; critical: number }>, allCategories: string[]): ValidationCheck[] {
   const checks: ValidationCheck[] = []
   const entries = draft.curated_entries ?? []
   const grouped = groupByCategory(entries)
@@ -93,9 +93,9 @@ function runValidation(draft: QirDraft, complianceSummary: Record<string, { coun
   }
 
   // 2. Category coverage
-  const missingCats = ALL_CATEGORIES.filter(c => !coveredCategories.includes(c))
+  const missingCats = allCategories.filter(c => !coveredCategories.includes(c))
   if (missingCats.length === 0) {
-    checks.push({ label: 'Category coverage', status: 'pass', detail: `All ${ALL_CATEGORIES.length} categories covered` })
+    checks.push({ label: 'Category coverage', status: 'pass', detail: `All ${allCategories.length} categories covered` })
   } else if (missingCats.length <= 3) {
     checks.push({ label: 'Category coverage', status: 'warn', detail: `Missing: ${missingCats.join(', ')}` })
   } else {
@@ -168,13 +168,15 @@ export default function GenerateQirPage() {
   const [editSummary, setEditSummary] = useState('')
   const [confirmFinalize, setConfirmFinalize] = useState<number | null>(null)
   const [complianceSummary, setComplianceSummary] = useState<Record<string, { count: number; critical: number }>>({})
+  const [issueCategories, setIssueCategories] = useState<string[]>(DEFAULT_CATEGORIES)
 
   const fetchDrafts = useCallback(async () => {
     setLoading(true)
     try {
-      const [draftsRes, dashRes] = await Promise.all([
+      const [draftsRes, dashRes, settingsRes] = await Promise.all([
         fetch(`/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
         fetch('/api/dashboard'),
+        fetch('/api/settings'),
       ])
       if (draftsRes.ok) {
         const data = await draftsRes.json()
@@ -186,6 +188,12 @@ export default function GenerateQirPage() {
       if (dashRes.ok) {
         const data = await dashRes.json()
         setComplianceSummary(data.complianceSummary ?? {})
+      }
+      if (settingsRes.ok) {
+        const data = await settingsRes.json()
+        if (Array.isArray(data.settings?.issue_categories)) {
+          setIssueCategories(data.settings.issue_categories)
+        }
       }
     } finally {
       setLoading(false)
@@ -292,7 +300,7 @@ export default function GenerateQirPage() {
   const totalCurated = activeDraft?.curated_entries?.length ?? 0
 
   // Run validation checks if we have a draft
-  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary) : []
+  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary, issueCategories) : []
   const hasBlockers = validationChecks.some(c => c.status === 'fail')
 
   return (

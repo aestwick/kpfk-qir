@@ -17,14 +17,14 @@ export async function GET(request: NextRequest) {
 
       if (error) throw error
 
-      // Also get episode counts per show
+      // Get episode counts per show using RPC or grouped query
       const { data: counts } = await supabaseAdmin
-        .from('episode_log')
-        .select('show_key')
+        .rpc('get_episode_counts_by_show')
+        .select('*')
 
       const countMap = new Map<string, number>()
-      for (const row of counts ?? []) {
-        countMap.set(row.show_key, (countMap.get(row.show_key) ?? 0) + 1)
+      for (const row of (counts as Array<{ show_key: string; count: number }>) ?? []) {
+        countMap.set(row.show_key, row.count)
       }
 
       const shows = (data ?? []).map((show) => ({
