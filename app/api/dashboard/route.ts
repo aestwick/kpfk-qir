@@ -32,6 +32,7 @@ export async function GET() {
     qtrStatusCounts,
     recentEpisodes,
     recentActivity,
+    activityUsage,
     usageThisQuarter,
     dailyCosts,
     categoryBreakdown,
@@ -80,13 +81,19 @@ export async function GET() {
       .order('updated_at', { ascending: false })
       .limit(15),
 
-    // 4. Recently processed (24h)
+    // 4. Recently processed (48h for day grouping)
     supabaseAdmin
       .from('episode_log')
-      .select('id, show_name, status, updated_at, headline')
-      .gte('updated_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .select('id, show_name, status, updated_at, headline, show_key')
+      .gte('updated_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
       .order('updated_at', { ascending: false })
       .limit(50),
+
+    // 4b. Usage log for recent activity (duration/cost per episode)
+    supabaseAdmin
+      .from('usage_log')
+      .select('episode_id, operation, duration_seconds, estimated_cost')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()),
 
     // 5. Usage/cost for this quarter
     supabaseAdmin
@@ -238,14 +245,31 @@ export async function GET() {
     .sort((a, b) => b.total - a.total)
     .slice(0, 15)
 
-  // Activity timeline
-  const activityData = (recentActivity.data ?? []).map((ep) => ({
-    id: ep.id,
-    show_name: ep.show_name,
-    headline: ep.headline,
-    status: ep.status,
-    time: ep.updated_at,
-  }))
+  // Activity timeline with duration/cost from usage_log
+  const activityUsageMap = new Map<number, { duration_seconds: number | null; cost: number | null; operation: string | null }>()
+  for (const row of activityUsage.data ?? []) {
+    if (row.episode_id && !activityUsageMap.has(row.episode_id)) {
+      activityUsageMap.set(row.episode_id, {
+        duration_seconds: row.duration_seconds,
+        cost: row.estimated_cost ? Number(row.estimated_cost) : null,
+        operation: row.operation,
+      })
+    }
+  }
+
+  const activityData = (recentActivity.data ?? []).map((ep) => {
+    const usageInfo = activityUsageMap.get(ep.id)
+    return {
+      id: ep.id,
+      show_name: ep.show_name,
+      headline: ep.headline,
+      status: ep.status,
+      show_key: ep.show_key,
+      time: ep.updated_at,
+      duration_seconds: usageInfo?.duration_seconds ?? null,
+      cost: usageInfo?.cost ?? null,
+    }
+  })
 
   // Processing time averages
   const procTimes: Record<string, { total: number; count: number }> = {}
