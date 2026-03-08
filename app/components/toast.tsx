@@ -55,7 +55,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
     : 'bg-red-50 text-red-800 border-red-200'
 
   return (
-    <div className={`${colors} border rounded-lg px-4 py-3 text-sm shadow-lg flex items-center justify-between gap-3 animate-in`}>
+    <div className={`${colors} border rounded-xl px-4 py-3 text-sm shadow-lg flex items-center justify-between gap-3 animate-slide-up`}>
       <span>{toast.message}</span>
       <button
         onClick={() => onDismiss(toast.id)}
