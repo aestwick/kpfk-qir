@@ -125,9 +125,7 @@ function PipelineVisualizer({ mode = "steady", isRunning = false }) {
     const frame = (now) => {
       const rawDt = Math.min((now - lastFrameRef.current) / 1000, 0.05);
       lastFrameRef.current = now;
-      // Use a simulation speed multiplier for demo — in production this would be 1x
-      const simSpeed = 12; // 12x realtime so you can see movement in demo
-      const dt = rawDt * simSpeed;
+      const dt = rawDt;
       timeRef.current += rawDt; // real time for visual effects
       const t = timeRef.current;
 
@@ -568,8 +566,4 @@ export default function PipelineDashboard() {
       </div>
     </div>
   );
-}
-
-function rgbStr(c, a = 1) {
-  return a < 1 ? `rgba(${c[0]},${c[1]},${c[2]},${a})` : `rgb(${c[0]},${c[1]},${c[2]})`;
 }
