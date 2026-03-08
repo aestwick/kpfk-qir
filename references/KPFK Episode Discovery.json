@@ -1,0 +1,407 @@
+{
+  "name": "KPFK Episode Discovery",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "episode_log",
+        "returnAll": true
+      },
+      "id": "6895588c-73bf-4215-b3c6-5129f174187a",
+      "name": "Get Existing Episodes",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        7968,
+        576
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "VMO1krHTdPDVM8BV",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "show_keys",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "category",
+              "condition": "neq",
+              "keyValue": "Music"
+            }
+          ]
+        }
+      },
+      "id": "329019c4-88b8-484b-bcd5-ba7cbcce5f23",
+      "name": "Get Show Keys",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        8160,
+        576
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "VMO1krHTdPDVM8BV",
+          "name": "Supabase account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const TARGET_SHOW_KEY = ''; // empty = all shows\n\nconst items = $input.all();\nconst existingData = $('Get Existing Episodes').all();\n\n// Get all existing MP3 URLs to avoid duplicates\nconst existingUrls = existingData\n  .map(item => item.json.mp3_url)\n  .filter(url => url);\n\nconsole.log(`Found ${existingUrls.length} existing episodes in DB`);\n\nconst filtered = TARGET_SHOW_KEY\n  ? items.filter(i => String(i.json.key) === String(TARGET_SHOW_KEY))\n  : items;\n\nconsole.log(`Processing ${filtered.length} shows`);\n\nreturn filtered.map(item => ({\n  json: {\n    show_key: item.json.key,\n    show_name: item.json.show_name,\n    category: item.json.category,\n    rss_url: `https://archive.kpfk.org/getrss.php?id=${item.json.key}`,\n    existing_urls: existingUrls\n  }\n}));"
+      },
+      "id": "07cc1c02-b3fb-4ad3-96cb-7a6f37249710",
+      "name": "Build RSS URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8368,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "046a854c-29d6-4479-8040-ff9d4f1fb202",
+      "name": "Loop Shows",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        8560,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.rss_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "1545cc17-daab-4955-b636-81fb2ba71e09",
+      "name": "Fetch RSS Feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        8768,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const xml = $input.item.json.data;\nconst showInfo = $('Loop Shows').first().json;\nconst existingUrls = showInfo.existing_urls || [];\n\nconst items = [];\nconst itemRegex = /<item>([\\s\\S]*?)<\\/item>/g;\nlet match;\nlet skippedExisting = 0;\n\nwhile ((match = itemRegex.exec(xml)) !== null) {\n  const itemXml = match[1];\n  \n  const title = (itemXml.match(/<title>\\s*<!\\[CDATA\\[\\s*(.+?)\\s*\\]\\]>\\s*<\\/title>/) || [])[1] || '';\n  const enclosure = (itemXml.match(/enclosure\\s+url=\"([^\"]+)\"/) || [])[1] || '';\n  const pubDateStr = (itemXml.match(/<pubDate>([^<]+)<\\/pubDate>/) || [])[1] || '';\n  const durationSec = parseInt((itemXml.match(/<itunes:duration>([^<]+)<\\/itunes:duration>/) || [])[1] || '0');\n  \n  if (!enclosure || !pubDateStr) continue;\n  \n  // Skip if already in database\n  if (existingUrls.includes(enclosure)) {\n    skippedExisting++;\n    continue;\n  }\n  \n  const pubDate = new Date(pubDateStr);\n  const endDate = new Date(pubDate.getTime() + durationSec * 1000);\n  \n  // Format in Pacific time (not server time)\n  const formatTime = (d) => {\n    return d.toLocaleString('en-US', {\n      hour: 'numeric',\n      minute: '2-digit',\n      hour12: true,\n      timeZone: 'America/Los_Angeles'\n    });\n  };\n  \n  const formatDate = (d) => {\n    return d.toLocaleString('en-US', {\n      weekday: 'long',\n      year: 'numeric',\n      month: 'long',\n      day: 'numeric',\n      timeZone: 'America/Los_Angeles'\n    });\n  };\n  \n  items.push({\n    json: {\n      show_key: showInfo.show_key,\n      show_name: showInfo.show_name,\n      category: showInfo.category,\n      title: title,\n      mp3_url: enclosure,\n      pub_date: pubDate.toISOString(),\n      date: formatDate(pubDate),\n      start_time: formatTime(pubDate),\n      end_time: formatTime(endDate),\n      duration: Math.round(durationSec / 60),\n      status: 'pending'\n    }\n  });\n}\n\nconsole.log(`${showInfo.show_name}: ${items.length} new, ${skippedExisting} already exist`);\n\n// Always return at least one item so the loop continues\nif (items.length === 0) {\n  return [{ json: { _skip: true, show_name: showInfo.show_name } }];\n}\n\nreturn items;"
+      },
+      "id": "95a5d841-b3ec-40bf-9cba-a7517709bb66",
+      "name": "Parse RSS Episodes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8960,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "check-mp3",
+              "leftValue": "={{ $json.mp3_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b6630631-a25e-4d51-90ba-9a625f660d35",
+      "name": "Has Episodes?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        9168,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "tableId": "episode_log",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "show_key",
+              "fieldValue": "={{ $json.show_key }}"
+            },
+            {
+              "fieldId": "show_name",
+              "fieldValue": "={{ $json.show_name }}"
+            },
+            {
+              "fieldId": "category",
+              "fieldValue": "={{ $json.category }}"
+            },
+            {
+              "fieldId": "date",
+              "fieldValue": "={{ $json.date }}"
+            },
+            {
+              "fieldId": "start_time",
+              "fieldValue": "={{ $json.start_time }}"
+            },
+            {
+              "fieldId": "end_time",
+              "fieldValue": "={{ $json.end_time }}"
+            },
+            {
+              "fieldId": "duration",
+              "fieldValue": "={{ $json.duration }}"
+            },
+            {
+              "fieldId": "mp3_url",
+              "fieldValue": "={{ $json.mp3_url }}"
+            },
+            {
+              "fieldId": "status",
+              "fieldValue": "pending"
+            }
+          ]
+        }
+      },
+      "id": "1520f0b3-e402-40c5-b3c0-e2f2f5c0a226",
+      "name": "Insert Episode",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        9360,
+        576
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "VMO1krHTdPDVM8BV",
+          "name": "Supabase account 2"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "a9891666-94e5-4317-a3d1-8fba6a456487",
+      "name": "Skip",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        9360,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "triggerAtMinute": 2
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        7728,
+        576
+      ],
+      "id": "76ddd894-4704-4b33-971b-d546df76e293",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "perItem",
+        "minutesSaved": 1
+      },
+      "type": "n8n-nodes-base.timeSaved",
+      "typeVersion": 1,
+      "position": [
+        9600,
+        832
+      ],
+      "id": "1d30d8f1-ef6a-42e8-9949-4a76f305c330",
+      "name": "Time Saved"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Get Existing Episodes": {
+      "main": [
+        [
+          {
+            "node": "Get Show Keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Show Keys": {
+      "main": [
+        [
+          {
+            "node": "Build RSS URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RSS URLs": {
+      "main": [
+        [
+          {
+            "node": "Loop Shows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Shows": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Fetch RSS Feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch RSS Feed": {
+      "main": [
+        [
+          {
+            "node": "Parse RSS Episodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse RSS Episodes": {
+      "main": [
+        [
+          {
+            "node": "Has Episodes?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Episodes?": {
+      "main": [
+        [
+          {
+            "node": "Insert Episode",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Episode": {
+      "main": [
+        [
+          {
+            "node": "Time Saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip": {
+      "main": [
+        [
+          {
+            "node": "Loop Shows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Episodes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Time Saved": {
+      "main": [
+        [
+          {
+            "node": "Loop Shows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false,
+    "timeSavedMode": "dynamic",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "0039e6ea-c838-42ca-b54c-1a078b15ed72",
+  "meta": {
+    "instanceId": "51925048d3b8b9d8d6ea96a4f6f58185b37777acd4244b42552b70f61dfba54f"
+  },
+  "id": "HPqjA9qD4MivLTWh",
+  "tags": [
+    {
+      "updatedAt": "2025-12-30T05:20:05.496Z",
+      "createdAt": "2025-12-30T05:20:05.496Z",
+      "id": "VOhVO9EUOCOHiAxm",
+      "name": "QIR"
+    }
+  ]
+}
