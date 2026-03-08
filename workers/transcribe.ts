@@ -61,7 +61,11 @@ function applyCorrections(
   for (const c of corrections) {
     if (c.isRegex) {
       const flags = c.caseSensitive ? 'g' : 'gi'
-      result = result.replace(new RegExp(c.wrong, flags), c.correct)
+      try {
+        result = result.replace(new RegExp(c.wrong, flags), c.correct)
+      } catch (err) {
+        console.warn(`[transcribe] Skipping invalid regex correction "${c.wrong}":`, err instanceof Error ? err.message : err)
+      }
     } else {
       const flags = c.caseSensitive ? 'g' : 'gi'
       const escaped = c.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

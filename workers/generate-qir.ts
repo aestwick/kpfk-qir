@@ -115,6 +115,10 @@ ${categorySummaries.join('\n')}`
     throw new Error(`Invalid JSON from OpenAI: ${content.slice(0, 200)}`)
   }
 
+  if (typeof curatedSelection !== 'object' || curatedSelection === null || Object.keys(curatedSelection).length === 0) {
+    throw new Error(`OpenAI returned empty or invalid curation selection: ${content.slice(0, 200)}`)
+  }
+
   // Collect curated episode IDs
   const curatedIds = new Set<number>()
   for (const ids of Object.values(curatedSelection)) {
