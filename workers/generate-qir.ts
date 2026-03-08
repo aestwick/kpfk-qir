@@ -25,9 +25,20 @@ OUTPUT: Return ONLY valid JSON. No markdown, no extra text.
 Return an object where keys are category names and values are arrays of episode IDs that should be included.
 Example: {"Civil Rights / Social Justice": [123, 456, 789], "Health": [101, 202]}`
 
+export interface GenerateQirOptions {
+  year: number
+  quarter: number
+  /** If provided, only include episodes from these show_keys */
+  includedShows?: string[]
+  /** Custom guidance text appended to the AI curation prompt */
+  guidance?: string
+}
+
 export async function processGenerateQir(job: Job) {
-  const { year, quarter } = job.data as { year: number; quarter: number }
+  const { year, quarter, includedShows, guidance } = job.data as GenerateQirOptions
   console.log(`[generate-qir] starting Q${quarter} ${year}...`)
+  if (includedShows?.length) console.log(`[generate-qir] filtering to ${includedShows.length} shows`)
+  if (guidance) console.log(`[generate-qir] custom guidance provided`)
 
   const openaiKey = process.env.OPENAI_API_KEY
   if (!openaiKey) throw new Error('OPENAI_API_KEY not set')
@@ -64,8 +75,18 @@ export async function processGenerateQir(job: Job) {
     return { drafted: false, reason: 'no episodes' }
   }
 
+  // Filter by included shows if specified
+  const filteredEpisodes = includedShows?.length
+    ? episodes.filter(ep => includedShows.includes(ep.show_key))
+    : episodes
+
+  if (!filteredEpisodes.length) {
+    console.log('[generate-qir] no episodes match show filter')
+    return { drafted: false, reason: 'no episodes match filter' }
+  }
+
   // Convert to QIR entries
-  const allEntries = episodes.map(episodeToQirEntry)
+  const allEntries = filteredEpisodes.map(episodeToQirEntry)
 
   // Group by category
   const grouped: Record<string, QirEntry[]> = {}
@@ -90,9 +111,13 @@ export async function processGenerateQir(job: Job) {
     )
   }
 
+  const guidanceSection = guidance
+    ? `\n\nADDITIONAL GUIDANCE FROM THE EDITOR:\n${guidance}\n`
+    : ''
+
   const userMessage = `Select up to ${maxPerCategory} entries per category for the FCC Quarterly Issues Report.
 Available categories: ${issueCategories.join(', ')}
-
+${guidanceSection}
 ${categorySummaries.join('\n')}`
 
   const response = await openai.chat.completions.create({
@@ -164,6 +189,8 @@ ${categorySummaries.join('\n')}`
       settings_snapshot: {
         max_entries_per_category: maxPerCategory,
         issue_categories: issueCategories,
+        included_shows: includedShows ?? null,
+        guidance: guidance ?? null,
       },
       full_text: fullText,
       curated_text: curatedText,
