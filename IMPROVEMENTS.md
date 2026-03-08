@@ -107,6 +107,60 @@ New `/dashboard/activity` page shows a full historical timeline of pipeline even
 
 ---
 
+## Known Issues (Not Yet Fixed)
+
+Pre-existing bugs and code smells discovered during development. None are blockers for production use, but should be addressed over time.
+
+### Dashboard `workersRunning` check is always true
+
+**File:** `app/dashboard/page.tsx:735`
+
+The condition `queues.ingest.active + queues.transcribe.active + queues.summarize.active + queues.compliance.active >= 0` is always true — any sum of non-negative integers is `>= 0`. The "Workers: running" badge never turns red, making it useless as a health indicator. Should use `> 0` or a proper worker heartbeat check.
+
+### SSE `: connected` comment is misleading
+
+**File:** `app/api/events/route.ts:55`
+
+The SSE stream sends `: connected\n\n` as its first message. In SSE protocol, lines starting with `:` are comments (ignored by `EventSource`). The label "connected" suggests it's a signal the client can act on, but clients never see it. Not a bug — just confusing for anyone reading the code. If a client-visible connection signal is needed, it should be sent as `event: connected\ndata: {}\n\n` instead.
+
+### Invalid regex in transcript corrections can crash transcription worker
+
+**File:** `workers/transcribe.ts:56-72`
+
+`applyCorrections()` creates `RegExp` from user-supplied patterns without a try/catch around `new RegExp()`. A malformed regex correction (e.g., `[invalid(regex`) will throw and crash the transcription job. Should wrap in try/catch and skip or warn on invalid patterns.
+
+### No schema validation on OpenAI JSON responses
+
+**Files:** `workers/summarize.ts:154-157`, `workers/generate-qir.ts:113-115`
+
+When OpenAI returns JSON, the code catches parse errors but doesn't validate that the parsed object matches the expected schema. OpenAI could return all-null fields that pass without flagging, leading to empty data in the database.
+
+### N+1 query in settings API
+
+**File:** `app/api/settings/route.ts:20-28`
+
+Fetching show episode counts loads all `episode_log` rows with `select('show_key')` and counts in memory. Should use a `GROUP BY` query instead. Will degrade as the episode table grows.
+
+### No upper bound on episodes pagination limit
+
+**File:** `app/api/episodes/route.ts:16`
+
+The `limit` query param is parsed from user input with no max cap. A request like `?limit=1000000` forces a massive database query. Should clamp to a reasonable maximum (e.g., 500).
+
+### Hardcoded FCC issue categories in multiple files
+
+**Files:** `app/dashboard/generate/page.tsx:49-53`, `workers/generate-qir.ts:40-50`, `app/dashboard/page.tsx:307-311`
+
+Issue categories are duplicated across UI and worker code instead of being fetched from the `qir_settings` table. Category changes require code edits and redeployment.
+
+### Silent error swallowing in compliance worker
+
+**File:** `workers/compliance.ts:258`
+
+One catch block silently continues without logging, unlike all other error handlers in the workers. Should at minimum log a warning.
+
+---
+
 ## Skip Entirely (For Now)
 
 ### Streaming Transcripts to Summarizer
