@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
+import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
 interface Episode {
   id: number
@@ -34,6 +35,15 @@ export default function EpisodesPage() {
   const [episodes, setEpisodes] = useState<Episode[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [issueCategories, setIssueCategories] = useState<string[]>([])
+
+  // Inline category editing state
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null)
+  const [savingCategoryId, setSavingCategoryId] = useState<number | null>(null)
+  const [savedCategoryId, setSavedCategoryId] = useState<number | null>(null)
+
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   // Read initial state from URL params
   const statusFilter = searchParams.get('status') ?? ''
@@ -47,11 +57,9 @@ export default function EpisodesPage() {
 
   // Local state for text inputs (decoupled from URL for responsive typing)
   const [showFilterLocal, setShowFilterLocal] = useState(showFilterParam)
-  const [categoryFilterLocal, setCategoryFilterLocal] = useState(categoryFilterParam)
 
   // Sync local state when URL params change externally (e.g. browser back/forward)
   useEffect(() => { setShowFilterLocal(showFilterParam) }, [showFilterParam])
-  useEffect(() => { setCategoryFilterLocal(categoryFilterParam) }, [categoryFilterParam])
 
   // Use URL param values for API calls (these are the "committed" filter values)
   const showFilter = showFilterParam
@@ -74,11 +82,11 @@ export default function EpisodesPage() {
 
   function setStatusFilter(v: string) { updateParams({ status: v, page: '' }) }
   function setQuarterFilter(v: string) { updateParams({ quarter: v, page: '' }) }
+  function setCategoryFilterValue(v: string) { updateParams({ category: v, page: '' }) }
   function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
 
   // Debounce text filter updates to URL
   const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
-  const categoryDebounceRef = useRef<ReturnType<typeof setTimeout>>()
 
   function setShowFilter(v: string) {
     setShowFilterLocal(v)
@@ -88,13 +96,36 @@ export default function EpisodesPage() {
     }, 350)
   }
 
-  function setCategoryFilter(v: string) {
-    setCategoryFilterLocal(v)
-    clearTimeout(categoryDebounceRef.current)
-    categoryDebounceRef.current = setTimeout(() => {
-      updateParams({ category: v, page: '' })
-    }, 350)
-  }
+  // Fetch issue categories from settings
+  useEffect(() => {
+    async function fetchCategories() {
+      try {
+        const res = await fetch('/api/settings')
+        if (res.ok) {
+          const data = await res.json()
+          const cats = data.settings?.issue_categories
+          if (Array.isArray(cats)) {
+            setIssueCategories(cats)
+          } else {
+            // Fallback defaults
+            setIssueCategories([
+              'Civil Rights / Social Justice',
+              'Immigration',
+              'Economy / Labor',
+              'Environment / Climate',
+              'Government / Politics',
+              'Health',
+              'International Affairs / War & Peace',
+              'Arts & Culture',
+            ])
+          }
+        }
+      } catch {
+        // Use fallback
+      }
+    }
+    fetchCategories()
+  }, [])
 
   const fetchEpisodes = useCallback(async () => {
     setLoading(true)
@@ -124,7 +155,6 @@ export default function EpisodesPage() {
   }
 
   async function handleBulkRetry() {
-    if (!confirm('Retry all failed episodes?')) return
     try {
       const res = await fetch('/api/episodes', {
         method: 'POST',
@@ -152,6 +182,34 @@ export default function EpisodesPage() {
     window.open(`/api/episodes?${params}`, '_blank')
   }
 
+  // Inline category save
+  async function handleCategorySave(episodeId: number, newCategory: string) {
+    setSavingCategoryId(episodeId)
+    try {
+      const res = await fetch(`/api/episodes/${episodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue_category: newCategory }),
+      })
+      if (res.ok) {
+        // Update local state optimistically
+        setEpisodes((prev) =>
+          prev.map((ep) =>
+            ep.id === episodeId ? { ...ep, issue_category: newCategory } : ep
+          )
+        )
+        // Show brief checkmark
+        setSavedCategoryId(episodeId)
+        setTimeout(() => setSavedCategoryId(null), 1500)
+      }
+    } catch {
+      // Silently fail — user can retry
+    } finally {
+      setSavingCategoryId(null)
+      setEditingCategoryId(null)
+    }
+  }
+
   const totalPages = Math.ceil(total / limit)
 
   // Generate quarter options
@@ -166,11 +224,20 @@ export default function EpisodesPage() {
   const [selectedRow, setSelectedRow] = useState(-1)
   const showFilterRef = useRef<HTMLInputElement>(null)
 
-  // Keyboard shortcuts: j/k navigate, Enter opens, / focuses search, r retries
+  // Keyboard shortcuts: j/k navigate, Enter opens, / focuses search, Escape deselects/blurs, r retries
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement
       const isInput = target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA'
+
+      if (e.key === 'Escape') {
+        if (isInput) {
+          (target as HTMLInputElement).blur()
+        }
+        setSelectedRow(-1)
+        setEditingCategoryId(null)
+        return
+      }
 
       if (e.key === '/' && !isInput) {
         e.preventDefault()
@@ -187,7 +254,7 @@ export default function EpisodesPage() {
       } else if (e.key === 'Enter' && selectedRow >= 0 && selectedRow < episodes.length) {
         router.push(`/dashboard/episodes/${episodes[selectedRow].id}`)
       } else if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
-        handleBulkRetry()
+        setConfirmOpen(true)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -207,7 +274,7 @@ export default function EpisodesPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Episodes</h2>
         <div className="flex gap-2">
-          <button onClick={handleBulkRetry} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700">
+          <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700">
             Retry Failed
           </button>
           <button onClick={handleExportCSV} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
@@ -238,13 +305,16 @@ export default function EpisodesPage() {
           onChange={(e) => setShowFilter(e.target.value)}
           className="border rounded px-2 py-1.5 text-sm w-48"
         />
-        <input
-          type="text"
-          placeholder="Filter by category..."
-          value={categoryFilterLocal}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="border rounded px-2 py-1.5 text-sm w-48"
-        />
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilterValue(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm"
+        >
+          <option value="">All Categories</option>
+          {issueCategories.map((cat) => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
       </div>
 
       {/* Table */}
@@ -263,7 +333,9 @@ export default function EpisodesPage() {
                 Status <SortIcon col="status" />
               </th>
               <th className="text-left px-4 py-3 font-medium">Headline</th>
-              <th className="text-left px-4 py-3 font-medium">Category</th>
+              <th className="text-left px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort('issue_category')}>
+                Category <SortIcon col="issue_category" />
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -272,7 +344,16 @@ export default function EpisodesPage() {
             ) : episodes.length === 0 ? (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No episodes found</td></tr>
             ) : episodes.map((ep, i) => (
-              <tr key={ep.id} className={`hover:bg-gray-50 cursor-pointer ${i === selectedRow ? 'bg-blue-50 ring-1 ring-blue-300' : ''}`} onClick={() => window.location.href = `/dashboard/episodes/${ep.id}`}>
+              <tr
+                key={ep.id}
+                className={`hover:bg-gray-50 cursor-pointer ${i === selectedRow ? 'bg-blue-50 ring-1 ring-blue-300' : ''}`}
+                onClick={(e) => {
+                  // Don't navigate if clicking on the category cell editing area
+                  const target = e.target as HTMLElement
+                  if (target.closest('[data-category-cell]')) return
+                  router.push(`/dashboard/episodes/${ep.id}`)
+                }}
+              >
                 <td className="px-4 py-3 max-w-[200px] truncate">{ep.show_name ?? ep.id}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
@@ -280,7 +361,38 @@ export default function EpisodesPage() {
                   <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[ep.status] ?? 'bg-gray-100'}`}>{ep.status}</span>
                 </td>
                 <td className="px-4 py-3 max-w-[250px] truncate">{ep.headline ?? '—'}</td>
-                <td className="px-4 py-3 max-w-[150px] truncate">{ep.issue_category ?? ep.category ?? '—'}</td>
+                <td className="px-4 py-3 max-w-[180px]" data-category-cell>
+                  {editingCategoryId === ep.id ? (
+                    <select
+                      autoFocus
+                      className="border rounded px-1.5 py-0.5 text-sm w-full bg-white"
+                      defaultValue={ep.issue_category ?? ''}
+                      onChange={(e) => handleCategorySave(ep.id, e.target.value)}
+                      onBlur={() => setEditingCategoryId(null)}
+                      disabled={savingCategoryId === ep.id}
+                    >
+                      <option value="">—</option>
+                      {issueCategories.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      className="inline-flex items-center gap-1 group"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditingCategoryId(ep.id)
+                      }}
+                    >
+                      <span className="truncate">{ep.issue_category ?? '—'}</span>
+                      {savedCategoryId === ep.id ? (
+                        <span className="text-green-600 text-xs font-medium">&#10003;</span>
+                      ) : (
+                        <span className="text-gray-300 group-hover:text-gray-500 text-xs opacity-0 group-hover:opacity-100 transition-opacity">&#9998;</span>
+                      )}
+                    </span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -289,7 +401,7 @@ export default function EpisodesPage() {
 
       {/* Keyboard hints */}
       <p className="text-[10px] text-gray-400">
-        Shortcuts: <kbd className="px-1 bg-gray-100 rounded">j</kbd>/<kbd className="px-1 bg-gray-100 rounded">k</kbd> navigate &middot; <kbd className="px-1 bg-gray-100 rounded">Enter</kbd> open &middot; <kbd className="px-1 bg-gray-100 rounded">/</kbd> search &middot; <kbd className="px-1 bg-gray-100 rounded">r</kbd> retry failed
+        Shortcuts: <kbd className="px-1 bg-gray-100 rounded">j</kbd>/<kbd className="px-1 bg-gray-100 rounded">k</kbd> navigate &middot; <kbd className="px-1 bg-gray-100 rounded">Enter</kbd> open &middot; <kbd className="px-1 bg-gray-100 rounded">/</kbd> search &middot; <kbd className="px-1 bg-gray-100 rounded">Esc</kbd> deselect &middot; <kbd className="px-1 bg-gray-100 rounded">r</kbd> retry failed
       </p>
 
       {/* Pagination */}
@@ -315,6 +427,20 @@ export default function EpisodesPage() {
           </div>
         </div>
       )}
+
+      {/* Confirm Dialog for Retry */}
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Retry Failed Episodes"
+        message="This will reset all failed episodes back to pending for re-processing. Continue?"
+        confirmLabel="Retry All"
+        confirmVariant="danger"
+        onConfirm={() => {
+          setConfirmOpen(false)
+          handleBulkRetry()
+        }}
+        onCancel={() => setConfirmOpen(false)}
+      />
     </div>
   )
 }
