@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     if (status) query = query.eq('status', status)
     if (show) query = query.ilike('show_name', `%${show}%`)
-    if (category) query = query.ilike('category', `%${category}%`)
+    if (category) query = query.eq('issue_category', category)
 
     if (quarter) {
       const [year, q] = quarter.split('-Q')
