@@ -8,7 +8,7 @@ export interface EpisodeLog {
   end_time: string | null
   duration: number | null
   mp3_url: string
-  status: 'pending' | 'transcribed' | 'summarized' | 'failed' | 'unavailable'
+  status: 'pending' | 'transcribed' | 'summarized' | 'failed' | 'unavailable' | 'dead'
   headline: string | null
   host: string | null
   guest: string | null
