@@ -29,7 +29,7 @@ const BADGE_COLORS: Record<string, string> = {
   compliance_checked:   'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
   failed:               'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
   unavailable:          'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
-  dead:                 'bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-500',
+  dead:                 'bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-400',
 }
 
 const EVENT_FILTERS = [
@@ -228,7 +228,7 @@ export default function ActivityPage() {
     <div className="space-y-6 max-w-4xl">
       {/* Header + Range */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Activity Log</h2>
+        <h2 className="text-2xl font-bold dark:text-warm-100">Activity Log</h2>
         <div className="flex gap-1">
           {RANGE_OPTIONS.map((opt) => (
             <button
