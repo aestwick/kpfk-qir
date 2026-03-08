@@ -72,37 +72,58 @@ export default function SettingsPage() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   async function saveSetting(key: string) {
     setSaving(key)
+    setSaveError(null)
     const field = settingFields.find((f) => f.key === key)
     let value: unknown = editValues[key]
     if (field?.type === 'number') value = Number(value)
     else if (field?.type === 'json') {
-      try { value = JSON.parse(value as string) } catch { setSaving(null); return }
+      try { value = JSON.parse(value as string) } catch { setSaving(null); setSaveError(`Invalid JSON for ${key}`); return }
     }
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, value }),
-    })
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSaveError(data.error ?? `Failed to save ${key}`)
+      }
+    } catch {
+      setSaveError('Network error: could not reach server')
+    }
     setSaving(null)
   }
 
   async function saveCorrection() {
     if (!correctionForm.wrong || !correctionForm.correct) return
+    setSaveError(null)
 
-    if (editingId) {
-      await fetch('/api/corrections', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: editingId, ...correctionForm }),
-      })
-    } else {
-      await fetch('/api/corrections', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(correctionForm),
-      })
+    try {
+      const res = editingId
+        ? await fetch('/api/corrections', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: editingId, ...correctionForm }),
+          })
+        : await fetch('/api/corrections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(correctionForm),
+          })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSaveError(data.error ?? 'Failed to save correction')
+        return
+      }
+    } catch {
+      setSaveError('Network error: could not reach server')
+      return
     }
 
     setCorrectionForm({ wrong: '', correct: '', case_sensitive: false, is_regex: false, notes: '' })
@@ -111,17 +132,37 @@ export default function SettingsPage() {
   }
 
   async function toggleCorrection(id: number, active: boolean) {
-    await fetch('/api/corrections', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, active: !active }),
-    })
+    try {
+      const res = await fetch('/api/corrections', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, active: !active }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSaveError(data.error ?? 'Failed to toggle correction')
+        return
+      }
+    } catch {
+      setSaveError('Network error: could not reach server')
+      return
+    }
     fetchAll()
   }
 
   async function deleteCorrection(id: number) {
     if (!confirm('Delete this correction?')) return
-    await fetch(`/api/corrections?id=${id}`, { method: 'DELETE' })
+    try {
+      const res = await fetch(`/api/corrections?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSaveError(data.error ?? 'Failed to delete correction')
+        return
+      }
+    } catch {
+      setSaveError('Network error: could not reach server')
+      return
+    }
     fetchAll()
   }
 
@@ -166,6 +207,13 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8">
       <h2 className="text-2xl font-bold">Settings</h2>
+
+      {saveError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 flex items-center justify-between">
+          {saveError}
+          <button onClick={() => setSaveError(null)} className="text-red-600 hover:text-red-800 ml-3 text-xs">Dismiss</button>
+        </div>
+      )}
 
       {/* QIR Settings */}
       <div className="bg-white rounded-lg shadow p-4 space-y-4">
