@@ -450,8 +450,7 @@ export default function EpisodeDetailPage() {
       `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
       `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
       `MP3: ${episode?.mp3_url ?? 'Unknown'}`,
-      `Review: ${window.location.origin}/dashboard/episodes/${id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
-      flag.timestamp_seconds != null ? `Timestamp: ${formatTimestamp(flag.timestamp_seconds)}` : null,
+      flag.timestamp_seconds != null ? `Violation at: ${formatTimestamp(flag.timestamp_seconds)}` : null,
       `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
       flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
     ].filter(Boolean).join('\n')
