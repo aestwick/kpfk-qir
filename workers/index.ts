@@ -26,6 +26,11 @@ const generateQirQueue = new Queue('generate-qir', { connection })
 const ingestWorker = new Worker('ingest', processIngest, {
   connection,
   concurrency: 1,
+  defaultJobOptions: {
+    timeout: 5 * 60 * 1000, // 5 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 ingestWorker.on('completed', async (job) => {
@@ -43,6 +48,11 @@ ingestWorker.on('failed', (job, err) => {
 const transcribeWorker = new Worker('transcribe', processTranscribe, {
   connection,
   concurrency: 1, // ffmpeg is heavy, run one at a time
+  defaultJobOptions: {
+    timeout: 10 * 60 * 1000, // 10 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 transcribeWorker.on('completed', async (job) => {
@@ -60,6 +70,11 @@ transcribeWorker.on('failed', (job, err) => {
 const summarizeWorker = new Worker('summarize', processSummarize, {
   connection,
   concurrency: 3,
+  defaultJobOptions: {
+    timeout: 2 * 60 * 1000, // 2 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 summarizeWorker.on('completed', (job) => {
@@ -74,6 +89,11 @@ summarizeWorker.on('failed', (job, err) => {
 const generateQirWorker = new Worker('generate-qir', processGenerateQir, {
   connection,
   concurrency: 1,
+  defaultJobOptions: {
+    timeout: 5 * 60 * 1000, // 5 minutes
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+  },
 })
 
 generateQirWorker.on('completed', (job) => {

@@ -111,15 +111,35 @@ Guest(s): ${episode.guest || ''}
 Transcript:
 ${transcript.transcript}`
 
-      const response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-      })
+      // Retry with exponential backoff on transient errors
+      let response: OpenAI.Chat.Completions.ChatCompletion | null = null
+      let lastError: Error | null = null
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'user', content: userMessage },
+            ],
+            temperature: 0.3,
+            response_format: { type: 'json_object' },
+          })
+          break
+        } catch (err: unknown) {
+          lastError = err instanceof Error ? err : new Error(String(err))
+          const status = (err as { status?: number })?.status
+          if (status && [429, 500, 502, 503].includes(status)) {
+            const delay = Math.pow(2, attempt + 1) * 1000
+            console.warn(`[summarize] ep ${episode.id} OpenAI error ${status}, retrying in ${delay}ms...`)
+            await new Promise((r) => setTimeout(r, delay))
+            continue
+          }
+          throw err
+        }
+      }
+
+      if (!response) throw lastError ?? new Error('OpenAI failed after retries')
 
       const content = response.choices[0]?.message?.content
       if (!content) throw new Error('Empty response from OpenAI')
