@@ -277,6 +277,119 @@ Sequenced implementation phases. Each phase is a shippable, testable increment.
 
 ---
 
+---
+
+## Phase 13: Infrastructure Hardening
+
+**Goal:** Fix P0 reliability issues before processing more episodes. No UI changes.
+
+**Tasks:**
+
+1. **Add missing database indexes** (new migration `002_add_indexes.sql`):
+   ```sql
+   CREATE INDEX IF NOT EXISTS idx_episode_status_date ON episode_log(status, air_date);
+   CREATE INDEX IF NOT EXISTS idx_episode_air_date ON episode_log(air_date);
+   ```
+
+2. **Add retry/backoff to OpenAI calls** in `workers/summarize.ts` — exponential backoff on 429 and 5xx, 3 attempts max. Same pattern as Groq transcription worker.
+
+3. **Add BullMQ job timeouts and attempts** in `workers/index.ts`:
+   - Ingest: 5 min timeout, 2 attempts
+   - Transcribe: 20 min timeout, 3 attempts with exponential backoff
+   - Summarize: 5 min timeout, 3 attempts with exponential backoff
+
+4. **Add `dead` status** — episodes that exhaust all retry attempts get `status = 'dead'` instead of staying `failed` forever. Dashboard shows these separately in the attention section with a "force retry" option.
+
+5. **Docker hardening** in `docker-compose.yml`:
+   - Add `mem_limit: 2g` and `cpus: '1.5'` to qir-app
+   - Add `mem_limit: 256m` to qir-redis
+   - Remove `version: "3.8"` (deprecated)
+   - Remove `ports: 3100:3000` (should only be reachable through Traefik)
+
+6. **Periodic temp cleanup** — add a BullMQ repeatable job that removes `/tmp/qir-audio` files older than 24 hours. Also wrap all cleanup in `finally` blocks.
+
+**Test:**
+- Run a summarize batch — verify retries on simulated failure
+- Check `docker compose ps` shows resource limits
+- Verify app is NOT accessible on port 3100 directly after port removal
+- Create a failed episode, wait for it to hit retry limit → verify `dead` status
+
+---
+
+## Phase 14: Code Quality
+
+**Goal:** Performance and UX fixes. Each item is independently testable.
+
+**Tasks:**
+
+1. **Cache transcript corrections** in memory with 60s TTL (same pattern as settings in `lib/settings.ts`) instead of querying DB on every transcription.
+
+2. **Fix N+1 queries**:
+   - Downloads API: batch-fetch transcripts with `IN` clause instead of individual queries
+   - Summarize worker: batch-fetch all transcripts for the batch in one query
+
+3. **Parallelize RSS ingest** — replace sequential feed fetching with `Promise.allSettled()` and concurrency limit of 5.
+
+4. **Auto-retry job** — add a BullMQ repeatable that retries `failed` episodes with `retry_count < 3` every 6 hours.
+
+5. **Shared toast/notification provider** — extract from copy-pasted pattern across pages into a React context provider.
+
+6. **Persist filter state in URL params** — episode filters (status, quarter, show, category, sort) stored in URL search params so they survive navigation and are bookmarkable.
+
+**Test:**
+- Ingest runs noticeably faster with parallel fetches
+- Downloads page loads faster for large quarters
+- Change episode filters, navigate away and back — filters persist
+- Failed episode auto-retries after 6 hours
+
+---
+
+## Phase 15: Dashboard Redesign
+
+**Goal:** Redesign the `/dashboard` overview page to be a radio station ops board — warm, functional, informative at a glance.
+
+**Visual direction:**
+- White/cream background, clean but not sterile
+- KPFK branding colors as accents — black, red, warm amber/gold
+- Editorial typography — like a broadcast log or newspaper layout
+- No gratuitous animations — purposeful motion only (gentle pulse when processing, number ticking up on new episodes)
+- Should feel like a tool built BY a radio station FOR a radio station
+
+**Layout:**
+
+1. **"On Air" status strip** across the top — what's currently processing? "Transcribing: Beneath The Surface - Mar 5" with subtle progress indicator. Or "All caught up" when idle. Like the ON AIR light in a studio.
+
+2. **Quarter at a glance** — big readable numbers, not charts for chart's sake. "Q1 2026: 342 episodes / 280 transcribed / 195 summarized / QIR: Draft in progress". Simple progress bar for overall pipeline completion.
+
+3. **Time estimates for remaining work** — calculated from historical averages in `usage_log`:
+   - Per stage: "~45 min to finish transcription (15 episodes × 3 min avg)"
+   - Per stage: "~2 min to finish summarization (8 episodes × 15s avg)"
+   - Overall: "Pipeline clear in ~47 min at current pace"
+   - If nothing pending: "All caught up"
+   - SQL for averages: `SELECT AVG(duration_seconds) FROM usage_log WHERE operation = 'transcribe' AND created_at > now() - interval '7 days'`
+
+4. **Recent activity as a broadcast log** — formatted like a radio station program log. Timestamps left column, show names, what happened. Scrollable. Auto-refreshes every 10-15 seconds.
+
+5. **Attention needed** — failed/dead episodes formatted like a producer's pull sheet. Not red alarm bells, just clear notes: "Background Briefing Mar 3 — MP3 not found" / "Democracy Now Mar 5 — transcription failed (retry)". Count badge if items exist.
+
+6. **Cost this month** — understated, at the bottom. Single line: "March spend: $4.82 (Groq $2.10 / OpenAI $2.72) — avg $0.03/episode". Optional sparkline for daily spend over last 30 days.
+
+7. **System health footer** — thin strip: "Workers: running · Last ingest: 12 min ago · Last transcription: 34 min ago". Green when healthy, amber when stale (>2 hours), red when broken.
+
+**Technical:**
+- Poll `/api/dashboard`, `/api/usage`, `/api/jobs` every 10-15 seconds
+- Calculate time estimates from `usage_log` averages
+- Use recharts only for the cost sparkline if needed
+- Page should tell everything at a glance without clicking into subpages
+
+**Test:**
+- Dashboard loads with real data
+- Time estimates update as episodes process
+- Activity feed shows live updates
+- Health indicators reflect actual worker state
+
+---
+
 ## Dependency Graph
 
 ```
