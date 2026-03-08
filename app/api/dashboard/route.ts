@@ -62,15 +62,14 @@ export async function GET() {
       })
     ),
 
-    // 2. Quarter-specific status counts
+    // 2. Quarter-specific status counts (include null air_date episodes by created_at)
     Promise.all(
       (['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable'] as const).map(async (s) => {
         const { count } = await supabaseAdmin
           .from('episode_log')
           .select('*', { count: 'exact', head: true })
           .eq('status', s)
-          .gte('air_date', qtr.start)
-          .lte('air_date', qtr.end)
+          .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`)
         return [s, count ?? 0] as const
       })
     ),
@@ -115,15 +114,13 @@ export async function GET() {
       .from('episode_log')
       .select('issue_category')
       .in('status', ['summarized', 'compliance_checked'])
-      .gte('air_date', qtr.start)
-      .lte('air_date', qtr.end),
+      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 
     // 8. Show distribution (this quarter)
     supabaseAdmin
       .from('episode_log')
       .select('show_name, show_key, status')
-      .gte('air_date', qtr.start)
-      .lte('air_date', qtr.end),
+      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 
     // 9-12. Queue status
     getQueueCounts(ingestQueue),
@@ -173,8 +170,7 @@ export async function GET() {
       .select('id, show_name, headline, air_date, duration, status')
       .in('status', ['transcribed', 'summarized', 'compliance_checked'])
       .gt('duration', 1800)
-      .gte('air_date', qtr.start)
-      .lte('air_date', qtr.end),
+      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 
     // 19. Last filed (finalized) QIR
     supabaseAdmin

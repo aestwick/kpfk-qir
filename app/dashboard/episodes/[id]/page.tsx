@@ -511,7 +511,9 @@ export default function EpisodeDetailPage() {
 
       <div className="flex items-center gap-3">
         <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700">&larr; Episodes</a>
-        <h2 className="text-2xl font-bold">{episode.show_name ?? `Episode ${episode.id}`}</h2>
+        <a href={`/dashboard/shows/${encodeURIComponent(episode.show_key)}`} className="text-2xl font-bold hover:text-blue-700 transition-colors">
+          {episode.show_name ?? `Episode ${episode.id}`}
+        </a>
         <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[episode.status] ?? 'bg-gray-100'}`}>
           {episode.status}
         </span>
@@ -644,9 +646,19 @@ export default function EpisodeDetailPage() {
                     <p className="text-sm font-medium text-gray-900">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
                     {flag.details && <p className="text-xs text-gray-600 mt-0.5">{flag.details}</p>}
                     {flag.excerpt && (
-                      <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1 font-mono">
+                      <button
+                        onClick={() => {
+                          if (flag.timestamp_seconds != null) {
+                            jumpToTimestamp(flag.timestamp_seconds, flag.excerpt)
+                          } else {
+                            setHighlightText(flag.excerpt!.slice(0, 60))
+                          }
+                        }}
+                        className="text-xs text-gray-500 mt-1 bg-gray-50 hover:bg-blue-50 hover:text-blue-700 rounded px-2 py-1 font-mono text-left w-full transition-colors cursor-pointer"
+                        title={flag.timestamp_seconds != null ? `Play from ${formatTimestamp(flag.timestamp_seconds)}` : 'Find in transcript'}
+                      >
                         &ldquo;...{flag.excerpt}...&rdquo;
-                      </p>
+                      </button>
                     )}
                     {flag.timestamp_seconds !== null ? (
                       <button
