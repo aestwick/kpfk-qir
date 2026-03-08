@@ -25,6 +25,7 @@ interface WhisperResponse {
   text: string
   segments?: WhisperSegment[]
   duration?: number
+  language?: string
 }
 
 function getCurrentQuarterBounds(): { start: string; end: string } {
@@ -239,6 +240,7 @@ export async function processTranscribe(job: Job) {
       const allTexts: string[] = []
       const allSegments: Array<{ chunkIndex: number; segments: WhisperSegment[] }> = []
       let totalDuration = 0
+      let detectedLanguage: string | null = null
 
       for (let i = 0; i < chunkFiles.length; i++) {
         const chunkPath = path.join(tmpDir, chunkFiles[i])
@@ -250,6 +252,10 @@ export async function processTranscribe(job: Job) {
           allSegments.push({ chunkIndex: i, segments: result.segments })
         }
         totalDuration += result.duration ?? CHUNK_DURATION_SECONDS
+        // Use language from first chunk as the episode language
+        if (i === 0 && result.language) {
+          detectedLanguage = result.language
+        }
 
         // Small delay between chunks to respect rate limits
         if (i < chunkFiles.length - 1) {
@@ -268,6 +274,9 @@ export async function processTranscribe(job: Job) {
           episode_id: episode.id,
           transcript: correctedTranscript,
           vtt,
+          language: detectedLanguage,
+          english_transcript: null,
+          english_vtt: null,
         },
         { onConflict: 'episode_id' }
       )
