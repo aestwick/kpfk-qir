@@ -107,6 +107,40 @@ New `/dashboard/activity` page shows a full historical timeline of pipeline even
 
 ---
 
+## Known Issues — Fixed ✅
+
+All known issues documented during development have been resolved.
+
+### Dashboard `workersRunning` check is always true ✅
+
+Fixed `>= 0` to `> 0` in `app/dashboard/page.tsx`. Badge now correctly shows "idle" (red) when no workers are active.
+
+### SSE `: connected` comment is misleading ✅
+
+Changed from SSE comment (`: connected`) to a proper named event (`event: connected\ndata: {}\n\n`) in `app/api/events/route.ts`.
+
+### Invalid regex in transcript corrections can crash transcription worker ✅
+
+Added try/catch around `new RegExp()` in `workers/transcribe.ts`. Invalid patterns are now logged and skipped instead of crashing the worker.
+
+### No schema validation on OpenAI JSON responses ✅
+
+Added validation in `workers/summarize.ts` (requires headline + summary) and `workers/generate-qir.ts` (requires non-empty object). Jobs now fail with descriptive errors instead of storing empty data.
+
+### N+1 query in settings API ✅
+
+Replaced full-table scan with `get_episode_counts_by_show()` RPC function (migration `007_episode_counts_rpc.sql`) that uses `GROUP BY` at the database level.
+
+### No upper bound on episodes pagination limit ✅
+
+Added `Math.min(..., 500)` cap on the `limit` query param in `app/api/episodes/route.ts`.
+
+### Hardcoded FCC issue categories in multiple files ✅
+
+Dashboard API (`app/api/dashboard/route.ts`) now uses `getIssueCategories()` from `lib/settings.ts`. Generate page (`app/dashboard/generate/page.tsx`) fetches categories from settings API. `workers/generate-qir.ts` already used `getSetting('issue_categories')`.
+
+---
+
 ## Skip Entirely (For Now)
 
 ### Streaming Transcripts to Summarizer

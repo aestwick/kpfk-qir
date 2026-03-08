@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
+import { getIssueCategories } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -304,11 +305,7 @@ export async function GET() {
       .map((r) => r.issue_category)
       .filter(Boolean)
   )
-  const allIssueCategories = [
-    'Civil Rights / Social Justice', 'Immigration', 'Economy / Labor',
-    'Environment / Climate', 'Government / Politics', 'Health',
-    'International Affairs / War & Peace', 'Arts & Culture',
-  ]
+  const allIssueCategories = await getIssueCategories()
 
   // Compliance summary
   const complianceFlagCounts: Record<string, { count: number; critical: number }> = {}

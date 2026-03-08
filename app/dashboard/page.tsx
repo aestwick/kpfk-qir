@@ -732,12 +732,12 @@ function SystemHealthFooter({ queues, activity, lastFiled }: { queues: DashData[
   const transcribeInfo = staleness(lastTranscribe)
   const summarizeInfo = staleness(lastSummarize)
 
-  const workersRunning = queues.ingest.active + queues.transcribe.active + queues.summarize.active + queues.compliance.active >= 0 // always true if API responds
+  const workersRunning = queues.ingest.active + queues.transcribe.active + queues.summarize.active + queues.compliance.active > 0
   const workerColor = workersRunning ? 'text-emerald-600' : 'text-red-600'
 
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 px-5 py-2.5 flex items-center gap-6 text-xs text-gray-500 flex-wrap">
-      <span>Workers: <span className={`font-medium ${workerColor}`}>running</span></span>
+      <span>Workers: <span className={`font-medium ${workerColor}`}>{workersRunning ? 'running' : 'idle'}</span></span>
       <span>Last ingest: <span className={`font-medium ${ingestInfo.color}`}>{ingestInfo.label}</span></span>
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>
       <span>Last summarization: <span className={`font-medium ${summarizeInfo.color}`}>{summarizeInfo.label}</span></span>
