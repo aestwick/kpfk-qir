@@ -40,8 +40,20 @@ interface Stats {
   total: number
 }
 
-const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id']
+const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id'] as const
 const SEVERITIES = ['info', 'warning', 'critical']
+
+function getQuarterOptions(): { label: string; value: string }[] {
+  const now = new Date()
+  const options: { label: string; value: string }[] = []
+  for (let i = 0; i < 4; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i * 3, 1)
+    const q = Math.floor(d.getMonth() / 3) + 1
+    const y = d.getFullYear()
+    options.push({ label: `Q${q} ${y}`, value: `${y}-${q}` })
+  }
+  return options
+}
 
 const severityColors: Record<string, string> = {
   info: 'bg-blue-100 text-blue-700',
@@ -73,6 +85,7 @@ export default function CompliancePage() {
   const [filterType, setFilterType] = useState(searchParams.get('type') ?? '')
   const [filterSeverity, setFilterSeverity] = useState(searchParams.get('severity') ?? '')
   const [filterResolution, setFilterResolution] = useState(searchParams.get('resolution') ?? '')
+  const [filterQuarter, setFilterQuarter] = useState(searchParams.get('quarter') ?? '')
   const [filterShow, setFilterShow] = useState(searchParams.get('show') ?? '')
   const [page, setPage] = useState(parseInt(searchParams.get('page') ?? '1'))
 
@@ -103,14 +116,18 @@ export default function CompliancePage() {
   const [newWord, setNewWord] = useState('')
   const [newWordSeverity, setNewWordSeverity] = useState('critical')
   const [addingWord, setAddingWord] = useState(false)
+  const [editingWord, setEditingWord] = useState<number | null>(null)
+  const [editWordSeverity, setEditWordSeverity] = useState('')
 
   // Compliance prompt
   const [compliancePrompt, setCompliancePrompt] = useState('')
   const [promptDirty, setPromptDirty] = useState(false)
   const [savingPrompt, setSavingPrompt] = useState(false)
 
-  // Check toggles
-  const [checksEnabled, setChecksEnabled] = useState(true)
+  // Check toggles — per-flag-type map matching DB schema
+  const [checkToggles, setCheckToggles] = useState<Record<string, boolean>>({
+    profanity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true,
+  })
   const [blocking, setBlocking] = useState(false)
 
   // Confirm dialog
@@ -132,12 +149,17 @@ export default function CompliancePage() {
     if (filterSeverity) params.set('severity', filterSeverity)
     if (filterResolution === 'unresolved') params.set('unresolved', 'true')
     else if (filterResolution === 'resolved') params.set('resolved', 'true')
+    if (filterQuarter) {
+      const [y, q] = filterQuarter.split('-')
+      params.set('year', y)
+      params.set('quarter', q)
+    }
     if (filterShow) params.set('show', filterShow)
     if (page > 1) params.set('page', String(page))
     params.set('sort', 'created_at')
     params.set('dir', 'desc')
     return params
-  }, [filterType, filterSeverity, filterResolution, filterShow, page])
+  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, page])
 
   // Fetch flags list
   const fetchFlags = useCallback(async () => {
@@ -182,7 +204,10 @@ export default function CompliancePage() {
       const s = settingsData.settings ?? {}
       setSettings(s)
       setCompliancePrompt((s.compliance_prompt as string) ?? '')
-      setChecksEnabled(s.compliance_checks_enabled !== 'false' && s.compliance_checks_enabled !== false)
+      // compliance_checks_enabled is a JSON object: { profanity: true, station_id_missing: true, ... }
+      if (s.compliance_checks_enabled && typeof s.compliance_checks_enabled === 'object') {
+        setCheckToggles(s.compliance_checks_enabled as Record<string, boolean>)
+      }
       setBlocking(s.compliance_blocking === 'true' || s.compliance_blocking === true)
       setLoading(false)
     })
@@ -194,11 +219,12 @@ export default function CompliancePage() {
     if (filterType) params.set('type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
     if (filterResolution) params.set('resolution', filterResolution)
+    if (filterQuarter) params.set('quarter', filterQuarter)
     if (filterShow) params.set('show', filterShow)
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     router.replace(`/dashboard/compliance${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [filterType, filterSeverity, filterResolution, filterShow, page, router])
+  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, page, router])
 
   // Refetch flags when filters/page change (skip initial render)
   const filterChangeCount = useRef(0)
@@ -317,6 +343,24 @@ export default function CompliancePage() {
     }
   }
 
+  // Edit word severity
+  async function saveWordEdit(id: number) {
+    try {
+      const res = await fetch('/api/compliance/wordlist', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, severity: editWordSeverity }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setWords((prev) => prev.map((w) => w.id === id ? { ...w, severity: editWordSeverity } : w))
+      setEditingWord(null)
+      toast('success', 'Word updated')
+    } catch (err) {
+      console.error('Failed to edit word:', err)
+      toast('error', 'Failed to update word')
+    }
+  }
+
   // Save compliance prompt
   async function savePrompt() {
     if (savingPrompt) return
@@ -338,19 +382,20 @@ export default function CompliancePage() {
     }
   }
 
-  // Toggle check settings
-  async function toggleChecks(enabled: boolean) {
-    setChecksEnabled(enabled)
+  // Toggle individual check type
+  async function toggleCheckType(type: string, enabled: boolean) {
+    const updated = { ...checkToggles, [type]: enabled }
+    setCheckToggles(updated)
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'compliance_checks_enabled', value: String(enabled) }),
+        body: JSON.stringify({ key: 'compliance_checks_enabled', value: updated }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch (err) {
-      console.error('Failed to toggle checks:', err)
-      setChecksEnabled(!enabled) // revert on error
+      console.error('Failed to toggle check:', err)
+      setCheckToggles({ ...checkToggles, [type]: !enabled }) // revert on error
       toast('error', 'Failed to update setting')
     }
   }
@@ -446,6 +491,19 @@ export default function CompliancePage() {
             </select>
           </div>
           <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Quarter</label>
+            <select
+              value={filterQuarter}
+              onChange={(e) => { setFilterQuarter(e.target.value); setPage(1) }}
+              className="border rounded-lg px-3 py-1.5 text-sm"
+            >
+              <option value="">All Quarters</option>
+              {getQuarterOptions().map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Show</label>
             <input
               type="text"
@@ -455,9 +513,9 @@ export default function CompliancePage() {
               className="border rounded-lg px-3 py-1.5 text-sm w-48"
             />
           </div>
-          {(filterType || filterSeverity || filterResolution || filterShow) && (
+          {(filterType || filterSeverity || filterResolution || filterQuarter || filterShow) && (
             <button
-              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterResolution(''); setFilterShow(''); setPage(1) }}
+              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterResolution(''); setFilterQuarter(''); setFilterShow(''); setPage(1) }}
               className="text-xs text-gray-500 hover:text-gray-700 underline"
             >
               Clear filters
@@ -733,9 +791,29 @@ export default function CompliancePage() {
                   <div key={w.id} className="flex items-center justify-between py-2 px-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-mono">{w.word}</span>
-                      <span className={`text-xs px-1.5 py-0.5 rounded-full ${severityColors[w.severity]}`}>
-                        {w.severity}
-                      </span>
+                      {editingWord === w.id ? (
+                        <div className="flex items-center gap-1">
+                          <select
+                            value={editWordSeverity}
+                            onChange={(e) => setEditWordSeverity(e.target.value)}
+                            className="border rounded px-1.5 py-0.5 text-xs"
+                            autoFocus
+                          >
+                            <option value="warning">warning</option>
+                            <option value="critical">critical</option>
+                          </select>
+                          <button onClick={() => saveWordEdit(w.id)} className="text-xs text-green-600 hover:text-green-800">Save</button>
+                          <button onClick={() => setEditingWord(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setEditingWord(w.id); setEditWordSeverity(w.severity) }}
+                          className={`text-xs px-1.5 py-0.5 rounded-full cursor-pointer hover:opacity-80 ${severityColors[w.severity]}`}
+                          title="Click to edit severity"
+                        >
+                          {w.severity}
+                        </button>
+                      )}
                     </div>
                     <button
                       onClick={() => {
@@ -771,6 +849,9 @@ export default function CompliancePage() {
                   placeholder="Compliance check prompt for AI..."
                 />
               </div>
+              {promptDirty && !compliancePrompt.trim() && (
+                <p className="text-xs text-red-500">Prompt cannot be empty</p>
+              )}
               <div className="flex items-center justify-between">
                 <button
                   onClick={() => {
@@ -792,7 +873,7 @@ export default function CompliancePage() {
                 </button>
                 <button
                   onClick={savePrompt}
-                  disabled={!promptDirty || savingPrompt}
+                  disabled={!promptDirty || savingPrompt || !compliancePrompt.trim()}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
                 >
                   {savingPrompt ? 'Saving...' : 'Save Prompt'}
@@ -803,20 +884,22 @@ export default function CompliancePage() {
 
           {/* Checks Tab */}
           {rulesTab === 'checks' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between py-3 border-b">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">Compliance Checks Enabled</p>
-                  <p className="text-xs text-gray-500">Run compliance checks on summarized episodes</p>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Check Types</p>
+              {FLAG_TYPES.map((type) => (
+                <div key={type} className="flex items-center justify-between py-3 border-b last:border-b-0">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{typeLabels[type]}</p>
+                  </div>
+                  <button
+                    onClick={() => toggleCheckType(type, !checkToggles[type])}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checkToggles[type] ? 'bg-blue-600' : 'bg-gray-300'}`}
+                  >
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checkToggles[type] ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
                 </div>
-                <button
-                  onClick={() => toggleChecks(!checksEnabled)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checksEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checksEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-                </button>
-              </div>
-              <div className="flex items-center justify-between py-3">
+              ))}
+              <div className="flex items-center justify-between py-3 mt-2 border-t">
                 <div>
                   <p className="text-sm font-medium text-gray-900">Blocking Mode</p>
                   <p className="text-xs text-gray-500">Block non-compliant episodes from QIR inclusion</p>
