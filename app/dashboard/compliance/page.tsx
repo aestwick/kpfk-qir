@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonCards, SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
+import { useToast } from '@/app/components/toast'
 
 interface ComplianceFlag {
   id: number
@@ -31,6 +32,12 @@ interface ComplianceWord {
   word: string
   severity: string
   active: boolean
+}
+
+interface Stats {
+  byType: Record<string, number>
+  bySeverity: Record<string, number>
+  total: number
 }
 
 const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id']
@@ -60,16 +67,18 @@ function formatTimestamp(seconds: number | null): string {
 export default function CompliancePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const { toast } = useToast()
 
   // Filters from URL
   const [filterType, setFilterType] = useState(searchParams.get('type') ?? '')
   const [filterSeverity, setFilterSeverity] = useState(searchParams.get('severity') ?? '')
-  const [filterResolution, setFilterResolution] = useState(searchParams.get('resolved') ?? '')
+  const [filterResolution, setFilterResolution] = useState(searchParams.get('resolution') ?? '')
   const [filterShow, setFilterShow] = useState(searchParams.get('show') ?? '')
   const [page, setPage] = useState(parseInt(searchParams.get('page') ?? '1'))
 
   // Data
   const [flags, setFlags] = useState<ComplianceFlag[]>([])
+  const [stats, setStats] = useState<Stats>({ byType: {}, bySeverity: {}, total: 0 })
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 0 })
   const [words, setWords] = useState<ComplianceWord[]>([])
   const [settings, setSettings] = useState<Record<string, unknown>>({})
@@ -84,12 +93,16 @@ export default function CompliancePage() {
   const [bulkResolveOpen, setBulkResolveOpen] = useState(false)
   const [bulkNotes, setBulkNotes] = useState('')
 
+  // Loading states for actions
+  const [actionLoading, setActionLoading] = useState(false)
+
   // Tab for rules section
   const [rulesTab, setRulesTab] = useState<'wordlist' | 'prompt' | 'checks'>('wordlist')
 
   // Wordlist form
   const [newWord, setNewWord] = useState('')
   const [newWordSeverity, setNewWordSeverity] = useState('critical')
+  const [addingWord, setAddingWord] = useState(false)
 
   // Compliance prompt
   const [compliancePrompt, setCompliancePrompt] = useState('')
@@ -109,45 +122,62 @@ export default function CompliancePage() {
     onConfirm: () => void
   }>({ open: false, title: '', message: '', variant: 'primary', onConfirm: () => {} })
 
-  // Build URL params
-  const buildParams = useCallback(() => {
+  // Prevent duplicate initial fetches
+  const initialLoadDone = useRef(false)
+
+  // Build API query params for flags list
+  const buildApiParams = useCallback(() => {
     const params = new URLSearchParams()
-    if (filterType) params.set('type', filterType)
+    if (filterType) params.set('flag_type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
-    if (filterResolution) params.set('resolved', filterResolution)
+    if (filterResolution === 'unresolved') params.set('unresolved', 'true')
+    else if (filterResolution === 'resolved') params.set('resolved', 'true')
     if (filterShow) params.set('show', filterShow)
     if (page > 1) params.set('page', String(page))
+    params.set('sort', 'created_at')
+    params.set('dir', 'desc')
     return params
   }, [filterType, filterSeverity, filterResolution, filterShow, page])
 
-  // Fetch flags
+  // Fetch flags list
   const fetchFlags = useCallback(async () => {
-    const params = buildParams()
-    // Map resolution filter to API params
-    if (filterResolution === 'unresolved') {
-      params.set('unresolved', 'true')
-      params.delete('resolved')
-    } else if (filterResolution === 'resolved') {
-      params.delete('resolved')
-      params.set('resolved', 'true')
+    try {
+      const params = buildApiParams()
+      const res = await fetch(`/api/compliance?${params}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setFlags(data.flags ?? [])
+      setPagination(data.pagination ?? { page: 1, limit: 50, total: 0, totalPages: 0 })
+    } catch (err) {
+      console.error('Failed to fetch flags:', err)
+      toast('error', 'Failed to load compliance flags')
     }
-    params.set('sort', 'created_at')
-    params.set('dir', 'desc')
+  }, [buildApiParams, toast])
 
-    const res = await fetch(`/api/compliance?${params}`)
-    const data = await res.json()
-    setFlags(data.flags ?? [])
-    setPagination(data.pagination ?? { page: 1, limit: 50, total: 0, totalPages: 0 })
-  }, [buildParams, filterResolution])
+  // Fetch stats (total unresolved counts across all pages)
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch('/api/compliance?stats=true')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setStats(data.stats ?? { byType: {}, bySeverity: {}, total: 0 })
+    } catch (err) {
+      console.error('Failed to fetch stats:', err)
+    }
+  }, [])
 
-  // Load all data
+  // Initial load — fetch everything in parallel
   useEffect(() => {
+    if (initialLoadDone.current) return
+    initialLoadDone.current = true
+
     setLoading(true)
     Promise.all([
       fetchFlags(),
-      fetch('/api/compliance/wordlist').then((r) => r.json()),
-      fetch('/api/settings').then((r) => r.json()),
-    ]).then(([, wordData, settingsData]) => {
+      fetchStats(),
+      fetch('/api/compliance/wordlist').then((r) => r.ok ? r.json() : { words: [] }),
+      fetch('/api/settings').then((r) => r.ok ? r.json() : { settings: {} }),
+    ]).then(([, , wordData, settingsData]) => {
       setWords(wordData.words ?? [])
       const s = settingsData.settings ?? {}
       setSettings(s)
@@ -156,29 +186,31 @@ export default function CompliancePage() {
       setBlocking(s.compliance_blocking === 'true' || s.compliance_blocking === true)
       setLoading(false)
     })
-  }, [fetchFlags])
+  }, [fetchFlags, fetchStats])
 
   // Update URL when filters change
   useEffect(() => {
-    const params = buildParams()
+    const params = new URLSearchParams()
+    if (filterType) params.set('type', filterType)
+    if (filterSeverity) params.set('severity', filterSeverity)
+    if (filterResolution) params.set('resolution', filterResolution)
+    if (filterShow) params.set('show', filterShow)
+    if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     router.replace(`/dashboard/compliance${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [filterType, filterSeverity, filterResolution, filterShow, page, router, buildParams])
+  }, [filterType, filterSeverity, filterResolution, filterShow, page, router])
 
-  // Refetch on filter/page change
+  // Refetch flags when filters/page change (skip initial render)
+  const filterChangeCount = useRef(0)
   useEffect(() => {
-    fetchFlags()
-  }, [filterType, filterSeverity, filterResolution, filterShow, page, fetchFlags])
-
-  // Summary stats
-  const unresolvedByType: Record<string, number> = {}
-  const unresolvedBySeverity: Record<string, number> = {}
-  for (const f of flags) {
-    if (!f.resolved) {
-      unresolvedByType[f.flag_type] = (unresolvedByType[f.flag_type] ?? 0) + 1
-      unresolvedBySeverity[f.severity] = (unresolvedBySeverity[f.severity] ?? 0) + 1
+    // Skip the first render (initial load already fetched)
+    if (filterChangeCount.current === 0) {
+      filterChangeCount.current++
+      return
     }
-  }
+    filterChangeCount.current++
+    fetchFlags()
+  }, [fetchFlags])
 
   // Toggle selection
   function toggleSelect(id: number) {
@@ -200,79 +232,143 @@ export default function CompliancePage() {
 
   // Resolve single flag
   async function resolveFlag(id: number) {
-    await fetch('/api/compliance', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, resolved: true, resolved_notes: resolveNotes, resolved_by: 'dashboard' }),
-    })
-    setResolveTarget(null)
-    setResolveNotes('')
-    fetchFlags()
+    if (actionLoading) return
+    setActionLoading(true)
+    try {
+      const res = await fetch('/api/compliance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, resolved: true, resolved_notes: resolveNotes, resolved_by: 'dashboard' }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      toast('success', 'Flag resolved')
+      setResolveTarget(null)
+      setResolveNotes('')
+      await Promise.all([fetchFlags(), fetchStats()])
+    } catch (err) {
+      console.error('Failed to resolve flag:', err)
+      toast('error', 'Failed to resolve flag')
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   // Bulk resolve
   async function bulkResolve() {
-    const ids = Array.from(selected)
-    await fetch('/api/compliance', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids, resolved: true, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
-    })
-    setSelected(new Set())
-    setBulkResolveOpen(false)
-    setBulkNotes('')
-    fetchFlags()
+    if (actionLoading) return
+    setActionLoading(true)
+    try {
+      const ids = Array.from(selected)
+      const res = await fetch('/api/compliance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, resolved: true, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      toast('success', `Resolved ${ids.length} flag${ids.length > 1 ? 's' : ''}`)
+      setSelected(new Set())
+      setBulkResolveOpen(false)
+      setBulkNotes('')
+      await Promise.all([fetchFlags(), fetchStats()])
+    } catch (err) {
+      console.error('Failed to bulk resolve:', err)
+      toast('error', 'Failed to resolve flags')
+    } finally {
+      setActionLoading(false)
+    }
   }
 
   // Add word
   async function addWord() {
-    if (!newWord.trim()) return
-    await fetch('/api/compliance/wordlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ word: newWord.trim(), severity: newWordSeverity }),
-    })
-    setNewWord('')
-    const res = await fetch('/api/compliance/wordlist')
-    const data = await res.json()
-    setWords(data.words ?? [])
+    if (!newWord.trim() || addingWord) return
+    setAddingWord(true)
+    try {
+      const res = await fetch('/api/compliance/wordlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word: newWord.trim(), severity: newWordSeverity }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setNewWord('')
+      const listRes = await fetch('/api/compliance/wordlist')
+      if (listRes.ok) {
+        const data = await listRes.json()
+        setWords(data.words ?? [])
+      }
+      toast('success', 'Word added')
+    } catch (err) {
+      console.error('Failed to add word:', err)
+      toast('error', 'Failed to add word')
+    } finally {
+      setAddingWord(false)
+    }
   }
 
   // Delete word
   async function deleteWord(id: number) {
-    await fetch(`/api/compliance/wordlist?id=${id}`, { method: 'DELETE' })
-    setWords((prev) => prev.filter((w) => w.id !== id))
+    try {
+      const res = await fetch(`/api/compliance/wordlist?id=${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setWords((prev) => prev.filter((w) => w.id !== id))
+      toast('success', 'Word removed')
+    } catch (err) {
+      console.error('Failed to delete word:', err)
+      toast('error', 'Failed to remove word')
+    }
   }
 
   // Save compliance prompt
   async function savePrompt() {
+    if (savingPrompt) return
     setSavingPrompt(true)
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'compliance_prompt', value: compliancePrompt }),
-    })
-    setPromptDirty(false)
-    setSavingPrompt(false)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'compliance_prompt', value: compliancePrompt }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setPromptDirty(false)
+      toast('success', 'Prompt saved')
+    } catch (err) {
+      console.error('Failed to save prompt:', err)
+      toast('error', 'Failed to save prompt')
+    } finally {
+      setSavingPrompt(false)
+    }
   }
 
   // Toggle check settings
   async function toggleChecks(enabled: boolean) {
     setChecksEnabled(enabled)
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'compliance_checks_enabled', value: String(enabled) }),
-    })
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'compliance_checks_enabled', value: String(enabled) }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (err) {
+      console.error('Failed to toggle checks:', err)
+      setChecksEnabled(!enabled) // revert on error
+      toast('error', 'Failed to update setting')
+    }
   }
 
   async function toggleBlocking(b: boolean) {
     setBlocking(b)
-    await fetch('/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: 'compliance_blocking', value: String(b) }),
-    })
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'compliance_blocking', value: String(b) }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch (err) {
+      console.error('Failed to toggle blocking:', err)
+      setBlocking(!b) // revert on error
+      toast('error', 'Failed to update setting')
+    }
   }
 
   if (loading) {
@@ -280,7 +376,7 @@ export default function CompliancePage() {
       <div className="space-y-6">
         <Breadcrumbs />
         <h1 className="text-2xl font-bold text-gray-900">Compliance</h1>
-        <SkeletonCards count={4} />
+        <SkeletonCards count={5} />
         <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
           <table className="w-full">
             <tbody>
@@ -297,12 +393,12 @@ export default function CompliancePage() {
       <Breadcrumbs />
       <h1 className="text-2xl font-bold text-gray-900">Compliance</h1>
 
-      {/* Summary Stats Strip */}
+      {/* Summary Stats Strip — uses dedicated stats query for accurate totals */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {FLAG_TYPES.map((type) => (
           <div key={type} className="bg-white rounded-xl shadow-sm border p-3">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{typeLabels[type]}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{unresolvedByType[type] ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1">{stats.byType[type] ?? 0}</p>
             <p className="text-xs text-gray-500">unresolved</p>
           </div>
         ))}
@@ -377,7 +473,8 @@ export default function CompliancePage() {
           <div className="flex gap-2">
             <button
               onClick={() => setBulkResolveOpen(true)}
-              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              disabled={actionLoading}
+              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               Resolve Selected
             </button>
@@ -404,8 +501,20 @@ export default function CompliancePage() {
               className="w-full border rounded-lg p-3 text-sm mb-4 h-24 resize-none"
             />
             <div className="flex justify-end gap-3">
-              <button onClick={() => setBulkResolveOpen(false)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200">Cancel</button>
-              <button onClick={bulkResolve} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">Resolve All</button>
+              <button
+                onClick={() => setBulkResolveOpen(false)}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={bulkResolve}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {actionLoading ? 'Resolving...' : 'Resolve All'}
+              </button>
             </div>
           </div>
         </div>
@@ -454,7 +563,7 @@ export default function CompliancePage() {
                     </td>
                     <td className="px-4 py-3">
                       <a
-                        href={`/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds ? `?seek=${flag.timestamp_seconds}` : ''}`}
+                        href={`/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`}
                         className="text-blue-600 hover:underline font-medium"
                       >
                         {flag.episode_log?.show_name ?? `Episode #${flag.episode_id}`}
@@ -477,7 +586,7 @@ export default function CompliancePage() {
                       {flag.excerpt ?? '--'}
                     </td>
                     <td className="px-4 py-3">
-                      {flag.timestamp_seconds !== null ? (
+                      {flag.timestamp_seconds != null ? (
                         <a
                           href={`/dashboard/episodes/${flag.episode_id}?seek=${flag.timestamp_seconds}`}
                           className="text-blue-600 hover:underline font-mono text-xs"
@@ -514,9 +623,10 @@ export default function CompliancePage() {
                               />
                               <button
                                 onClick={() => resolveFlag(flag.id)}
-                                className="text-xs text-green-600 hover:text-green-800 font-medium"
+                                disabled={actionLoading}
+                                className="text-xs text-green-600 hover:text-green-800 font-medium disabled:opacity-50"
                               >
-                                Save
+                                {actionLoading ? '...' : 'Save'}
                               </button>
                               <button
                                 onClick={() => { setResolveTarget(null); setResolveNotes('') }}
@@ -547,7 +657,7 @@ export default function CompliancePage() {
         {pagination.totalPages > 1 && (
           <div className="border-t px-4 py-3 flex items-center justify-between text-sm text-gray-600">
             <span>
-              Showing {((pagination.page - 1) * pagination.limit) + 1}–{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
+              Showing {((pagination.page - 1) * pagination.limit) + 1}&ndash;{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
             </span>
             <div className="flex gap-2">
               <button
@@ -612,9 +722,10 @@ export default function CompliancePage() {
                 </select>
                 <button
                   onClick={addWord}
-                  className="px-4 py-1.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700"
+                  disabled={addingWord || !newWord.trim()}
+                  className="px-4 py-1.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 disabled:opacity-50"
                 >
-                  Add
+                  {addingWord ? 'Adding...' : 'Add'}
                 </button>
               </div>
               <div className="divide-y max-h-80 overflow-y-auto">

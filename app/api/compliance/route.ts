@@ -3,10 +3,30 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
-// GET /api/compliance — list flags with pagination and filters
+// GET /api/compliance — list flags with pagination and filters, or stats summary
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
+
+    // GET /api/compliance?stats=true — return unresolved counts by type and severity
+    if (searchParams.get('stats') === 'true') {
+      const { data, error } = await supabaseAdmin
+        .from('compliance_flags')
+        .select('flag_type, severity')
+        .eq('resolved', false)
+
+      if (error) throw error
+
+      const byType: Record<string, number> = {}
+      const bySeverity: Record<string, number> = {}
+      for (const flag of data ?? []) {
+        byType[flag.flag_type] = (byType[flag.flag_type] ?? 0) + 1
+        bySeverity[flag.severity] = (bySeverity[flag.severity] ?? 0) + 1
+      }
+
+      return NextResponse.json({ stats: { byType, bySeverity, total: (data ?? []).length } })
+    }
+
     const episodeId = searchParams.get('episode_id')
     const flagType = searchParams.get('flag_type')
     const severity = searchParams.get('severity')
@@ -18,7 +38,9 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') ?? '1')
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset = (page - 1) * limit
-    const sortBy = searchParams.get('sort') ?? 'created_at'
+    const allowedSortColumns = ['created_at', 'flag_type', 'severity', 'resolved']
+    const sortByRaw = searchParams.get('sort') ?? 'created_at'
+    const sortBy = allowedSortColumns.includes(sortByRaw) ? sortByRaw : 'created_at'
     const sortDir = searchParams.get('dir') === 'asc'
 
     // Build query with count for pagination
