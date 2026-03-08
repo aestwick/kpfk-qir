@@ -1,4 +1,5 @@
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
+import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,6 +10,22 @@ async function getQueueCounts(queue: typeof ingestQueue) {
     waiting: counts.waiting ?? 0,
     completed: counts.completed ?? 0,
     failed: counts.failed ?? 0,
+  }
+}
+
+async function getEpisodeBacklog() {
+  const { data, error } = await supabaseAdmin
+    .from('episode_log')
+    .select('status')
+    .in('status', ['pending', 'transcribed', 'summarized', 'failed'])
+
+  if (error || !data) return { pendingTranscription: 0, pendingSummarization: 0, pendingCompliance: 0, failed: 0 }
+
+  return {
+    pendingTranscription: data.filter((e: { status: string }) => e.status === 'pending').length,
+    pendingSummarization: data.filter((e: { status: string }) => e.status === 'transcribed').length,
+    pendingCompliance: data.filter((e: { status: string }) => e.status === 'summarized').length,
+    failed: data.filter((e: { status: string }) => e.status === 'failed').length,
   }
 }
 
@@ -25,14 +42,15 @@ export async function GET() {
       async function push() {
         if (closed) return
         try {
-          const [ingest, transcribe, summarize, compliance] = await Promise.all([
+          const [ingest, transcribe, summarize, compliance, backlog] = await Promise.all([
             getQueueCounts(ingestQueue),
             getQueueCounts(transcribeQueue),
             getQueueCounts(summarizeQueue),
             getQueueCounts(complianceQueue),
+            getEpisodeBacklog(),
           ])
 
-          const data = { ingest, transcribe, summarize, compliance }
+          const data = { ingest, transcribe, summarize, compliance, backlog }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         } catch {
           // Silently skip on error — client will reconnect
