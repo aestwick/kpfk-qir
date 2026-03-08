@@ -24,32 +24,59 @@ export async function GET(request: NextRequest) {
     }
 
     // Calculate totals
-    const totals = {
-      groq: 0,
-      openai: 0,
-      total: 0,
-      episodes: new Set<number>(),
-      byOperation: {} as Record<string, number>,
-    }
+    const episodes = new Set<number>()
+    let groqCost = 0
+    let openaiCost = 0
+    let totalCost = 0
+    let totalDurationSeconds = 0
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+
+    const byOperation: Record<string, {
+      cost: number
+      count: number
+      durationSeconds: number
+      inputTokens: number
+      outputTokens: number
+    }> = {}
 
     for (const row of data ?? []) {
       const cost = Number(row.estimated_cost) || 0
-      totals.total += cost
-      if (row.service === 'groq') totals.groq += cost
-      if (row.service === 'openai') totals.openai += cost
-      if (row.episode_id) totals.episodes.add(row.episode_id)
-      totals.byOperation[row.operation] =
-        (totals.byOperation[row.operation] ?? 0) + cost
+      const dur = Number(row.duration_seconds) || 0
+      const inTok = Number(row.input_tokens) || 0
+      const outTok = Number(row.output_tokens) || 0
+
+      totalCost += cost
+      totalDurationSeconds += dur
+      totalInputTokens += inTok
+      totalOutputTokens += outTok
+
+      if (row.service === 'groq') groqCost += cost
+      if (row.service === 'openai') openaiCost += cost
+      if (row.episode_id) episodes.add(row.episode_id)
+
+      if (!byOperation[row.operation]) {
+        byOperation[row.operation] = { cost: 0, count: 0, durationSeconds: 0, inputTokens: 0, outputTokens: 0 }
+      }
+      const op = byOperation[row.operation]
+      op.cost += cost
+      op.count++
+      op.durationSeconds += dur
+      op.inputTokens += inTok
+      op.outputTokens += outTok
     }
 
     return NextResponse.json({
       entries: data,
       totals: {
-        groq: totals.groq,
-        openai: totals.openai,
-        total: totals.total,
-        episodeCount: totals.episodes.size,
-        byOperation: totals.byOperation,
+        groq: groqCost,
+        openai: openaiCost,
+        total: totalCost,
+        episodeCount: episodes.size,
+        totalDurationSeconds,
+        totalInputTokens,
+        totalOutputTokens,
+        byOperation,
       },
     })
   } catch (err) {
