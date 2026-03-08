@@ -106,10 +106,19 @@ export async function GET() {
           }
         })
       ),
-      supabaseAdmin
-        .from('episode_log')
-        .select('status')
-        .in('status', ['pending', 'transcribed', 'summarized', 'failed']),
+      (() => {
+        const now = new Date()
+        const q = Math.floor(now.getMonth() / 3)
+        const year = now.getFullYear()
+        const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
+        const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
+        return supabaseAdmin
+          .from('episode_log')
+          .select('status')
+          .in('status', ['pending', 'transcribed', 'summarized', 'failed'])
+          .gte('air_date', start)
+          .lte('air_date', end)
+      })(),
     ])
 
     const episodes = backlogResult.data ?? []
