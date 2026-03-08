@@ -34,6 +34,20 @@ interface ComplianceWord {
   active: boolean
 }
 
+interface ShowHealth {
+  show_key: string
+  show_name: string
+  episodes_checked: number
+  episodes_clean: number
+  episodes_flagged: number
+  total_flags: number
+  critical: number
+  warning: number
+  info: number
+  by_type: Record<string, number>
+  score: number
+}
+
 interface Stats {
   byType: Record<string, number>
   bySeverity: Record<string, number>
@@ -92,6 +106,8 @@ export default function CompliancePage() {
   // Data
   const [flags, setFlags] = useState<ComplianceFlag[]>([])
   const [stats, setStats] = useState<Stats>({ byType: {}, bySeverity: {}, total: 0 })
+  const [showHealth, setShowHealth] = useState<ShowHealth[]>([])
+  const [showHealthExpanded, setShowHealthExpanded] = useState(false)
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 0 })
   const [words, setWords] = useState<ComplianceWord[]>([])
   const [settings, setSettings] = useState<Record<string, unknown>>({})
@@ -199,7 +215,9 @@ export default function CompliancePage() {
       fetchStats(),
       fetch('/api/compliance/wordlist').then((r) => r.ok ? r.json() : { words: [] }),
       fetch('/api/settings').then((r) => r.ok ? r.json() : { settings: {} }),
-    ]).then(([, , wordData, settingsData]) => {
+      fetch('/api/compliance?by_show=true').then((r) => r.ok ? r.json() : { shows: [] }),
+    ]).then(([, , wordData, settingsData, showData]) => {
+      setShowHealth(showData.shows ?? [])
       setWords(wordData.words ?? [])
       const s = settingsData.settings ?? {}
       setSettings(s)
@@ -448,6 +466,84 @@ export default function CompliancePage() {
           </div>
         ))}
       </div>
+
+      {/* Show Health Summary */}
+      {showHealth.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border">
+          <button
+            onClick={() => setShowHealthExpanded(!showHealthExpanded)}
+            className="w-full px-5 py-4 flex items-center justify-between text-left"
+          >
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">Show Health</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {showHealth.filter((s) => s.score === 100).length} clean / {showHealth.length} shows checked
+              </p>
+            </div>
+            <svg className={`w-5 h-5 text-gray-400 transition-transform ${showHealthExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showHealthExpanded && (
+            <div className="border-t overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Show</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Score</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Checked</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Clean</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Flagged</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Critical</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Warning</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Total Flags</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {showHealth.map((show) => (
+                    <tr
+                      key={show.show_key}
+                      className="hover:bg-gray-50 cursor-pointer"
+                      onClick={() => { setFilterShow(show.show_name); setPage(1) }}
+                    >
+                      <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[200px] truncate">
+                        {show.show_name}
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold ${
+                          show.score === 100
+                            ? 'bg-green-100 text-green-700'
+                            : show.score >= 80
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-red-100 text-red-700'
+                        }`}>
+                          {show.score}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-gray-600">{show.episodes_checked}</td>
+                      <td className="px-4 py-2.5 text-center text-green-600 font-medium">{show.episodes_clean}</td>
+                      <td className="px-4 py-2.5 text-center text-amber-600 font-medium">{show.episodes_flagged || '—'}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        {show.critical > 0
+                          ? <span className="text-red-600 font-bold">{show.critical}</span>
+                          : <span className="text-gray-300">—</span>
+                        }
+                      </td>
+                      <td className="px-4 py-2.5 text-center">
+                        {show.warning > 0
+                          ? <span className="text-amber-600 font-medium">{show.warning}</span>
+                          : <span className="text-gray-300">—</span>
+                        }
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-gray-600">{show.total_flags || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-xl shadow-sm border p-4">

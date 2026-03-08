@@ -27,6 +27,93 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ stats: { byType, bySeverity, total: (data ?? []).length } })
     }
 
+    // GET /api/compliance?by_show=true — per-show compliance summary
+    if (searchParams.get('by_show') === 'true') {
+      // Get all compliance-checked episodes
+      const { data: episodes, error: epError } = await supabaseAdmin
+        .from('episode_log')
+        .select('id, show_name, show_key')
+        .in('status', ['compliance_checked', 'summarized'])
+
+      if (epError) throw epError
+
+      // Get all unresolved flags
+      const { data: flagRows, error: flagError } = await supabaseAdmin
+        .from('compliance_flags')
+        .select('episode_id, flag_type, severity')
+        .eq('resolved', false)
+
+      if (flagError) throw flagError
+
+      // Build per-show summary
+      const showMap: Record<string, {
+        show_name: string
+        episodes_checked: number
+        episode_ids: Set<number>
+        total_flags: number
+        critical: number
+        warning: number
+        info: number
+        by_type: Record<string, number>
+        flagged_episodes: Set<number>
+      }> = {}
+
+      for (const ep of episodes ?? []) {
+        const key = ep.show_key
+        if (!showMap[key]) {
+          showMap[key] = {
+            show_name: ep.show_name ?? key,
+            episodes_checked: 0,
+            episode_ids: new Set(),
+            total_flags: 0,
+            critical: 0,
+            warning: 0,
+            info: 0,
+            by_type: {},
+            flagged_episodes: new Set(),
+          }
+        }
+        showMap[key].episodes_checked++
+        showMap[key].episode_ids.add(ep.id)
+      }
+
+      for (const flag of flagRows ?? []) {
+        // Find which show this episode belongs to
+        const ep = (episodes ?? []).find((e) => e.id === flag.episode_id)
+        if (!ep) continue
+        const key = ep.show_key
+        if (!showMap[key]) continue
+
+        showMap[key].total_flags++
+        showMap[key].flagged_episodes.add(flag.episode_id)
+        if (flag.severity === 'critical') showMap[key].critical++
+        else if (flag.severity === 'warning') showMap[key].warning++
+        else showMap[key].info++
+        showMap[key].by_type[flag.flag_type] = (showMap[key].by_type[flag.flag_type] ?? 0) + 1
+      }
+
+      const shows = Object.entries(showMap).map(([show_key, s]) => ({
+        show_key,
+        show_name: s.show_name,
+        episodes_checked: s.episodes_checked,
+        episodes_clean: s.episodes_checked - s.flagged_episodes.size,
+        episodes_flagged: s.flagged_episodes.size,
+        total_flags: s.total_flags,
+        critical: s.critical,
+        warning: s.warning,
+        info: s.info,
+        by_type: s.by_type,
+        score: s.episodes_checked > 0
+          ? Math.round(((s.episodes_checked - s.flagged_episodes.size) / s.episodes_checked) * 100)
+          : 100,
+      }))
+
+      // Sort by score ascending (worst first), then by total_flags descending
+      shows.sort((a, b) => a.score - b.score || b.total_flags - a.total_flags)
+
+      return NextResponse.json({ shows })
+    }
+
     const episodeId = searchParams.get('episode_id')
     const flagType = searchParams.get('flag_type')
     const severity = searchParams.get('severity')
