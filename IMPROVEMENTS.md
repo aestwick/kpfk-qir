@@ -71,41 +71,39 @@ Episodes that fail 3+ times are promoted to `dead` status by the auto-retry work
 
 ---
 
-## P2/P3 — Nice to Have (Defer)
+## P2/P3 — Nice to Have
 
-Legitimate improvements but none are blocking you from getting the pipeline running and generating your first QIR.
+### 11. SSE Instead of Polling ✅
 
-### 11. SSE Instead of Polling
+Added `/api/events` SSE endpoint that streams queue status every 5 seconds over a persistent connection. Jobs page uses `useQueueSSE()` hook for live updates without polling. Dashboard uses SSE for pipeline visualization (live queue data) and reduced polling interval (30s instead of 5s) for the full dashboard data.
 
-The dashboard and jobs page poll every 5 seconds regardless of activity. Server-Sent Events would reduce unnecessary API calls and provide instant updates. Not worth the complexity until you have multiple concurrent users.
+### 12. URL-Persisted Filters ✅
 
-### 12. URL-Persisted Filters
+Episode filters (status, quarter, show, category, sort, page) are now stored in URL search params via `useSearchParams`. Users can bookmark filtered views and share links. Filters survive navigation.
 
-Episode filters (status, quarter, show, category, sort) reset on navigation. Store them in URL search params so users can bookmark filtered views. Nice for daily use once the system is stable.
+### 13. Shared Toast/Notification System ✅
 
-### 13. Shared Toast/Notification System
+Extracted `app/components/toast.tsx` with `ToastProvider` and `useToast()` hook. Toasts auto-dismiss after 5 seconds with manual dismiss option. Replaced per-page state in dashboard overview, jobs, and settings pages.
 
-The toast pattern is copy-pasted across pages (component-local state). Extract a shared context/provider. Low priority — it works, it's just not DRY.
+### 14. Parallelize RSS Ingest ✅
 
-### 14. Parallelize RSS Ingest
+RSS feeds are now fetched in parallel batches of 5 using `Promise.allSettled()`. Per-show logic extracted into `processShow()` helper.
 
-Currently fetches each show's RSS feed sequentially. Could use `Promise.allSettled()` with concurrency limit. Saves maybe 10 seconds on a job that runs hourly. Not worth the complexity right now.
+### 15. Lazy-Load Dashboard Pages ✅
 
-### 15. Lazy-Load Dashboard Pages
+Next.js App Router already code-splits each route segment into its own chunk. No additional `next/dynamic` needed — build output confirms each page is 1–5KB independently loaded.
 
-All dashboard pages use `'use client'` and are bundled together. Use `next/dynamic` to lazy-load heavier pages (episode detail, QIR generator, settings). Low impact — the bundle is already small (~5KB per page).
+### 16. ISR for Public QIR Page ✅
 
-### 16. ISR for Public QIR Page
+Public QIR page (`/[year]/q[quarter]`) now uses `revalidate = 86400` (24 hours). Finalized reports are cached and served statically.
 
-The public report page (`/[year]/q[quarter]`) makes a fresh DB query on every request. Since finalized reports never change, use Next.js ISR with `revalidate`. Low traffic, so this barely matters.
+### 17. Keyboard Shortcuts ✅
 
-### 17. Keyboard Shortcuts
+Episodes page now supports: `j`/`k` to navigate rows, `Enter` to open selected episode, `/` to focus the show filter, `r` to retry all failed. Selected row is highlighted with a blue ring. Shortcut hints shown below the table.
 
-Power users (station staff checking daily) would benefit from `J/K` to navigate episodes, `R` to retry, `/` to search. Pure convenience feature.
+### 18. Timeline/Activity Log View ✅
 
-### 18. Timeline/Activity Log View
-
-A historical timeline of all pipeline events. The 24h feed on the new dashboard covers the immediate need. A full history view can wait.
+New `/dashboard/activity` page shows a full historical timeline of pipeline events grouped by day. Supports 24h, 3-day, 7-day, and 30-day ranges. Each entry links to the episode detail page. Added to sidebar navigation.
 
 ---
 

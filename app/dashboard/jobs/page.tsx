@@ -1,48 +1,14 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
 import { SkeletonCard } from '@/app/components/skeleton'
-
-interface QueueCounts {
-  active: number
-  waiting: number
-  completed: number
-  failed: number
-}
-
-interface QueueData {
-  ingest: QueueCounts
-  transcribe: QueueCounts
-  summarize: QueueCounts
-}
+import { useToast } from '@/app/components/toast'
+import { useQueueSSE } from '@/lib/use-sse'
 
 export default function JobsPage() {
-  const [queues, setQueues] = useState<QueueData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchQueues = useCallback(async () => {
-    try {
-      const res = await fetch('/api/jobs')
-      if (res.ok) {
-        setQueues(await res.json())
-        setError(null)
-      } else {
-        setError('Failed to fetch queue status')
-      }
-    } catch {
-      setError('Could not reach server')
-    }
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    fetchQueues()
-    const interval = setInterval(fetchQueues, 5000)
-    return () => clearInterval(interval)
-  }, [fetchQueues])
+  const { toast } = useToast()
 
   async function triggerJob(action: string) {
     setActionLoading(action)
@@ -54,18 +20,15 @@ export default function JobsPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        setError(data.error ?? `Failed to queue ${action}`)
+        toast('error', data.error ?? `Failed to queue ${action}`)
       }
     } catch {
-      setError('Network error: could not reach server')
+      toast('error', 'Network error: could not reach server')
     }
-    setTimeout(() => {
-      fetchQueues()
-      setActionLoading(null)
-    }, 1500)
+    setTimeout(() => setActionLoading(null), 1500)
   }
 
-  if (loading) return (
+  if (!queues) return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Jobs</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -80,14 +43,10 @@ export default function JobsPage() {
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Jobs</h2>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">{error}</div>
-      )}
-
       {/* Queue Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {queueNames.map((name) => {
-          const q = queues?.[name]
+          const q = queues[name]
           return (
             <div key={name} className="bg-white rounded-lg shadow p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -102,19 +61,19 @@ export default function JobsPage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-blue-50 rounded p-2 text-center">
-                  <p className="text-lg font-bold text-blue-700">{q?.active ?? 0}</p>
+                  <p className="text-lg font-bold text-blue-700">{q.active}</p>
                   <p className="text-xs text-blue-600">Active</p>
                 </div>
                 <div className="bg-yellow-50 rounded p-2 text-center">
-                  <p className="text-lg font-bold text-yellow-700">{q?.waiting ?? 0}</p>
+                  <p className="text-lg font-bold text-yellow-700">{q.waiting}</p>
                   <p className="text-xs text-yellow-600">Waiting</p>
                 </div>
                 <div className="bg-green-50 rounded p-2 text-center">
-                  <p className="text-lg font-bold text-green-700">{q?.completed ?? 0}</p>
+                  <p className="text-lg font-bold text-green-700">{q.completed}</p>
                   <p className="text-xs text-green-600">Completed</p>
                 </div>
                 <div className="bg-red-50 rounded p-2 text-center">
-                  <p className="text-lg font-bold text-red-700">{q?.failed ?? 0}</p>
+                  <p className="text-lg font-bold text-red-700">{q.failed}</p>
                   <p className="text-xs text-red-600">Failed</p>
                 </div>
               </div>
@@ -131,7 +90,7 @@ export default function JobsPage() {
           Transcription triggers after ingest finds new episodes. Summarization triggers after transcription completes.
         </p>
         <p className="text-sm text-gray-500 mt-2">
-          Auto-refresh: queue counts update every 5 seconds.
+          Live updates via server-sent events.
         </p>
       </div>
     </div>
