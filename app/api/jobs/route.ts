@@ -47,6 +47,48 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, message: `Retried ${retried} of ${failed.length} failed jobs in ${body.queue}` })
     }
 
+    // Advance pipeline: check backlog and trigger all stages with pending work
+    if (action === 'advance-pipeline') {
+      const now = new Date()
+      const q = Math.floor(now.getMonth() / 3)
+      const year = now.getFullYear()
+      const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
+      const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
+      const dateFilter = `and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`
+
+      const [pendingRes, transcribedRes, summarizedRes] = await Promise.all([
+        supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('status', 'pending').or(dateFilter),
+        supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('status', 'transcribed').or(dateFilter),
+        supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('status', 'summarized').or(dateFilter),
+      ])
+
+      const triggered: string[] = []
+
+      // Always run ingest to pull any new episodes
+      await ingestQueue.add('pipeline-ingest', {})
+      triggered.push('ingest')
+
+      if ((pendingRes.count ?? 0) > 0) {
+        await transcribeQueue.add('pipeline-transcribe', {})
+        triggered.push(`transcribe (${pendingRes.count} pending)`)
+      }
+      if ((transcribedRes.count ?? 0) > 0) {
+        await summarizeQueue.add('pipeline-summarize', {})
+        triggered.push(`summarize (${transcribedRes.count} transcribed)`)
+      }
+      if ((summarizedRes.count ?? 0) > 0) {
+        await complianceQueue.add('pipeline-compliance', {})
+        triggered.push(`compliance (${summarizedRes.count} summarized)`)
+      }
+
+      const total = (pendingRes.count ?? 0) + (transcribedRes.count ?? 0) + (summarizedRes.count ?? 0)
+      const message = total > 0
+        ? `Pipeline advancing: ${triggered.join(', ')}. ${total} episodes to process — jobs will auto-continue until done.`
+        : 'Pipeline up to date! Ingest queued to check for new episodes.'
+
+      return NextResponse.json({ ok: true, message, triggered, backlog: total })
+    }
+
     switch (action) {
       case 'ingest': {
         await ingestQueue.add('manual-ingest', {})

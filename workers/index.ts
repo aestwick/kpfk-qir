@@ -95,9 +95,13 @@ const transcribeWorker = new Worker('transcribe', processTranscribe, {
 
 transcribeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.transcribed ?? 0
-  console.log(`[transcribe] completed — ${count} episodes transcribed`)
+  const remaining = job.returnvalue?.remaining ?? false
+  console.log(`[transcribe] completed — ${count} episodes transcribed${remaining ? ' (more remaining)' : ''}`)
   if (count > 0) {
     await summarizeQueue.add('summarize-batch', {})
+  }
+  if (remaining) {
+    await transcribeQueue.add('transcribe-continue', {})
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -112,9 +116,13 @@ const summarizeWorker = new Worker('summarize', processSummarize, {
 
 summarizeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.summarized ?? 0
-  console.log(`[summarize] completed — ${count} episodes summarized`)
+  const remaining = job.returnvalue?.remaining ?? false
+  console.log(`[summarize] completed — ${count} episodes summarized${remaining ? ' (more remaining)' : ''}`)
   if (count > 0) {
     await complianceQueue.add('compliance-batch', {})
+  }
+  if (remaining) {
+    await summarizeQueue.add('summarize-continue', {})
   }
 })
 summarizeWorker.on('failed', (job, err) => {
@@ -127,9 +135,13 @@ const complianceWorker = new Worker('compliance', processCompliance, {
   concurrency: 1,
 })
 
-complianceWorker.on('completed', (job) => {
+complianceWorker.on('completed', async (job) => {
   const count = job.returnvalue?.checked ?? 0
-  console.log(`[compliance] completed — ${count} episodes checked`)
+  const remaining = job.returnvalue?.remaining ?? false
+  console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
+  if (remaining) {
+    await complianceQueue.add('compliance-continue', {})
+  }
 })
 complianceWorker.on('failed', (job, err) => {
   console.error(`[compliance] failed:`, err.message)

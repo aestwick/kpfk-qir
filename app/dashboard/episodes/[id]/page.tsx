@@ -439,6 +439,19 @@ export default function EpisodeDetailPage() {
     }
   }
 
+  function copyFlagDetails(flag: ComplianceFlag) {
+    const lines = [
+      `Show: ${episode?.show_name ?? 'Unknown'}`,
+      `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
+      `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
+      `URL: ${window.location.origin}/dashboard/episodes/${id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
+      flag.timestamp_seconds != null ? `Timestamp: ${formatTimestamp(flag.timestamp_seconds)}` : null,
+      `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
+      flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
+    ].filter(Boolean).join('\n')
+    navigator.clipboard.writeText(lines).then(() => setToast('Copied to clipboard'))
+  }
+
   function handleTextSelected(text: string, rect: DOMRect) {
     // rect is viewport-relative; position: fixed is also viewport-relative — no scroll offset needed
     setSelectionToolbar({
@@ -498,7 +511,9 @@ export default function EpisodeDetailPage() {
 
       <div className="flex items-center gap-3">
         <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; Episodes</a>
-        <h2 className="text-2xl font-bold">{episode.show_name ?? `Episode ${episode.id}`}</h2>
+        <a href={`/dashboard/shows/${encodeURIComponent(episode.show_key)}`} className="text-2xl font-bold hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
+          {episode.show_name ?? `Episode ${episode.id}`}
+        </a>
         <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[episode.status] ?? 'bg-gray-100 dark:bg-warm-700'}`}>
           {episode.status}
         </span>
@@ -631,17 +646,38 @@ export default function EpisodeDetailPage() {
                     <p className="text-sm font-medium text-gray-900 dark:text-warm-100">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
                     {flag.details && <p className="text-xs text-gray-600 dark:text-warm-400 mt-0.5">{flag.details}</p>}
                     {flag.excerpt && (
-                      <p className="text-xs text-gray-500 mt-1 bg-gray-50 dark:bg-warm-700 rounded px-2 py-1 font-mono">
+                      <button
+                        onClick={() => {
+                          if (flag.timestamp_seconds != null) {
+                            jumpToTimestamp(flag.timestamp_seconds, flag.excerpt)
+                          } else {
+                            setHighlightText(flag.excerpt!.slice(0, 60))
+                          }
+                        }}
+                        className="text-xs text-gray-500 dark:text-warm-400 mt-1 bg-gray-50 dark:bg-warm-700 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300 rounded px-2 py-1 font-mono text-left w-full transition-colors cursor-pointer"
+                        title={flag.timestamp_seconds != null ? `Play from ${formatTimestamp(flag.timestamp_seconds)}` : 'Find in transcript'}
+                      >
                         &ldquo;...{flag.excerpt}...&rdquo;
-                      </p>
+                      </button>
                     )}
-                    {flag.timestamp_seconds !== null && (
+                    {flag.timestamp_seconds !== null ? (
                       <button
                         onClick={() => jumpToTimestamp(flag.timestamp_seconds!, flag.excerpt)}
                         className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
                         title="Jump to this timestamp in audio and transcript"
                       >
                         <span>&#9654;</span> Jump to {formatTimestamp(flag.timestamp_seconds)}
+                      </button>
+                    ) : flag.excerpt && (
+                      <button
+                        onClick={() => {
+                          // No timestamp stored — highlight excerpt in transcript so user can find it
+                          setHighlightText(flag.excerpt!.slice(0, 60))
+                        }}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
+                        title="Find this excerpt in the transcript"
+                      >
+                        <span>&#128269;</span> Find in transcript
                       </button>
                     )}
                     {/* "Not a real word" shortcut for profanity flags */}
@@ -660,7 +696,14 @@ export default function EpisodeDetailPage() {
                       </button>
                     )}
                   </div>
-                  <div className="shrink-0">
+                  <div className="shrink-0 flex items-center gap-2">
+                    <button
+                      onClick={() => copyFlagDetails(flag)}
+                      className="text-xs px-2 py-1 border rounded hover:bg-gray-50 text-gray-400 hover:text-gray-600"
+                      title="Copy flag details to clipboard"
+                    >
+                      Copy
+                    </button>
                     {resolvingFlag === flag.id ? (
                       <div className="flex items-center gap-2">
                         <input

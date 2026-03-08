@@ -259,9 +259,44 @@ export default function JobsPage() {
     return sum + (failedDetails?.[name]?.failedJobs?.length ?? 0)
   }, 0)
 
+  async function advancePipeline() {
+    setActionLoading('advance-pipeline')
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'advance-pipeline' }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        toast('success', data.message)
+        await fetchDetails()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        toast('error', data.error ?? 'Failed to advance pipeline')
+      }
+    } catch {
+      toast('error', 'Network error: could not reach server')
+    }
+    setActionLoading(null)
+  }
+
+  const totalBacklog = queues?.backlog
+    ? (queues.backlog.pendingTranscription + queues.backlog.pendingSummarization + queues.backlog.pendingCompliance)
+    : 0
+
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Jobs</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Jobs</h2>
+        <button
+          onClick={advancePipeline}
+          disabled={anyLoading}
+          className="px-5 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+        >
+          {actionLoading === 'advance-pipeline' ? 'Starting...' : totalBacklog > 0 ? `Advance Pipeline (${totalBacklog} episodes)` : 'Advance Pipeline'}
+        </button>
+      </div>
 
       {/* Queue Cards — 4 columns */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -148,10 +148,30 @@ function runStationIdCheck(
   return flags
 }
 
+function findTimestampForText(vttCues: VttCue[], searchText: string): number | null {
+  const lower = searchText.toLowerCase()
+  for (const cue of vttCues) {
+    if (cue.text.toLowerCase().includes(lower)) {
+      return Math.floor(cue.startSeconds)
+    }
+  }
+  // Fallback: search for first few words of the excerpt
+  const words = lower.split(/\s+/).slice(0, 4).join(' ')
+  if (words.length > 10) {
+    for (const cue of vttCues) {
+      if (cue.text.toLowerCase().includes(words)) {
+        return Math.floor(cue.startSeconds)
+      }
+    }
+  }
+  return null
+}
+
 function runTechnicalCheck(
   episodeId: number,
   transcript: string,
-  duration: number | null
+  duration: number | null,
+  vttCues: VttCue[]
 ): ComplianceFlagInsert[] {
   const flags: ComplianceFlagInsert[] = []
 
@@ -188,18 +208,21 @@ function runTechnicalCheck(
     }
   }
 
-  // Technical difficulty keywords
-  const techPattern = /technical difficult|dead air|off the air|lost (the )?signal/i
+  // Technical difficulty keywords — require context that suggests actual issues,
+  // not casual speech like "after we got off the air"
+  const techPattern = /technical difficult|dead air|(went|was|were|go|gone|got kicked|knocked) off the air|lost (the )?signal|having .{0,20}problems? with .{0,20}(audio|signal|feed|stream|broadcast)/i
   const techMatch = transcript.match(techPattern)
   if (techMatch) {
     const idx = techMatch.index ?? 0
     const excerpt = transcript.slice(Math.max(0, idx - 30), Math.min(transcript.length, idx + 80))
+    const matchedPhrase = techMatch[0]
+    const timestamp = findTimestampForText(vttCues, matchedPhrase)
     flags.push({
       episode_id: episodeId,
       flag_type: 'technical',
       severity: 'info',
       excerpt,
-      timestamp_seconds: null,
+      timestamp_seconds: timestamp,
       details: 'Transcript mentions possible technical issues',
     })
   }
@@ -355,15 +378,17 @@ export async function processCompliance(job: Job) {
         allFlags.push(...runProfanityCheck(episode.id, data.transcript, wordlist, restricted))
       }
 
+      // Parse VTT once for both station ID and technical checks
+      const vttCues = data.vtt ? parseVtt(data.vtt) : []
+
       // 2. Station ID check
-      if (checksEnabled.station_id_missing && data.vtt) {
-        const cues = parseVtt(data.vtt)
-        allFlags.push(...runStationIdCheck(episode.id, cues, episode.duration))
+      if (checksEnabled.station_id_missing && vttCues.length > 0) {
+        allFlags.push(...runStationIdCheck(episode.id, vttCues, episode.duration))
       }
 
       // 3. Technical check
       if (checksEnabled.technical) {
-        allFlags.push(...runTechnicalCheck(episode.id, data.transcript, episode.duration))
+        allFlags.push(...runTechnicalCheck(episode.id, data.transcript, episode.duration, vttCues))
       }
 
       // 4. AI checks (payola + sponsor)
@@ -409,5 +434,17 @@ export async function processCompliance(job: Job) {
     }
   }
 
-  return { checked }
+  // Check if more summarized episodes remain after this batch
+  const { count: remainingCount } = await supabaseAdmin
+    .from('episode_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'summarized')
+    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+
+  const remaining = (remainingCount ?? 0) > 0
+  if (remaining) {
+    console.log(`[compliance] ${remainingCount} more summarized episodes — will continue`)
+  }
+
+  return { checked, remaining }
 }
