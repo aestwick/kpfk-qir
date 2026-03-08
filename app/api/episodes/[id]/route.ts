@@ -7,24 +7,36 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { data: episode, error } = await supabaseAdmin
-      .from('episode_log')
-      .select('*')
-      .eq('id', parseInt(params.id))
-      .single()
+    const episodeId = parseInt(params.id)
 
-    if (error || !episode) {
+    // Fetch episode, transcript, and compliance flags in parallel
+    const [episodeResult, transcriptResult, flagsResult] = await Promise.all([
+      supabaseAdmin
+        .from('episode_log')
+        .select('*')
+        .eq('id', episodeId)
+        .single(),
+      supabaseAdmin
+        .from('transcripts')
+        .select('*')
+        .eq('episode_id', episodeId)
+        .single(),
+      supabaseAdmin
+        .from('compliance_flags')
+        .select('*')
+        .eq('episode_id', episodeId)
+        .order('created_at', { ascending: false }),
+    ])
+
+    if (episodeResult.error || !episodeResult.data) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
 
-    // Also fetch transcript if it exists
-    const { data: transcript } = await supabaseAdmin
-      .from('transcripts')
-      .select('*')
-      .eq('episode_id', episode.id)
-      .single()
-
-    return NextResponse.json({ episode, transcript })
+    return NextResponse.json({
+      episode: episodeResult.data,
+      transcript: transcriptResult.data ?? null,
+      complianceFlags: flagsResult.data ?? [],
+    })
   } catch (err) {
     console.error('GET /api/episodes/[id] failed:', err)
     return NextResponse.json({ error: 'Failed to fetch episode' }, { status: 500 })
@@ -66,10 +78,22 @@ export async function PATCH(
       return NextResponse.json({ ok: true, message: 'Episode reset to pending' })
     }
 
-    // Generic update (edit summary, issue_category, etc.)
+    // Generic update (edit summary, issue_category, host, guest, etc.)
+    const allowedFields = ['summary', 'issue_category', 'headline', 'host', 'guest', 'status', 'error_message']
+    const safeUpdates: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(updates)) {
+      if (allowedFields.includes(key)) {
+        safeUpdates[key] = value
+      }
+    }
+
+    if (Object.keys(safeUpdates).length === 0) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+    }
+
     const { error } = await supabaseAdmin
       .from('episode_log')
-      .update(updates)
+      .update(safeUpdates)
       .eq('id', episodeId)
 
     if (error) {
