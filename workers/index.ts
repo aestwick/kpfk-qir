@@ -4,8 +4,16 @@ import { processTranscribe } from './transcribe'
 import { processSummarize } from './summarize'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
+import { getSetting } from '../lib/settings'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
+
+// -- Pipeline Mode Presets --
+const PIPELINE_MODES: Record<string, { transcribe: number; summarize: number }> = {
+  steady: { transcribe: 1, summarize: 5 },
+  'catch-up': { transcribe: 3, summarize: 10 },
+}
+const DEFAULT_MODE = 'steady'
 
 function parseRedisUrl(url: string) {
   const parsed = new URL(url)
@@ -71,9 +79,10 @@ ingestWorker.on('failed', (job, err) => {
 })
 
 // -- Transcribe Worker --
+const initialMode = PIPELINE_MODES[DEFAULT_MODE]
 const transcribeWorker = new Worker('transcribe', processTranscribe, {
   connection,
-  concurrency: 1, // ffmpeg is heavy, run one at a time
+  concurrency: initialMode.transcribe,
 })
 
 transcribeWorker.on('completed', async (job) => {
@@ -90,7 +99,7 @@ transcribeWorker.on('failed', (job, err) => {
 // -- Summarize Worker --
 const summarizeWorker = new Worker('summarize', processSummarize, {
   connection,
-  concurrency: 3,
+  concurrency: initialMode.summarize,
 })
 
 summarizeWorker.on('completed', (job) => {
@@ -166,11 +175,35 @@ async function setupCron() {
 
 setupCron().catch(console.error)
 
+// -- Pipeline Mode Polling --
+let currentMode = DEFAULT_MODE
+
+async function syncPipelineMode() {
+  try {
+    const mode = (await getSetting<string>('pipeline_mode')) ?? DEFAULT_MODE
+    const preset = PIPELINE_MODES[mode]
+    if (!preset) return
+    if (mode !== currentMode) {
+      transcribeWorker.concurrency = preset.transcribe
+      summarizeWorker.concurrency = preset.summarize
+      console.log(`[workers] pipeline mode changed: ${currentMode} → ${mode} (transcribe=${preset.transcribe}, summarize=${preset.summarize})`)
+      currentMode = mode
+    }
+  } catch (err) {
+    console.error('[workers] failed to sync pipeline mode:', err)
+  }
+}
+
+// Check on startup, then every 30s
+syncPipelineMode()
+const modeInterval = setInterval(syncPipelineMode, 30_000)
+
 console.log('[workers] all workers started')
 
 // Graceful shutdown
 async function shutdown() {
   console.log('[workers] shutting down...')
+  clearInterval(modeInterval)
   await Promise.all([
     ingestWorker.close(),
     transcribeWorker.close(),
