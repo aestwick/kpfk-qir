@@ -45,12 +45,12 @@ interface DashData {
 }
 
 const BADGE_COLORS: Record<string, string> = {
-  pending:             'bg-amber-100/80 text-amber-800',
-  transcribed:         'bg-blue-100/80 text-blue-800',
-  summarized:          'bg-emerald-100/80 text-emerald-800',
-  compliance_checked:  'bg-emerald-100/80 text-emerald-800',
-  failed:              'bg-red-100/80 text-red-800',
-  unavailable:         'bg-warm-200 text-warm-500',
+  pending:             'bg-amber-100/80 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  transcribed:         'bg-blue-100/80 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  summarized:          'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  compliance_checked:  'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  failed:              'bg-red-100/80 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  unavailable:         'bg-warm-200 text-warm-500 dark:bg-warm-700 dark:text-warm-400',
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -63,12 +63,12 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_CELL_BG: Record<string, string> = {
-  pending:             'bg-amber-50 border-amber-100',
-  transcribed:         'bg-blue-50 border-blue-100',
-  summarized:          'bg-emerald-50 border-emerald-100',
-  compliance_checked:  'bg-emerald-50/60 border-emerald-100',
-  failed:              'bg-red-50 border-red-100',
-  unavailable:         'bg-warm-50 border-warm-200',
+  pending:             'bg-amber-50 border-amber-100 dark:bg-amber-900/20 dark:border-amber-800/40',
+  transcribed:         'bg-blue-50 border-blue-100 dark:bg-blue-900/20 dark:border-blue-800/40',
+  summarized:          'bg-emerald-50 border-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-800/40',
+  compliance_checked:  'bg-emerald-50/60 border-emerald-100 dark:bg-emerald-900/15 dark:border-emerald-800/40',
+  failed:              'bg-red-50 border-red-100 dark:bg-red-900/20 dark:border-red-800/40',
+  unavailable:         'bg-warm-50 border-warm-200 dark:bg-warm-800 dark:border-warm-700',
 }
 
 const FLAG_LABELS: Record<string, string> = {
@@ -231,8 +231,8 @@ export default function DashboardOverview() {
 
   if (loading) return (
     <div className="space-y-6 max-w-[1400px] animate-fade-in">
-      <div className="h-12 bg-warm-100 rounded-xl animate-pulse" />
-      <div className="h-14 bg-warm-100 rounded-xl animate-pulse" />
+      <div className="h-12 bg-warm-100 dark:bg-warm-700 rounded-xl animate-pulse" />
+      <div className="h-14 bg-warm-100 dark:bg-warm-700 rounded-xl animate-pulse" />
       <SkeletonCards count={5} />
       <SkeletonBlock />
       <SkeletonBlock />
@@ -265,9 +265,9 @@ export default function DashboardOverview() {
   const readinessLevel = qirReadiness.coveredCategories.length >= 5 ? 'good'
     : qirReadiness.coveredCategories.length >= 3 ? 'warn' : 'bad'
   const readinessStyles: Record<string, string> = {
-    good: 'text-emerald-700 bg-emerald-50 border-emerald-200',
-    warn: 'text-amber-700 bg-amber-50 border-amber-200',
-    bad: 'text-red-700 bg-red-50 border-red-200',
+    good: 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-300 dark:bg-emerald-900/20 dark:border-emerald-800/40',
+    warn: 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-300 dark:bg-amber-900/20 dark:border-amber-800/40',
+    bad: 'text-red-700 bg-red-50 border-red-200 dark:text-red-300 dark:bg-red-900/20 dark:border-red-800/40',
   }
 
   const activityByDay: { label: string; items: ActivityItem[] }[] = []
@@ -291,8 +291,8 @@ export default function DashboardOverview() {
       {/* ═══ 1. ON AIR STATUS STRIP ═══ */}
       <div className={`rounded-xl border px-5 py-3.5 flex items-center justify-between transition-all duration-300 ${
         anyProcessing
-          ? 'bg-gradient-to-r from-kpfk-cream to-kpfk-cream-dark border-kpfk-gold/25 shadow-glow-gold'
-          : 'bg-white border-warm-200'
+          ? 'bg-gradient-to-r from-kpfk-cream to-kpfk-cream-dark border-kpfk-gold/25 shadow-glow-gold dark:from-warm-800 dark:to-warm-800 dark:border-kpfk-gold-dark/30 dark:shadow-glow-gold-dark'
+          : 'bg-white border-warm-200 dark:bg-surface-raised dark:border-warm-700'
       }`}>
         <div className="flex items-center gap-4">
           {anyProcessing ? (
@@ -302,7 +302,7 @@ export default function DashboardOverview() {
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-kpfk-gold opacity-60" />
                   <span className="relative inline-flex rounded-full h-3 w-3 bg-kpfk-gold" />
                 </span>
-                <span className="text-xs font-semibold text-warm-700 uppercase tracking-wider">Processing</span>
+                <span className="text-xs font-semibold text-warm-700 dark:text-warm-200 uppercase tracking-wider">Processing</span>
               </div>
               <div className="flex items-center gap-3 text-sm text-warm-500">
                 {activeJobs.map((j) => (
@@ -346,16 +346,16 @@ export default function DashboardOverview() {
       {/* ═══ 2. QUARTER SCOREBOARD ═══ */}
       <div className="card p-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-lg font-bold text-warm-900">{data.quarter.label}</h2>
+          <h2 className="text-lg font-bold text-warm-900 dark:text-warm-50">{data.quarter.label}</h2>
           {qirStatus && (
             <a href="/dashboard/generate" className={`badge text-xs px-3 py-1 rounded-full border ${
-              qirStatus.status === 'final' ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'
+              qirStatus.status === 'final' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800/40 dark:text-emerald-300' : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300'
             }`}>
               QIR: {qirStatus.status === 'final' ? 'Finalized' : 'Draft'} (v{qirStatus.version}, {qirStatus.entryCount} entries)
             </a>
           )}
           {!qirStatus && (
-            <a href="/dashboard/generate" className="badge text-xs px-3 py-1 rounded-full border border-warm-200 text-warm-400 hover:border-warm-400 transition-colors">
+            <a href="/dashboard/generate" className="badge text-xs px-3 py-1 rounded-full border border-warm-200 text-warm-400 dark:border-warm-600 dark:text-warm-500 hover:border-warm-400 transition-colors">
               QIR: Not generated
             </a>
           )}
@@ -376,7 +376,7 @@ export default function DashboardOverview() {
               href={`/dashboard/episodes?status=${status}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
               className={`text-center p-3.5 rounded-xl border hover:shadow-card-hover transition-all duration-200 ${STATUS_CELL_BG[status] ?? 'bg-warm-50 border-warm-200'}`}
             >
-              <p className="text-2xl font-bold text-warm-900 tabular-nums">{count}</p>
+              <p className="text-2xl font-bold text-warm-900 dark:text-warm-100 tabular-nums">{count}</p>
               <p className="text-2xs text-warm-500 mt-0.5">{STATUS_LABELS[status] ?? status}</p>
             </a>
           ))}
@@ -386,9 +386,9 @@ export default function DashboardOverview() {
         <div>
           <div className="flex justify-between text-xs text-warm-500 mb-1.5">
             <span>Pipeline completion</span>
-            <span className="font-medium text-warm-700 tabular-nums">{qtrPct}% ({qtrComplete}/{qtrTotal})</span>
+            <span className="font-medium text-warm-700 dark:text-warm-300 tabular-nums">{qtrPct}% ({qtrComplete}/{qtrTotal})</span>
           </div>
-          <div className="progress-track h-2.5 bg-warm-100">
+          <div className="progress-track h-2.5 bg-warm-100 dark:bg-warm-700">
             <div className="progress-fill bg-kpfk-red h-2.5" style={{ width: `${qtrPct}%` }} />
           </div>
         </div>
@@ -430,7 +430,7 @@ export default function DashboardOverview() {
               {timeEstimates.transcription && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-warm-500">Transcription</span>
-                  <span className="font-medium text-warm-800 tabular-nums">
+                  <span className="font-medium text-warm-800 dark:text-warm-200 tabular-nums">
                     {fmtDur(timeEstimates.transcription.totalMinutes)} ({timeEstimates.transcription.count} episodes)
                   </span>
                 </div>
@@ -438,7 +438,7 @@ export default function DashboardOverview() {
               {timeEstimates.summarization && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-warm-500">Summarization</span>
-                  <span className="font-medium text-warm-800 tabular-nums">
+                  <span className="font-medium text-warm-800 dark:text-warm-200 tabular-nums">
                     {fmtDur(timeEstimates.summarization.totalMinutes)} ({timeEstimates.summarization.count} episodes)
                   </span>
                 </div>
@@ -446,12 +446,12 @@ export default function DashboardOverview() {
               {timeEstimates.compliance && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-warm-500">Compliance</span>
-                  <span className="font-medium text-warm-800 tabular-nums">
+                  <span className="font-medium text-warm-800 dark:text-warm-200 tabular-nums">
                     {fmtDur(timeEstimates.compliance.totalMinutes)} ({timeEstimates.compliance.count} episodes)
                   </span>
                 </div>
               )}
-              <div className="pt-2 border-t border-warm-100 text-xs text-warm-400 tabular-nums">
+              <div className="pt-2 border-t border-warm-100 dark:border-warm-700 text-xs text-warm-400 dark:text-warm-500 tabular-nums">
                 Pipeline clear in {fmtDur(
                   (timeEstimates.transcription?.totalMinutes ?? 0) +
                   (timeEstimates.summarization?.totalMinutes ?? 0) +
@@ -465,18 +465,18 @@ export default function DashboardOverview() {
 
       {/* ═══ 5. BROADCAST LOG ═══ */}
       <div className="card overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-warm-100 flex items-center justify-between">
+        <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
           <h3 className="section-header">Broadcast Log</h3>
           <span className="text-2xs text-warm-400 tabular-nums">Last {activity24h.length} events</span>
         </div>
         <div className="max-h-[420px] overflow-y-auto">
           {activityByDay.length > 0 ? activityByDay.map((group) => (
             <div key={group.label}>
-              <div className="sticky top-0 z-10 bg-warm-50 px-5 py-1.5 border-b border-warm-100">
+              <div className="sticky top-0 z-10 bg-warm-50 dark:bg-surface px-5 py-1.5 border-b border-warm-100 dark:border-warm-700">
                 <span className="text-2xs font-semibold text-warm-400 tracking-wider">{group.label}</span>
                 <span className="text-2xs text-warm-300 ml-2 tabular-nums">{group.items.length} events</span>
               </div>
-              <div className="divide-y divide-warm-50">
+              <div className="divide-y divide-warm-50 dark:divide-warm-700">
                 {group.items.map((item, i) => (
                   <a
                     key={`${item.id}-${i}`}
@@ -514,26 +514,26 @@ export default function DashboardOverview() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {attentionCount > 0 && (
             <div className="card overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-warm-100 flex items-center justify-between">
+              <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
                 <h3 className="section-header">Attention Needed</h3>
-                <span className="badge bg-red-100 text-red-700 tabular-nums">{attentionCount}</span>
+                <span className="badge bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 tabular-nums">{attentionCount}</span>
               </div>
               <div className="max-h-56 overflow-y-auto">
                 {failedEpisodes.length > 0 && failedEpisodes.map((ep) => (
-                  <div key={ep.id} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 last:border-0 hover:bg-red-50/40 transition-colors">
-                    <a href={`/dashboard/episodes/${ep.id}`} className="text-sm text-warm-700 truncate flex-1">{ep.show_name ?? `#${ep.id}`}</a>
+                  <div key={ep.id} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 dark:border-warm-700 last:border-0 hover:bg-red-50/40 dark:hover:bg-red-900/20 transition-colors">
+                    <a href={`/dashboard/episodes/${ep.id}`} className="text-sm text-warm-700 dark:text-warm-300 truncate flex-1">{ep.show_name ?? `#${ep.id}`}</a>
                     <span className="text-xs text-warm-400 shrink-0 tabular-nums">{ep.air_date ?? ''}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); retryEpisode(ep.id) }}
                       disabled={actionLoading !== null}
-                      className="text-2xs px-2.5 py-1 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-40 font-medium transition-colors"
+                      className="text-2xs px-2.5 py-1 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 disabled:opacity-40 font-medium transition-colors"
                     >
                       {actionLoading === `retry-${ep.id}` ? '...' : 'Retry'}
                     </button>
                     <button
                       onClick={(e) => { e.stopPropagation(); markUnavailable(ep.id) }}
                       disabled={actionLoading !== null}
-                      className="text-2xs px-2.5 py-1 rounded-lg bg-warm-100 text-warm-500 hover:bg-warm-200 disabled:opacity-40 font-medium transition-colors"
+                      className="text-2xs px-2.5 py-1 rounded-lg bg-warm-100 text-warm-500 hover:bg-warm-200 dark:bg-warm-700 dark:text-warm-400 dark:hover:bg-warm-600 disabled:opacity-40 font-medium transition-colors"
                     >
                       {actionLoading === `unavail-${ep.id}` ? '...' : 'Unavail'}
                     </button>
@@ -564,9 +564,9 @@ export default function DashboardOverview() {
 
           {totalFlags > 0 && (
             <div className="card overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-warm-100 flex items-center justify-between">
+              <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
                 <h3 className="section-header">Compliance</h3>
-                <span className={`badge tabular-nums ${totalCritical > 0 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                <span className={`badge tabular-nums ${totalCritical > 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
                   {totalFlags} unresolved
                 </span>
               </div>
@@ -577,7 +577,7 @@ export default function DashboardOverview() {
                       key={type}
                       href={`/dashboard/compliance?type=${type}`}
                       className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
-                        critical > 0 ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100' : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                        critical > 0 ? 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100 dark:bg-red-900/20 dark:border-red-800/40 dark:text-red-300 dark:hover:bg-red-900/30' : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300 dark:hover:bg-amber-900/30'
                       }`}
                     >
                       {count} {FLAG_LABELS[type] ?? type}
@@ -595,11 +595,11 @@ export default function DashboardOverview() {
         <div className="card overflow-hidden">
           <button
             onClick={() => setGapsCollapsed(!gapsCollapsed)}
-            className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-warm-50 transition-colors"
+            className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-warm-50 dark:hover:bg-warm-700/50 transition-colors"
           >
             <div className="flex items-center gap-2.5">
               <h3 className="section-header">Show Coverage Gaps</h3>
-              <span className="badge bg-amber-100 text-amber-700 tabular-nums">{coverageGaps.length}</span>
+              <span className="badge bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 tabular-nums">{coverageGaps.length}</span>
             </div>
             <span className={`text-warm-400 text-xs transition-transform duration-200 ${gapsCollapsed ? '' : 'rotate-90'}`}>▶</span>
           </button>
@@ -611,7 +611,7 @@ export default function DashboardOverview() {
                   <a
                     key={name}
                     href={`/dashboard/episodes?show=${encodeURIComponent(name)}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
-                    className="text-xs px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors"
+                    className="text-xs px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300 dark:hover:bg-amber-900/30 transition-colors"
                   >
                     {name}
                   </a>
@@ -625,7 +625,7 @@ export default function DashboardOverview() {
       {/* ═══ 8. COST THIS MONTH ═══ */}
       <div className="card px-5 py-3.5 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-4 text-sm text-warm-500 flex-wrap">
-          <span className="font-semibold text-warm-800">
+          <span className="font-semibold text-warm-800 dark:text-warm-200">
             {new Date().toLocaleString('en-US', { month: 'long' })} spend: {fmtCost(cost.month.total)}
           </span>
           <span className="text-xs text-warm-400 tabular-nums">
@@ -659,13 +659,13 @@ export default function DashboardOverview() {
                   <a
                     key={c.name}
                     href={`/dashboard/episodes?category=${encodeURIComponent(c.name)}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
-                    className="block hover:bg-warm-50 rounded-lg transition-colors -mx-1 px-1 py-0.5"
+                    className="block hover:bg-warm-50 dark:hover:bg-warm-700/50 rounded-lg transition-colors -mx-1 px-1 py-0.5"
                   >
                     <div className="flex justify-between text-xs mb-1">
-                      <span className="text-warm-700 truncate mr-2">{c.name}</span>
-                      <span className="text-warm-400 shrink-0 tabular-nums">{c.count}</span>
+                      <span className="text-warm-700 dark:text-warm-300 truncate mr-2">{c.name}</span>
+                      <span className="text-warm-400 dark:text-warm-500 shrink-0 tabular-nums">{c.count}</span>
                     </div>
-                    <div className="progress-track h-2 bg-warm-100">
+                    <div className="progress-track h-2 bg-warm-100 dark:bg-warm-700">
                       <div
                         className={`progress-fill h-2 ${colors[i % colors.length]}`}
                         style={{ width: `${max > 0 ? (c.count / max) * 100 : 0}%` }}
@@ -682,18 +682,18 @@ export default function DashboardOverview() {
 
         {/* Recent Episodes */}
         <div className="card overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-warm-100 flex items-center justify-between">
+          <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
             <h3 className="section-header">Recent Episodes</h3>
             <a href="/dashboard/episodes" className="text-xs text-kpfk-red hover:text-kpfk-red-dark transition-colors">View all →</a>
           </div>
-          <div className="divide-y divide-warm-50 max-h-72 overflow-y-auto">
+          <div className="divide-y divide-warm-50 dark:divide-warm-700 max-h-72 overflow-y-auto">
             {data.recentEpisodes.map((ep) => (
               <a key={ep.id} href={`/dashboard/episodes/${ep.id}`} className="log-entry">
                 <span className={`badge shrink-0 ${BADGE_COLORS[ep.status] ?? 'bg-warm-100'}`}>
                   {STATUS_LABELS[ep.status] ?? ep.status}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm text-warm-800 truncate">{ep.show_name ?? `#${ep.id}`}</p>
+                  <p className="text-sm text-warm-800 dark:text-warm-200 truncate">{ep.show_name ?? `#${ep.id}`}</p>
                 </div>
                 <span className="text-2xs text-warm-400 shrink-0 tabular-nums">{ep.air_date ?? timeAgo(ep.updated_at)}</span>
               </a>
@@ -733,7 +733,7 @@ function SystemHealthFooter({ queues, activity, lastFiled }: { queues: DashData[
   const workerColor = workersRunning ? 'text-emerald-600' : 'text-red-600'
 
   return (
-    <div className="rounded-xl border border-warm-200 bg-warm-50 px-5 py-3 flex items-center gap-6 text-xs text-warm-500 flex-wrap tabular-nums">
+    <div className="rounded-xl border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-surface-raised px-5 py-3 flex items-center gap-6 text-xs text-warm-500 dark:text-warm-400 flex-wrap tabular-nums">
       <span>Workers: <span className={`font-medium ${workerColor}`}>{workersRunning ? 'running' : 'idle'}</span></span>
       <span>Last ingest: <span className={`font-medium ${ingestInfo.color}`}>{ingestInfo.label}</span></span>
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>

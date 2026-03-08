@@ -65,7 +65,7 @@ export default function DownloadsPage() {
             )
             if (opt) setSelected(opt)
           }}
-          className="border rounded px-3 py-2 text-sm"
+          className="border rounded px-3 py-2 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         >
           {quarterOptions.map((o) => (
             <option key={`${o.year}-${o.quarter}`} value={`${o.year}-${o.quarter}`}>
@@ -76,13 +76,13 @@ export default function DownloadsPage() {
       </div>
 
       {/* Batch Downloads */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-4 py-3 border-b">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase">
+      <div className="bg-white rounded-lg shadow dark:bg-surface-raised dark:shadow-card-dark">
+        <div className="px-4 py-3 border-b dark:border-warm-700">
+          <h3 className="text-sm font-semibold text-gray-500 dark:text-warm-400 uppercase">
             Batch Downloads — {selected.label}
           </h3>
         </div>
-        <div className="divide-y">
+        <div className="divide-y dark:divide-warm-700">
           {downloads.map((dl) => (
             <div
               key={dl.type}
@@ -90,11 +90,11 @@ export default function DownloadsPage() {
             >
               <div>
                 <p className="text-sm font-medium">{dl.label}</p>
-                <p className="text-xs text-gray-500">{dl.description}</p>
+                <p className="text-xs text-gray-500 dark:text-warm-400">{dl.description}</p>
               </div>
               <a
                 href={`/api/downloads?year=${selected.year}&quarter=${selected.quarter}&type=${dl.type}`}
-                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800"
+                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
               >
                 Download
               </a>
@@ -104,17 +104,17 @@ export default function DownloadsPage() {
       </div>
 
       {/* QIR Exports */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="px-4 py-3 border-b">
-          <h3 className="text-sm font-semibold text-gray-500 uppercase">
+      <div className="bg-white rounded-lg shadow dark:bg-surface-raised dark:shadow-card-dark">
+        <div className="px-4 py-3 border-b dark:border-warm-700">
+          <h3 className="text-sm font-semibold text-gray-500 dark:text-warm-400 uppercase">
             QIR Report Exports
           </h3>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs text-gray-400 dark:text-warm-500 mt-1">
             To export a specific QIR draft, go to the Generate QIR page and use
             the export buttons there.
           </p>
         </div>
-        <div className="divide-y">
+        <div className="divide-y dark:divide-warm-700">
           {qirExports.map((exp) => (
             <div
               key={exp.format}
@@ -122,11 +122,11 @@ export default function DownloadsPage() {
             >
               <div>
                 <p className="text-sm font-medium">{exp.label}</p>
-                <p className="text-xs text-gray-500">{exp.description}</p>
+                <p className="text-xs text-gray-500 dark:text-warm-400">{exp.description}</p>
               </div>
               <a
                 href={`/dashboard/generate`}
-                className="px-4 py-2 border text-sm rounded hover:bg-gray-50"
+                className="px-4 py-2 border text-sm rounded hover:bg-gray-50 dark:border-warm-600 dark:hover:bg-warm-700/50 dark:text-warm-200"
               >
                 Go to QIR Builder
               </a>
@@ -136,11 +136,11 @@ export default function DownloadsPage() {
       </div>
 
       {/* Public QIR Link */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <h3 className="text-sm font-semibold text-gray-500 uppercase mb-2">
+      <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
+        <h3 className="text-sm font-semibold text-gray-500 dark:text-warm-400 uppercase mb-2">
           Public QIR Page
         </h3>
-        <p className="text-sm text-gray-600 mb-2">
+        <p className="text-sm text-gray-600 dark:text-warm-400 mb-2">
           Finalized QIR reports are published at:
         </p>
         <a

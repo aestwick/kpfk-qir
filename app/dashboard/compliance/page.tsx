@@ -70,9 +70,9 @@ function getQuarterOptions(): { label: string; value: string }[] {
 }
 
 const severityColors: Record<string, string> = {
-  info: 'bg-blue-100 text-blue-700',
-  warning: 'bg-amber-100 text-amber-700',
-  critical: 'bg-red-100 text-red-700',
+  info: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+  critical: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
 }
 
 const typeLabels: Record<string, string> = {
@@ -439,9 +439,9 @@ export default function CompliancePage() {
     return (
       <div className="space-y-6">
         <Breadcrumbs />
-        <h1 className="text-2xl font-bold text-gray-900">Compliance</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
         <SkeletonCards count={5} />
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
           <table className="w-full">
             <tbody>
               <SkeletonTableRows rows={8} />
@@ -455,88 +455,88 @@ export default function CompliancePage() {
   return (
     <div className="space-y-6">
       <Breadcrumbs />
-      <h1 className="text-2xl font-bold text-gray-900">Compliance</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
 
       {/* Summary Stats Strip — uses dedicated stats query for accurate totals */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {FLAG_TYPES.map((type) => (
-          <div key={type} className="bg-white rounded-xl shadow-sm border p-3">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{typeLabels[type]}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{stats.byType[type] ?? 0}</p>
-            <p className="text-xs text-gray-500">unresolved</p>
+          <div key={type} className="bg-white rounded-xl shadow-sm border p-3 dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide dark:text-warm-500">{typeLabels[type]}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1 dark:text-warm-100">{stats.byType[type] ?? 0}</p>
+            <p className="text-xs text-gray-500 dark:text-warm-400">unresolved</p>
           </div>
         ))}
       </div>
 
       {/* Show Health Summary */}
       {showHealth.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border">
+        <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
           <button
             onClick={() => setShowHealthExpanded(!showHealthExpanded)}
             className="w-full px-5 py-4 flex items-center justify-between text-left"
           >
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Show Health</h3>
-              <p className="text-xs text-gray-500 mt-0.5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-warm-100">Show Health</h3>
+              <p className="text-xs text-gray-500 mt-0.5 dark:text-warm-400">
                 {showHealth.filter((s) => s.score === 100).length} clean / {showHealth.length} shows checked
               </p>
             </div>
-            <svg className={`w-5 h-5 text-gray-400 transition-transform ${showHealthExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className={`w-5 h-5 text-gray-400 dark:text-warm-500 transition-transform ${showHealthExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </button>
           {showHealthExpanded && (
-            <div className="border-t overflow-x-auto">
+            <div className="border-t overflow-x-auto dark:border-warm-700">
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
+                <thead className="bg-gray-50 border-b dark:bg-warm-700 dark:border-warm-600">
                   <tr>
-                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Show</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Score</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Checked</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Clean</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Flagged</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Critical</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Warning</th>
-                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 uppercase">Total Flags</th>
+                    <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Show</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Score</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Checked</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Clean</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Flagged</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Critical</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Warning</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Total Flags</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-gray-100 dark:divide-warm-700">
                   {showHealth.map((show) => (
                     <tr
                       key={show.show_key}
-                      className="hover:bg-gray-50 cursor-pointer"
+                      className="hover:bg-gray-50 dark:hover:bg-warm-700/50 cursor-pointer"
                       onClick={() => { setFilterShow(show.show_name); setPage(1) }}
                     >
-                      <td className="px-4 py-2.5 font-medium text-gray-900 max-w-[200px] truncate">
+                      <td className="px-4 py-2.5 font-medium text-gray-900 dark:text-warm-100 max-w-[200px] truncate">
                         {show.show_name}
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold ${
                           show.score === 100
-                            ? 'bg-green-100 text-green-700'
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
                             : show.score >= 80
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-red-100 text-red-700'
+                              ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                         }`}>
                           {show.score}%
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 text-center text-gray-600">{show.episodes_checked}</td>
-                      <td className="px-4 py-2.5 text-center text-green-600 font-medium">{show.episodes_clean}</td>
-                      <td className="px-4 py-2.5 text-center text-amber-600 font-medium">{show.episodes_flagged || '—'}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-600 dark:text-warm-400">{show.episodes_checked}</td>
+                      <td className="px-4 py-2.5 text-center text-green-600 dark:text-green-400 font-medium">{show.episodes_clean}</td>
+                      <td className="px-4 py-2.5 text-center text-amber-600 dark:text-amber-400 font-medium">{show.episodes_flagged || '—'}</td>
                       <td className="px-4 py-2.5 text-center">
                         {show.critical > 0
-                          ? <span className="text-red-600 font-bold">{show.critical}</span>
-                          : <span className="text-gray-300">—</span>
+                          ? <span className="text-red-600 dark:text-red-400 font-bold">{show.critical}</span>
+                          : <span className="text-gray-300 dark:text-warm-600">—</span>
                         }
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         {show.warning > 0
-                          ? <span className="text-amber-600 font-medium">{show.warning}</span>
-                          : <span className="text-gray-300">—</span>
+                          ? <span className="text-amber-600 dark:text-amber-400 font-medium">{show.warning}</span>
+                          : <span className="text-gray-300 dark:text-warm-600">—</span>
                         }
                       </td>
-                      <td className="px-4 py-2.5 text-center text-gray-600">{show.total_flags || '—'}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-600 dark:text-warm-400">{show.total_flags || '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -547,14 +547,14 @@ export default function CompliancePage() {
       )}
 
       {/* Filters */}
-      <div className="bg-white rounded-xl shadow-sm border p-4">
+      <div className="bg-white rounded-xl shadow-sm border p-4 dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
         <div className="flex flex-wrap gap-3 items-end">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Type</label>
             <select
               value={filterType}
               onChange={(e) => { setFilterType(e.target.value); setPage(1) }}
-              className="border rounded-lg px-3 py-1.5 text-sm"
+              className="border rounded-lg px-3 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             >
               <option value="">All Types</option>
               {FLAG_TYPES.map((t) => (
@@ -563,11 +563,11 @@ export default function CompliancePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Severity</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Severity</label>
             <select
               value={filterSeverity}
               onChange={(e) => { setFilterSeverity(e.target.value); setPage(1) }}
-              className="border rounded-lg px-3 py-1.5 text-sm"
+              className="border rounded-lg px-3 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             >
               <option value="">All</option>
               {SEVERITIES.map((s) => (
@@ -576,11 +576,11 @@ export default function CompliancePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Resolution</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Resolution</label>
             <select
               value={filterResolution}
               onChange={(e) => { setFilterResolution(e.target.value); setPage(1) }}
-              className="border rounded-lg px-3 py-1.5 text-sm"
+              className="border rounded-lg px-3 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             >
               <option value="">All</option>
               <option value="unresolved">Unresolved</option>
@@ -588,11 +588,11 @@ export default function CompliancePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Quarter</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Quarter</label>
             <select
               value={filterQuarter}
               onChange={(e) => { setFilterQuarter(e.target.value); setPage(1) }}
-              className="border rounded-lg px-3 py-1.5 text-sm"
+              className="border rounded-lg px-3 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             >
               <option value="">All Quarters</option>
               {getQuarterOptions().map((opt) => (
@@ -601,19 +601,19 @@ export default function CompliancePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Show</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Show</label>
             <input
               type="text"
               value={filterShow}
               onChange={(e) => { setFilterShow(e.target.value); setPage(1) }}
               placeholder="Search show..."
-              className="border rounded-lg px-3 py-1.5 text-sm w-48"
+              className="border rounded-lg px-3 py-1.5 text-sm w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             />
           </div>
           {(filterType || filterSeverity || filterResolution || filterQuarter || filterShow) && (
             <button
               onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterResolution(''); setFilterQuarter(''); setFilterShow(''); setPage(1) }}
-              className="text-xs text-gray-500 hover:text-gray-700 underline"
+              className="text-xs text-gray-500 hover:text-gray-700 underline dark:text-warm-400 dark:hover:text-warm-200"
             >
               Clear filters
             </button>
@@ -623,19 +623,19 @@ export default function CompliancePage() {
 
       {/* Bulk Actions */}
       {selected.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between">
-          <span className="text-sm text-blue-800 font-medium">{selected.size} flag{selected.size > 1 ? 's' : ''} selected</span>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between dark:bg-blue-900/20 dark:border-blue-800/40">
+          <span className="text-sm text-blue-800 font-medium dark:text-blue-300">{selected.size} flag{selected.size > 1 ? 's' : ''} selected</span>
           <div className="flex gap-2">
             <button
               onClick={() => setBulkResolveOpen(true)}
               disabled={actionLoading}
-              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
             >
               Resolve Selected
             </button>
             <button
               onClick={() => setSelected(new Set())}
-              className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border rounded-lg hover:bg-gray-50"
+              className="px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border rounded-lg hover:bg-gray-50 dark:bg-warm-800 dark:text-warm-300 dark:border-warm-600 dark:hover:bg-warm-700/50"
             >
               Clear
             </button>
@@ -647,26 +647,26 @@ export default function CompliancePage() {
       {bulkResolveOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setBulkResolveOpen(false)} />
-          <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Bulk Resolve {selected.size} Flags</h3>
+          <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6 dark:bg-surface-raised dark:shadow-card-dark">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2 dark:text-warm-100">Bulk Resolve {selected.size} Flags</h3>
             <textarea
               value={bulkNotes}
               onChange={(e) => setBulkNotes(e.target.value)}
               placeholder="Resolution notes (optional)..."
-              className="w-full border rounded-lg p-3 text-sm mb-4 h-24 resize-none"
+              className="w-full border rounded-lg p-3 text-sm mb-4 h-24 resize-none dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             />
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => setBulkResolveOpen(false)}
                 disabled={actionLoading}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 dark:bg-warm-700 dark:text-warm-200 dark:hover:bg-warm-600"
               >
                 Cancel
               </button>
               <button
                 onClick={bulkResolve}
                 disabled={actionLoading}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
               >
                 {actionLoading ? 'Resolving...' : 'Resolve All'}
               </button>
@@ -676,10 +676,10 @@ export default function CompliancePage() {
       )}
 
       {/* Flags Table */}
-      <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+      <div className="bg-white rounded-xl shadow-sm border overflow-hidden dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 border-b dark:bg-warm-700 dark:border-warm-600">
               <tr>
                 <th className="px-4 py-3 text-left">
                   <input
@@ -689,25 +689,25 @@ export default function CompliancePage() {
                     className="rounded"
                   />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Episode</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Severity</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Excerpt</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Time</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Action</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Episode</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Type</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Severity</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Excerpt</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Time</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-gray-100 dark:divide-warm-700">
               {flags.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                  <td colSpan={8} className="px-4 py-12 text-center text-gray-400 dark:text-warm-500">
                     No compliance flags found
                   </td>
                 </tr>
               ) : (
                 flags.map((flag) => (
-                  <tr key={flag.id} className={`hover:bg-gray-50 ${selected.has(flag.id) ? 'bg-blue-50' : ''}`}>
+                  <tr key={flag.id} className={`hover:bg-gray-50 dark:hover:bg-warm-700/50 ${selected.has(flag.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}>
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
@@ -724,11 +724,11 @@ export default function CompliancePage() {
                         {flag.episode_log?.show_name ?? `Episode #${flag.episode_id}`}
                       </a>
                       {flag.episode_log?.air_date && (
-                        <p className="text-xs text-gray-400">{flag.episode_log.air_date}</p>
+                        <p className="text-xs text-gray-400 dark:text-warm-500">{flag.episode_log.air_date}</p>
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                      <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-warm-700 dark:text-warm-300">
                         {typeLabels[flag.flag_type] ?? flag.flag_type}
                       </span>
                     </td>
@@ -737,7 +737,7 @@ export default function CompliancePage() {
                         {flag.severity}
                       </span>
                     </td>
-                    <td className="px-4 py-3 max-w-xs truncate text-gray-600" title={flag.excerpt ?? ''}>
+                    <td className="px-4 py-3 max-w-xs truncate text-gray-600 dark:text-warm-400" title={flag.excerpt ?? ''}>
                       {flag.excerpt ?? '--'}
                     </td>
                     <td className="px-4 py-3">
@@ -749,14 +749,14 @@ export default function CompliancePage() {
                           {formatTimestamp(flag.timestamp_seconds)}
                         </a>
                       ) : (
-                        <span className="text-gray-400">--</span>
+                        <span className="text-gray-400 dark:text-warm-500">--</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
                       {flag.resolved ? (
-                        <span className="text-xs text-green-600 font-medium">Resolved</span>
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">Resolved</span>
                       ) : (
-                        <span className="text-xs text-amber-600 font-medium">Open</span>
+                        <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Open</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -769,7 +769,7 @@ export default function CompliancePage() {
                                 value={resolveNotes}
                                 onChange={(e) => setResolveNotes(e.target.value)}
                                 placeholder="Notes..."
-                                className="border rounded px-2 py-1 text-xs w-32"
+                                className="border rounded px-2 py-1 text-xs w-32 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                                 autoFocus
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') resolveFlag(flag.id)
@@ -785,7 +785,7 @@ export default function CompliancePage() {
                               </button>
                               <button
                                 onClick={() => { setResolveTarget(null); setResolveNotes('') }}
-                                className="text-xs text-gray-400 hover:text-gray-600"
+                                className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-500 dark:hover:text-warm-300"
                               >
                                 Cancel
                               </button>
@@ -810,7 +810,7 @@ export default function CompliancePage() {
 
         {/* Pagination */}
         {pagination.totalPages > 1 && (
-          <div className="border-t px-4 py-3 flex items-center justify-between text-sm text-gray-600">
+          <div className="border-t px-4 py-3 flex items-center justify-between text-sm text-gray-600 dark:border-warm-700 dark:text-warm-400">
             <span>
               Showing {((pagination.page - 1) * pagination.limit) + 1}&ndash;{Math.min(pagination.page * pagination.limit, pagination.total)} of {pagination.total}
             </span>
@@ -818,14 +818,14 @@ export default function CompliancePage() {
               <button
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="px-3 py-1 rounded border disabled:opacity-50 hover:bg-gray-50"
+                className="px-3 py-1 rounded border disabled:opacity-50 hover:bg-gray-50 dark:border-warm-600 dark:hover:bg-warm-700/50"
               >
                 Prev
               </button>
               <button
                 disabled={page >= pagination.totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="px-3 py-1 rounded border disabled:opacity-50 hover:bg-gray-50"
+                className="px-3 py-1 rounded border disabled:opacity-50 hover:bg-gray-50 dark:border-warm-600 dark:hover:bg-warm-700/50"
               >
                 Next
               </button>
@@ -835,8 +835,8 @@ export default function CompliancePage() {
       </div>
 
       {/* Compliance Rules Section */}
-      <div className="bg-white rounded-xl shadow-sm border">
-        <div className="border-b">
+      <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
+        <div className="border-b dark:border-warm-700">
           <div className="flex">
             {(['wordlist', 'prompt', 'checks'] as const).map((tab) => (
               <button
@@ -845,7 +845,7 @@ export default function CompliancePage() {
                 className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
                   rulesTab === tab
                     ? 'border-blue-600 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200'
                 }`}
               >
                 {tab === 'wordlist' ? 'Profanity Word List' : tab === 'prompt' ? 'AI Compliance Prompt' : 'Check Settings'}
@@ -864,13 +864,13 @@ export default function CompliancePage() {
                   value={newWord}
                   onChange={(e) => setNewWord(e.target.value)}
                   placeholder="Add word..."
-                  className="border rounded-lg px-3 py-1.5 text-sm flex-1"
+                  className="border rounded-lg px-3 py-1.5 text-sm flex-1 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                   onKeyDown={(e) => e.key === 'Enter' && addWord()}
                 />
                 <select
                   value={newWordSeverity}
                   onChange={(e) => setNewWordSeverity(e.target.value)}
-                  className="border rounded-lg px-3 py-1.5 text-sm"
+                  className="border rounded-lg px-3 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                 >
                   <option value="warning">Warning</option>
                   <option value="critical">Critical</option>
@@ -878,29 +878,29 @@ export default function CompliancePage() {
                 <button
                   onClick={addWord}
                   disabled={addingWord || !newWord.trim()}
-                  className="px-4 py-1.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 disabled:opacity-50"
+                  className="px-4 py-1.5 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 disabled:opacity-50 dark:bg-warm-700 dark:hover:bg-warm-600"
                 >
                   {addingWord ? 'Adding...' : 'Add'}
                 </button>
               </div>
-              <div className="divide-y max-h-80 overflow-y-auto">
+              <div className="divide-y dark:divide-warm-700 max-h-80 overflow-y-auto">
                 {words.map((w) => (
                   <div key={w.id} className="flex items-center justify-between py-2 px-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-mono">{w.word}</span>
+                      <span className="text-sm font-mono dark:text-warm-100">{w.word}</span>
                       {editingWord === w.id ? (
                         <div className="flex items-center gap-1">
                           <select
                             value={editWordSeverity}
                             onChange={(e) => setEditWordSeverity(e.target.value)}
-                            className="border rounded px-1.5 py-0.5 text-xs"
+                            className="border rounded px-1.5 py-0.5 text-xs dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                             autoFocus
                           >
                             <option value="warning">warning</option>
                             <option value="critical">critical</option>
                           </select>
-                          <button onClick={() => saveWordEdit(w.id)} className="text-xs text-green-600 hover:text-green-800">Save</button>
-                          <button onClick={() => setEditingWord(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                          <button onClick={() => saveWordEdit(w.id)} className="text-xs text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-300">Save</button>
+                          <button onClick={() => setEditingWord(null)} className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-500 dark:hover:text-warm-300">Cancel</button>
                         </div>
                       ) : (
                         <button
@@ -929,7 +929,7 @@ export default function CompliancePage() {
                   </div>
                 ))}
                 {words.length === 0 && (
-                  <p className="text-sm text-gray-400 py-4 text-center">No words in compliance list</p>
+                  <p className="text-sm text-gray-400 dark:text-warm-500 py-4 text-center">No words in compliance list</p>
                 )}
               </div>
             </div>
@@ -942,7 +942,7 @@ export default function CompliancePage() {
                 <textarea
                   value={compliancePrompt}
                   onChange={(e) => { setCompliancePrompt(e.target.value); setPromptDirty(true) }}
-                  className="w-full border rounded-lg p-3 text-sm font-mono h-48 resize-y"
+                  className="w-full border rounded-lg p-3 text-sm font-mono h-48 resize-y dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                   placeholder="Compliance check prompt for AI..."
                 />
               </div>
@@ -964,14 +964,14 @@ export default function CompliancePage() {
                       },
                     })
                   }}
-                  className="text-xs text-gray-500 hover:text-gray-700 underline"
+                  className="text-xs text-gray-500 hover:text-gray-700 underline dark:text-warm-400 dark:hover:text-warm-200"
                 >
                   Reset to default
                 </button>
                 <button
                   onClick={savePrompt}
                   disabled={!promptDirty || savingPrompt || !compliancePrompt.trim()}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
                 >
                   {savingPrompt ? 'Saving...' : 'Save Prompt'}
                 </button>
@@ -982,28 +982,28 @@ export default function CompliancePage() {
           {/* Checks Tab */}
           {rulesTab === 'checks' && (
             <div className="space-y-1">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Check Types</p>
+              <p className="text-xs font-semibold text-gray-400 dark:text-warm-500 uppercase tracking-wide mb-3">Check Types</p>
               {FLAG_TYPES.map((type) => (
-                <div key={type} className="flex items-center justify-between py-3 border-b last:border-b-0">
+                <div key={type} className="flex items-center justify-between py-3 border-b last:border-b-0 dark:border-warm-700">
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{typeLabels[type]}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-warm-100">{typeLabels[type]}</p>
                   </div>
                   <button
                     onClick={() => toggleCheckType(type, !checkToggles[type])}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checkToggles[type] ? 'bg-blue-600' : 'bg-gray-300'}`}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checkToggles[type] ? 'bg-blue-600' : 'bg-gray-300 dark:bg-warm-600'}`}
                   >
                     <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checkToggles[type] ? 'translate-x-6' : 'translate-x-1'}`} />
                   </button>
                 </div>
               ))}
-              <div className="flex items-center justify-between py-3 mt-2 border-t">
+              <div className="flex items-center justify-between py-3 mt-2 border-t dark:border-warm-700">
                 <div>
-                  <p className="text-sm font-medium text-gray-900">Blocking Mode</p>
-                  <p className="text-xs text-gray-500">Block non-compliant episodes from QIR inclusion</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-warm-100">Blocking Mode</p>
+                  <p className="text-xs text-gray-500 dark:text-warm-400">Block non-compliant episodes from QIR inclusion</p>
                 </div>
                 <button
                   onClick={() => toggleBlocking(!blocking)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${blocking ? 'bg-red-600' : 'bg-gray-300'}`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${blocking ? 'bg-red-600' : 'bg-gray-300 dark:bg-warm-600'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${blocking ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>

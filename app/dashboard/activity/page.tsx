@@ -23,13 +23,13 @@ interface UsageEntry {
 }
 
 const BADGE_COLORS: Record<string, string> = {
-  pending:              'bg-amber-100 text-amber-800',
-  transcribed:          'bg-blue-100 text-blue-800',
-  summarized:           'bg-emerald-100 text-emerald-800',
-  compliance_checked:   'bg-purple-100 text-purple-800',
-  failed:               'bg-red-100 text-red-800',
-  unavailable:          'bg-gray-100 text-gray-600',
-  dead:                 'bg-gray-200 text-gray-700',
+  pending:              'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  transcribed:          'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  summarized:           'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
+  compliance_checked:   'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  failed:               'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  unavailable:          'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
+  dead:                 'bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-500',
 }
 
 const EVENT_FILTERS = [
@@ -236,8 +236,8 @@ export default function ActivityPage() {
               onClick={() => handleRangeChange(opt.hours)}
               className={`px-3 py-1.5 text-xs rounded-md ${
                 range === opt.hours
-                  ? 'bg-gray-900 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  ? 'bg-gray-900 text-white dark:bg-warm-200 dark:text-warm-900'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-warm-700 dark:text-warm-300 dark:hover:bg-warm-600'
               }`}
             >
               {opt.label}
@@ -256,8 +256,8 @@ export default function ActivityPage() {
               onClick={() => handleTypeChange(f.value)}
               className={`px-3 py-1.5 text-xs rounded-md ${
                 typeFilter === f.value
-                  ? 'bg-gray-900 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  ? 'bg-gray-900 text-white dark:bg-warm-200 dark:text-warm-900'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-warm-700 dark:text-warm-300 dark:hover:bg-warm-600'
               }`}
             >
               {f.label}
@@ -272,13 +272,13 @@ export default function ActivityPage() {
             placeholder="Search show name..."
             value={showSearch}
             onChange={(e) => handleShowChange(e.target.value)}
-            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-gray-300"
+            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 dark:placeholder-warm-500 dark:focus:ring-warm-500"
           />
         </div>
 
         {/* Result count */}
         {!loading && (
-          <span className="text-xs text-gray-400">
+          <span className="text-xs text-gray-400 dark:text-warm-500">
             {filtered.length} event{filtered.length !== 1 ? 's' : ''}
           </span>
         )}
@@ -288,33 +288,33 @@ export default function ActivityPage() {
       {loading ? (
         <SkeletonBlock />
       ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500 dark:bg-surface-raised dark:text-warm-400">
           No activity{typeFilter ? ` with status "${typeFilter}"` : ''}{showSearch ? ` matching "${showSearch}"` : ''} in this time range.
         </div>
       ) : (
         <div className="space-y-6">
           {Array.from(grouped.entries()).map(([day, dayEntries]) => (
             <div key={day}>
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 sticky top-0 bg-gray-50 py-1 px-1 -mx-1 rounded">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 sticky top-0 bg-gray-50 py-1 px-1 -mx-1 rounded dark:text-warm-500 dark:bg-surface">
                 {formatDay(day)} — {dayEntries.length} event{dayEntries.length !== 1 ? 's' : ''}
               </h3>
-              <div className="bg-white rounded-lg shadow divide-y">
+              <div className="bg-white rounded-lg shadow divide-y dark:bg-surface-raised dark:shadow-card-dark dark:divide-warm-700">
                 {dayEntries.map((entry, i) => (
                   <a
                     key={`${entry.id}-${i}`}
                     href={`/dashboard/episodes/${entry.id}`}
-                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors dark:hover:bg-warm-700/50"
                   >
-                    <span className="text-xs text-gray-400 w-16 shrink-0 text-right">
+                    <span className="text-xs text-gray-400 w-16 shrink-0 text-right dark:text-warm-500">
                       {formatTime(entry.updated_at)}
                     </span>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium shrink-0 ${BADGE_COLORS[entry.status] ?? 'bg-gray-100'}`}>
                       {entry.status}
                     </span>
-                    <span className="text-sm text-gray-700 truncate flex-1">
+                    <span className="text-sm text-gray-700 truncate flex-1 dark:text-warm-200">
                       {entry.show_name ?? `Episode #${entry.id}`}
                     </span>
-                    <span className="text-xs text-gray-400 truncate max-w-[200px] hidden sm:inline">
+                    <span className="text-xs text-gray-400 truncate max-w-[200px] hidden sm:inline dark:text-warm-500">
                       {entry.headline ?? ''}
                     </span>
                     {renderMeta(entry)}

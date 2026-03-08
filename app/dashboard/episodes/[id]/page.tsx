@@ -10,11 +10,11 @@ import type { SeekToFn } from '@/app/components/episode-media'
 
 /* ─── lazy-loaded media components ─── */
 const AudioPlayerWithCaptions = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.AudioPlayerWithCaptions })), {
-  loading: () => <div className="bg-white rounded-lg shadow p-4"><div className="h-32 bg-gray-100 rounded animate-pulse" /></div>,
+  loading: () => <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4"><div className="h-32 bg-gray-100 dark:bg-warm-700 rounded animate-pulse" /></div>,
   ssr: false,
 })
 const TranscriptViewer = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.TranscriptViewer })), {
-  loading: () => <div className="bg-white rounded-lg shadow p-4"><div className="h-48 bg-gray-100 rounded animate-pulse" /></div>,
+  loading: () => <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4"><div className="h-48 bg-gray-100 dark:bg-warm-700 rounded animate-pulse" /></div>,
   ssr: false,
 })
 
@@ -74,9 +74,9 @@ const FLAG_TYPE_LABELS: Record<string, string> = {
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
-  critical: 'bg-red-100 text-red-800 border-red-200',
-  warning: 'bg-amber-100 text-amber-800 border-amber-200',
-  info: 'bg-blue-100 text-blue-800 border-blue-200',
+  critical: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800/40',
+  warning: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800/40',
+  info: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800/40',
 }
 
 const issueCategories = [
@@ -91,12 +91,12 @@ const issueCategories = [
 ]
 
 const statusColors: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  transcribed: 'bg-blue-100 text-blue-800',
-  summarized: 'bg-green-100 text-green-800',
-  compliance_checked: 'bg-green-100 text-green-800',
-  failed: 'bg-red-100 text-red-800',
-  unavailable: 'bg-gray-100 text-gray-600',
+  pending: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
+  transcribed: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  summarized: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  compliance_checked: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  unavailable: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
 }
 
 function formatTimestamp(seconds: number): string {
@@ -170,12 +170,12 @@ function InlineEditField({
 
   return (
     <p
-      className="text-sm font-medium truncate cursor-pointer hover:text-blue-600 group"
+      className="text-sm font-medium truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 group"
       onClick={() => { setEditValue(value); setEditing(true) }}
       title={`Click to edit ${field}`}
     >
       {value || '\u2014'}
-      <span className="ml-1 text-gray-300 opacity-0 group-hover:opacity-100 text-xs">✎</span>
+      <span className="ml-1 text-gray-300 dark:text-warm-600 opacity-0 group-hover:opacity-100 text-xs">✎</span>
     </p>
   )
 }
@@ -245,35 +245,35 @@ function CorrectionToolbar({
   return (
     <div
       ref={toolbarRef}
-      className="fixed z-50 bg-white rounded-lg shadow-lg border border-gray-200 p-2"
+      className="fixed z-50 bg-white dark:bg-surface-overlay rounded-lg shadow-lg border border-gray-200 dark:border-warm-600 p-2"
       style={{ top: position.top, left: position.left }}
     >
       {!expanded ? (
         <button
           onClick={() => setExpanded(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 rounded whitespace-nowrap"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-warm-300 hover:bg-gray-50 dark:hover:bg-warm-700 rounded whitespace-nowrap"
         >
           <span className="text-base leading-none">+</span> Add Transcript Correction
         </button>
       ) : (
         <div className="space-y-2 w-72">
           <div>
-            <label className="text-[10px] text-gray-500 uppercase">Pattern</label>
-            <div className="text-xs bg-gray-50 rounded px-2 py-1 font-mono break-all">{selectedText}</div>
+            <label className="text-[10px] text-gray-500 dark:text-warm-400 uppercase">Pattern</label>
+            <div className="text-xs bg-gray-50 dark:bg-warm-700 rounded px-2 py-1 font-mono break-all">{selectedText}</div>
           </div>
           <div>
-            <label className="text-[10px] text-gray-500 uppercase">Replacement</label>
+            <label className="text-[10px] text-gray-500 dark:text-warm-400 uppercase">Replacement</label>
             <input
               type="text"
               value={replacement}
               onChange={(e) => setReplacement(e.target.value)}
-              className="w-full border rounded px-2 py-1 text-xs"
+              className="w-full border rounded px-2 py-1 text-xs dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
               placeholder="Replace with..."
               autoFocus
             />
           </div>
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1 text-xs text-gray-600">
+            <label className="flex items-center gap-1 text-xs text-gray-600 dark:text-warm-400">
               <input type="checkbox" checked={isRegex} onChange={(e) => setIsRegex(e.target.checked)} className="rounded" />
               Regex
             </label>
@@ -292,7 +292,7 @@ function CorrectionToolbar({
             <button
               onClick={handleSave}
               disabled={saving}
-              className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              className="text-xs px-3 py-1 bg-blue-600 dark:bg-blue-700 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
               {saving ? 'Saving...' : 'Save Correction'}
             </button>
@@ -462,12 +462,12 @@ export default function EpisodeDetailPage() {
 
   if (loading) return (
     <div className="space-y-6">
-      <div className="h-8 bg-gray-200 rounded w-64 animate-pulse" />
+      <div className="h-8 bg-gray-200 dark:bg-warm-700 rounded w-64 animate-pulse" />
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="bg-white rounded shadow p-3 animate-pulse">
-            <div className="h-3 bg-gray-200 rounded w-16 mb-2" />
-            <div className="h-4 bg-gray-200 rounded w-24" />
+          <div key={i} className="bg-white dark:bg-surface-raised rounded shadow dark:shadow-card-dark p-3 animate-pulse">
+            <div className="h-3 bg-gray-200 dark:bg-warm-700 rounded w-16 mb-2" />
+            <div className="h-4 bg-gray-200 dark:bg-warm-700 rounded w-24" />
           </div>
         ))}
       </div>
@@ -497,7 +497,7 @@ export default function EpisodeDetailPage() {
       <Breadcrumbs episodeName={episode.show_name ?? `Episode ${episode.id}`} />
 
       <div className="flex items-center gap-3">
-        <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700">&larr; Episodes</a>
+        <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; Episodes</a>
         <h2 className="text-2xl font-bold">{episode.show_name ?? `Episode ${episode.id}`}</h2>
         <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[episode.status] ?? 'bg-gray-100'}`}>
           {episode.status}
@@ -506,7 +506,7 @@ export default function EpisodeDetailPage() {
 
       {/* Error message */}
       {episode.error_message && (
-        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700 dark:bg-red-900/20 dark:border-red-800/40 dark:text-red-300">
           <strong>Error:</strong> {episode.error_message}
           {episode.retry_count > 0 && <span className="ml-2">(retries: {episode.retry_count})</span>}
         </div>
@@ -514,7 +514,7 @@ export default function EpisodeDetailPage() {
 
       {/* Discrepancy notes */}
       {episode.compliance_report && (
-        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300">
           <strong>Discrepancy:</strong> {episode.compliance_report}
         </div>
       )}
@@ -522,8 +522,8 @@ export default function EpisodeDetailPage() {
       {/* Metadata Grid — Host/Guest are inline-editable */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {metadataItems.map((item) => (
-          <div key={item.label} className="bg-white rounded shadow p-3">
-            <p className="text-xs text-gray-500">{item.label}</p>
+          <div key={item.label} className="bg-white dark:bg-surface-raised rounded shadow dark:shadow-card-dark p-3">
+            <p className="text-xs text-gray-500 dark:text-warm-400">{item.label}</p>
             {item.editable ? (
               <InlineEditField
                 value={item.value}
@@ -553,49 +553,49 @@ export default function EpisodeDetailPage() {
         <button onClick={() => handleAction('re-summarize')} disabled={actionLoading !== null || !transcript?.transcript} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
           {actionLoading === 're-summarize' ? 'Queuing...' : 'Re-Summarize'}
         </button>
-        <a href={episode.mp3_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+        <a href={episode.mp3_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
           Download MP3
         </a>
         {transcript?.transcript && (
-          <button onClick={() => downloadFile(transcript.transcript!, `episode-${id}.txt`, 'text/plain')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+          <button onClick={() => downloadFile(transcript.transcript!, `episode-${id}.txt`, 'text/plain')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
             Download Transcript
           </button>
         )}
         {transcript?.vtt && (
-          <button onClick={() => downloadFile(transcript.vtt!, `episode-${id}.vtt`, 'text/vtt')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+          <button onClick={() => downloadFile(transcript.vtt!, `episode-${id}.vtt`, 'text/vtt')} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
             Download VTT
           </button>
         )}
         {episode.transcript_url && (
-          <a href={episode.transcript_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+          <a href={episode.transcript_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300">
             Legacy Drive Link
           </a>
         )}
       </div>
 
       {/* Summary & Category Editor */}
-      <div className="bg-white rounded-lg shadow p-4 space-y-3">
-        <h3 className="font-semibold text-sm text-gray-500 uppercase">Summary & Category</h3>
+      <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
+        <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Summary & Category</h3>
         {episode.headline && <p className="font-medium">{episode.headline}</p>}
         <textarea
           value={editSummary}
           onChange={(e) => setEditSummary(e.target.value)}
           rows={4}
-          className="w-full border rounded p-2 text-sm"
+          className="w-full border rounded p-2 text-sm dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
           placeholder="Summary..."
         />
         <div className="flex items-center gap-3">
           <select
             value={editCategory}
             onChange={(e) => setEditCategory(e.target.value)}
-            className="border rounded px-2 py-1.5 text-sm"
+            className="border rounded px-2 py-1.5 text-sm dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
           >
             <option value="">Select Issue Category</option>
             {issueCategories.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
-          <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50">
+          <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 text-sm bg-green-600 dark:bg-green-700 text-white rounded hover:bg-green-700 disabled:opacity-50">
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
         </div>
@@ -603,9 +603,9 @@ export default function EpisodeDetailPage() {
 
       {/* ═══ Compliance Flags ═══ */}
       {complianceFlags.length > 0 && (
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <h3 className="font-semibold text-sm text-gray-500 uppercase">Compliance Flags</h3>
+        <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark">
+          <div className="px-4 py-3 border-b dark:border-warm-700 flex items-center justify-between">
+            <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Compliance Flags</h3>
             <div className="flex items-center gap-2">
               {unresolvedFlags.length > 0 && (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">{unresolvedFlags.length} unresolved</span>
@@ -620,7 +620,7 @@ export default function EpisodeDetailPage() {
               )}
             </div>
           </div>
-          <div className="divide-y">
+          <div className="divide-y dark:divide-warm-700">
             {unresolvedFlags.map((flag) => (
               <div key={flag.id} className="px-4 py-3">
                 <div className="flex items-start gap-3">
@@ -628,10 +628,10 @@ export default function EpisodeDetailPage() {
                     {flag.severity}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
-                    {flag.details && <p className="text-xs text-gray-600 mt-0.5">{flag.details}</p>}
+                    <p className="text-sm font-medium text-gray-900 dark:text-warm-100">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
+                    {flag.details && <p className="text-xs text-gray-600 dark:text-warm-400 mt-0.5">{flag.details}</p>}
                     {flag.excerpt && (
-                      <p className="text-xs text-gray-500 mt-1 bg-gray-50 rounded px-2 py-1 font-mono">
+                      <p className="text-xs text-gray-500 mt-1 bg-gray-50 dark:bg-warm-700 rounded px-2 py-1 font-mono">
                         &ldquo;...{flag.excerpt}...&rdquo;
                       </p>
                     )}
@@ -668,7 +668,7 @@ export default function EpisodeDetailPage() {
                           value={resolveNotes}
                           onChange={(e) => setResolveNotes(e.target.value)}
                           placeholder="Notes (optional)"
-                          className="border rounded px-2 py-1 text-xs w-48"
+                          className="border rounded px-2 py-1 text-xs w-48 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
                         />
                         <button onClick={() => resolveFlag(flag.id)} className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">
                           Resolve
@@ -680,7 +680,7 @@ export default function EpisodeDetailPage() {
                     ) : (
                       <button
                         onClick={() => { setResolvingFlag(flag.id); setResolveNotes('') }}
-                        className="text-xs px-2 py-1 border rounded hover:bg-gray-50 text-gray-500"
+                        className="text-xs px-2 py-1 border rounded hover:bg-gray-50 text-gray-500 dark:text-warm-400 dark:border-warm-600 dark:hover:bg-warm-700"
                       >
                         Resolve
                       </button>

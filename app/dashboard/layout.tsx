@@ -110,17 +110,17 @@ export default function DashboardLayout({
 
   if (authed === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-warm-50">
+      <div className="min-h-screen flex items-center justify-center bg-warm-50 dark:bg-surface">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 border-2 border-kpfk-red border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-warm-400">Loading...</span>
+          <span className="text-sm text-warm-400 dark:text-warm-500">Loading...</span>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex bg-warm-50">
+    <div className="min-h-screen flex bg-warm-50 dark:bg-surface">
       {/* Mobile header */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 bg-sidebar-bg text-white flex items-center justify-between px-4 py-3 border-b border-sidebar-border">
         <div className="flex items-center gap-2.5">

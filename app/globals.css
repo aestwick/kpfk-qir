@@ -32,6 +32,20 @@
     background: #A8A39B;
   }
 
+  /* Dark mode base overrides */
+  @media (prefers-color-scheme: dark) {
+    ::selection {
+      background-color: rgba(217, 74, 94, 0.3);
+      color: #FAF9F7;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #5C574F;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #7D7870;
+    }
+  }
+
   /* Tabular/monospace figures for numbers */
   .tabular-nums {
     font-variant-numeric: tabular-nums;
@@ -41,15 +55,16 @@
 @layer components {
   /* Card base */
   .card {
-    @apply bg-white rounded-xl border border-warm-200 shadow-card;
+    @apply bg-white rounded-xl border border-warm-200 shadow-card
+           dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark;
   }
   .card:hover {
-    @apply shadow-card-hover;
+    @apply shadow-card-hover dark:shadow-card-hover-dark;
   }
 
   /* Section header used in dashboard cards */
   .section-header {
-    @apply text-2xs font-semibold uppercase tracking-wider text-warm-400;
+    @apply text-2xs font-semibold uppercase tracking-wider text-warm-400 dark:text-warm-500;
   }
 
   /* Status badge base */
@@ -75,18 +90,20 @@
     @apply flex items-center gap-3 px-5 py-2.5 transition-colors duration-150;
   }
   .log-entry:hover {
-    @apply bg-kpfk-cream/50;
+    @apply bg-kpfk-cream/50 dark:bg-warm-800/50;
   }
 
   /* Action buttons in status strip */
   .action-btn {
-    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 disabled:opacity-40;
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 disabled:opacity-40 dark:disabled:opacity-50;
   }
   .action-btn-primary {
-    @apply action-btn bg-warm-800 text-white hover:bg-warm-700 active:bg-warm-900;
+    @apply action-btn bg-warm-800 text-white hover:bg-warm-700 active:bg-warm-900
+           dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 dark:active:bg-warm-300;
   }
   .action-btn-ghost {
-    @apply action-btn text-warm-600 hover:bg-warm-100 active:bg-warm-200;
+    @apply action-btn text-warm-600 hover:bg-warm-100 active:bg-warm-200
+           dark:text-warm-300 dark:hover:bg-warm-700 dark:active:bg-warm-600;
   }
 
   /* Progress bar */

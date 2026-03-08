@@ -1,6 +1,7 @@
 import type { Config } from 'tailwindcss'
 
 const config: Config = {
+  darkMode: 'media',
   content: [
     './app/**/*.{js,ts,jsx,tsx,mdx}',
     './components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -33,6 +34,13 @@ const config: Config = {
           900: '#1C1A17',
           950: '#0F0E0C',
         },
+        // Dark mode surface hierarchy
+        surface: {
+          DEFAULT: '#1C1A17',   // page bg in dark (warm-900)
+          raised: '#2A2722',    // cards, containers (warm-800)
+          overlay: '#352F28',   // modals, popovers
+          subtle: '#3F3B35',    // hover states on cards
+        },
         // Sidebar dark palette
         sidebar: {
           bg: '#191817',
@@ -57,6 +65,10 @@ const config: Config = {
         'card-hover': '0 4px 6px -1px rgba(0,0,0,0.06), 0 2px 4px -2px rgba(0,0,0,0.04)',
         'glow-red': '0 0 0 3px rgba(196, 30, 58, 0.1)',
         'glow-gold': '0 0 0 3px rgba(212, 168, 67, 0.15)',
+        'card-dark': '0 1px 3px 0 rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.2)',
+        'card-hover-dark': '0 4px 6px -1px rgba(0,0,0,0.4), 0 2px 4px -2px rgba(0,0,0,0.3)',
+        'glow-red-dark': '0 0 0 3px rgba(217, 74, 94, 0.25)',
+        'glow-gold-dark': '0 0 0 3px rgba(232, 201, 122, 0.2)',
       },
       animation: {
         'fade-in': 'fadeIn 0.3s ease-out',
