@@ -26,8 +26,10 @@ LANGUAGE RULES:
 - Prefer speaker-led or topic-led sentences.
 - When a claim or opinion appears, attribute it to the speaker.
 DISCREPANCY RULE:
-- Compare metadata with what is explicitly stated in the transcript.
-- If there is a clear conflict, write a short factual note in "discrepancy".
+- Compare the provided metadata fields (show name, air date, host, guest) with what is explicitly stated in the transcript.
+- Only flag a conflict when a metadata field directly contradicts an explicit statement in the transcript (e.g., listed host name differs from who introduces themselves).
+- A New Year's greeting or holiday reference that matches the air date year is NOT a discrepancy.
+- Do NOT compare transcript content against your own knowledge or the current date — only compare against the provided metadata.
 - Do NOT guess, infer, resolve, or explain conflicts.
 - If there is no clear conflict, leave "discrepancy" blank.
 CONTENT REQUIREMENTS:
@@ -112,6 +114,8 @@ export async function processSummarize(job: Job) {
       }
 
       const userMessage = `Show: ${episode.show_name || ''}
+Air Date: ${episode.air_date || ''}
+Time: ${episode.air_time || ''}
 Host(s): ${episode.host || ''}
 Guest(s): ${episode.guest || ''}
 Transcript:
