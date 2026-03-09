@@ -300,19 +300,30 @@ async function runAiComplianceCheck(
 }
 
 export async function processCompliance(job: Job) {
-  console.log('[compliance] starting batch...')
+  const showKey = job.data?.show_key as string | undefined
+  console.log(`[compliance] starting batch...${showKey ? ` (show: ${showKey})` : ''}`)
 
   const checksEnabled = await getComplianceChecksEnabled()
   const compliancePrompt = await getCompliancePrompt()
   const batchSize = await getSummarizeBatchSize()
   const { start, end } = getCurrentQuarterBounds()
 
-  // Get summarized episodes that haven't been compliance checked (including those
-  // with null air_date created during this quarter — older ingests didn't populate air_date)
-  const { data: episodes, error } = await supabaseAdmin
+  // Build query — when processing a specific show, include already-checked episodes
+  // so the user can re-run compliance on a particular show
+  let query = supabaseAdmin
     .from('episode_log')
     .select('*')
-    .eq('status', 'summarized')
+
+  if (showKey) {
+    query = query
+      .eq('show_key', showKey)
+      .in('status', ['summarized', 'compliance_checked'])
+  } else {
+    query = query.eq('status', 'summarized')
+  }
+
+  // Filter to current quarter (including null air_date episodes created this quarter)
+  const { data: episodes, error } = await query
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
     .limit(batchSize)
@@ -434,16 +445,28 @@ export async function processCompliance(job: Job) {
     }
   }
 
-  // Check if more summarized episodes remain after this batch
-  const { count: remainingCount } = await supabaseAdmin
+  // Check if more episodes remain after this batch
+  let remainQuery = supabaseAdmin
     .from('episode_log')
     .select('id', { count: 'exact', head: true })
-    .eq('status', 'summarized')
+
+  if (showKey) {
+    remainQuery = remainQuery
+      .eq('show_key', showKey)
+      .in('status', ['summarized', 'compliance_checked'])
+  } else {
+    remainQuery = remainQuery.eq('status', 'summarized')
+  }
+
+  const { count: remainingCount } = await remainQuery
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 
-  const remaining = (remainingCount ?? 0) > 0
+  // For show-specific runs, "remaining" means there are more than what we just processed
+  const remaining = showKey
+    ? (remainingCount ?? 0) > checked
+    : (remainingCount ?? 0) > 0
   if (remaining) {
-    console.log(`[compliance] ${remainingCount} more summarized episodes — will continue`)
+    console.log(`[compliance] ${remainingCount} more episodes — will continue`)
   }
 
   return { checked, remaining }

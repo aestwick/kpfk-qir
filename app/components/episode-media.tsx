@@ -41,6 +41,7 @@ export function AudioPlayerWithCaptions({
   onReady?: (seekTo: SeekToFn) => void
 }) {
   const [currentTime, setCurrentTime] = useState(0)
+  const [autoScroll, setAutoScroll] = useState(true)
   const audioRef = useRef<HTMLAudioElement>(null)
   const activeCueRef = useRef<HTMLDivElement>(null)
   const captionsRef = useRef<HTMLDivElement>(null)
@@ -88,14 +89,25 @@ export function AudioPlayerWithCaptions({
 
   // Auto-scroll captions to active cue
   useEffect(() => {
-    if (activeCueRef.current && captionsRef.current) {
+    if (autoScroll && activeCueRef.current && captionsRef.current) {
       activeCueRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
-  }, [activeCueIdx])
+  }, [activeCueIdx, autoScroll])
 
   return (
     <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
-      <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Audio Player with Captions</h3>
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Audio Player with Captions</h3>
+        <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-warm-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={autoScroll}
+            onChange={(e) => setAutoScroll(e.target.checked)}
+            className="rounded"
+          />
+          Auto-scroll
+        </label>
+      </div>
       <audio
         ref={audioRef}
         src={mp3Url}

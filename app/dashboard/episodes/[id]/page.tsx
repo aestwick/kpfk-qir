@@ -716,18 +716,17 @@ export default function EpisodeDetailPage() {
                     {flag.timestamp_seconds !== null ? (
                       <button
                         onClick={() => jumpToTimestamp(flag.timestamp_seconds!, flag.excerpt)}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
-                        title="Jump to this timestamp in audio and transcript"
+                        className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+                        title="Play audio from this timestamp"
                       >
-                        <span>&#9654;</span> Jump to {formatTimestamp(flag.timestamp_seconds)}
+                        <span>&#9654;</span> Listen at {formatTimestamp(flag.timestamp_seconds)}
                       </button>
                     ) : flag.excerpt && (
                       <button
                         onClick={() => {
-                          // No timestamp stored — highlight excerpt in transcript so user can find it
                           setHighlightText(flag.excerpt!.slice(0, 60))
                         }}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
+                        className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
                         title="Find this excerpt in the transcript"
                       >
                         <span>&#128269;</span> Find in transcript
