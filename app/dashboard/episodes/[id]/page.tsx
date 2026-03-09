@@ -99,7 +99,9 @@ const statusColors: Record<string, string> = {
   summarized: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
   compliance_checked: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
   failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  transcript_missing: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   unavailable: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
+  dead: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
 }
 
 function formatTimestamp(seconds: number): string {
@@ -716,18 +718,17 @@ export default function EpisodeDetailPage() {
                     {flag.timestamp_seconds !== null ? (
                       <button
                         onClick={() => jumpToTimestamp(flag.timestamp_seconds!, flag.excerpt)}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
-                        title="Jump to this timestamp in audio and transcript"
+                        className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+                        title="Play audio from this timestamp"
                       >
-                        <span>&#9654;</span> Jump to {formatTimestamp(flag.timestamp_seconds)}
+                        <span>&#9654;</span> Listen at {formatTimestamp(flag.timestamp_seconds)}
                       </button>
                     ) : flag.excerpt && (
                       <button
                         onClick={() => {
-                          // No timestamp stored — highlight excerpt in transcript so user can find it
                           setHighlightText(flag.excerpt!.slice(0, 60))
                         }}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 mt-1 flex items-center gap-1"
+                        className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
                         title="Find this excerpt in the transcript"
                       >
                         <span>&#128269;</span> Find in transcript

@@ -103,6 +103,17 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true, message: 'Summarize job queued' })
       }
       case 'compliance': {
+        const showKey = body.show_key as string | undefined
+        if (showKey) {
+          // Count eligible episodes for this show
+          const { count } = await supabaseAdmin
+            .from('episode_log')
+            .select('id', { count: 'exact', head: true })
+            .eq('show_key', showKey)
+            .eq('status', 'summarized')
+          await complianceQueue.add(`manual-compliance-${showKey}`, { show_key: showKey })
+          return NextResponse.json({ ok: true, message: `Compliance check queued for show "${showKey}" (${count ?? 0} episodes eligible)` })
+        }
         await complianceQueue.add('manual-compliance', {})
         return NextResponse.json({ ok: true, message: 'Compliance check job queued' })
       }

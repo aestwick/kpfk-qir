@@ -109,7 +109,14 @@ export async function processSummarize(job: Job) {
       const transcriptText = transcriptMap.get(episode.id)
 
       if (!transcriptText) {
-        console.warn(`[summarize] no transcript for episode ${episode.id}`)
+        console.warn(`[summarize] no transcript for episode ${episode.id}, marking as transcript_missing`)
+        await supabaseAdmin
+          .from('episode_log')
+          .update({
+            status: 'transcript_missing',
+            error_message: 'Episode marked as transcribed but no transcript found in database',
+          })
+          .eq('id', episode.id)
         continue
       }
 

@@ -50,7 +50,8 @@ services:
     image: redis:7-alpine
     container_name: qir-redis
     restart: unless-stopped
-    mem_limit: 256m
+    mem_limit: 512m
+    command: ["redis-server", "--maxmemory", "450mb", "--maxmemory-policy", "noeviction"]
     logging:
       driver: json-file
       options:

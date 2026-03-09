@@ -99,7 +99,7 @@ export default function CompliancePage() {
   // Filters from URL
   const [filterType, setFilterType] = useState(searchParams.get('type') ?? '')
   const [filterSeverity, setFilterSeverity] = useState(searchParams.get('severity') ?? '')
-  const [filterResolution, setFilterResolution] = useState(searchParams.get('resolution') ?? '')
+  const [filterResolution, setFilterResolution] = useState(searchParams.get('resolution') ?? 'unresolved')
   const [filterQuarter, setFilterQuarter] = useState(searchParams.get('quarter') ?? '')
   const [filterShow, setFilterShow] = useState(searchParams.get('show') ?? '')
   const [page, setPage] = useState(parseInt(searchParams.get('page') ?? '1'))
@@ -125,6 +125,7 @@ export default function CompliancePage() {
 
   // Loading states for actions
   const [actionLoading, setActionLoading] = useState(false)
+  const [processingShow, setProcessingShow] = useState<string | null>(null)
 
   // Tab for rules section
   const [rulesTab, setRulesTab] = useState<'wordlist' | 'prompt' | 'checks'>('wordlist')
@@ -435,6 +436,26 @@ export default function CompliancePage() {
     }
   }
 
+  async function runComplianceForShow(showKey: string, showName: string) {
+    if (processingShow) return
+    setProcessingShow(showKey)
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'compliance', show_key: showKey }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      toast('success', data.message ?? `Compliance check queued for ${showName}`)
+    } catch (err) {
+      console.error('Failed to queue compliance check:', err)
+      toast('error', `Failed to queue compliance check for ${showName}`)
+    } finally {
+      setProcessingShow(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -498,6 +519,7 @@ export default function CompliancePage() {
                     <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Critical</th>
                     <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Warning</th>
                     <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase">Total Flags</th>
+                    <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500 dark:text-warm-400 uppercase"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-warm-700">
@@ -537,6 +559,16 @@ export default function CompliancePage() {
                         }
                       </td>
                       <td className="px-4 py-2.5 text-center text-gray-600 dark:text-warm-400">{show.total_flags || '—'}</td>
+                      <td className="px-4 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => runComplianceForShow(show.show_key, show.show_name)}
+                          disabled={processingShow !== null}
+                          className="text-xs px-2.5 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap dark:bg-blue-700 dark:hover:bg-blue-600"
+                          title={`Run compliance checks on all episodes of ${show.show_name}`}
+                        >
+                          {processingShow === show.show_key ? 'Queuing...' : 'Run Check'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -706,11 +738,13 @@ export default function CompliancePage() {
                   </td>
                 </tr>
               ) : (
-                flags.map((flag) => (
+                flags.map((flag) => {
+                  const episodeUrl = `/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`
+                  return (
                   <tr
                     key={flag.id}
                     className={`hover:bg-gray-50 dark:hover:bg-warm-700/50 cursor-pointer ${selected.has(flag.id) ? 'bg-blue-50 dark:bg-blue-900/30' : ''}`}
-                    onClick={() => router.push(`/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`)}
+                    onClick={() => router.push(episodeUrl)}
                   >
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -722,7 +756,7 @@ export default function CompliancePage() {
                     </td>
                     <td className="px-4 py-3">
                       <a
-                        href={`/dashboard/shows/${encodeURIComponent(flag.episode_log?.show_key ?? '')}`}
+                        href={episodeUrl}
                         onClick={(e) => e.stopPropagation()}
                         className="text-blue-600 hover:underline font-medium"
                       >
@@ -807,7 +841,8 @@ export default function CompliancePage() {
                       )}
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

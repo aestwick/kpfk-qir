@@ -101,7 +101,12 @@ transcribeWorker.on('completed', async (job) => {
     await summarizeQueue.add('summarize-batch', {})
   }
   if (remaining) {
-    await transcribeQueue.add('transcribe-continue', {})
+    if (count === 0) {
+      console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
+      await transcribeQueue.add('transcribe-backoff', {}, { delay: 5 * 60 * 1000 })
+    } else {
+      await transcribeQueue.add('transcribe-continue', {})
+    }
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -122,7 +127,13 @@ summarizeWorker.on('completed', async (job) => {
     await complianceQueue.add('compliance-batch', {})
   }
   if (remaining) {
-    await summarizeQueue.add('summarize-continue', {})
+    if (count === 0) {
+      // Zero progress — back off 5 minutes to avoid hot-looping on stuck episodes
+      console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
+      await summarizeQueue.add('summarize-backoff', {}, { delay: 5 * 60 * 1000 })
+    } else {
+      await summarizeQueue.add('summarize-continue', {})
+    }
   }
 })
 summarizeWorker.on('failed', (job, err) => {
