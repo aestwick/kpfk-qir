@@ -618,6 +618,9 @@ export default function EpisodeDetailPage() {
         <button onClick={() => handleAction('re-summarize')} disabled={actionLoading !== null || !transcript?.transcript} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
           {actionLoading === 're-summarize' ? 'Queuing...' : 'Re-Summarize'}
         </button>
+        <button onClick={() => handleAction('fix-dates')} disabled={actionLoading !== null} className="px-3 py-1.5 text-sm bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50">
+          {actionLoading === 'fix-dates' ? 'Fixing...' : 'Fix Dates from URL'}
+        </button>
         <a href={episode.mp3_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 dark:bg-warm-700 dark:text-warm-200 rounded hover:bg-gray-300 dark:hover:bg-warm-600">
           Download MP3
         </a>

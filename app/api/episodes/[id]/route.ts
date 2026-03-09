@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
+import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 
 export async function GET(
   _request: NextRequest,
@@ -68,6 +69,23 @@ export async function PATCH(
         .eq('id', episodeId)
       await summarizeQueue.add('re-summarize', { episodeId })
       return NextResponse.json({ ok: true, message: 'Re-summarization queued' })
+    }
+
+    if (action === 'fix-dates') {
+      const { data: ep } = await supabaseAdmin
+        .from('episode_log')
+        .select('mp3_url, duration')
+        .eq('id', episodeId)
+        .single()
+      if (!ep) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      const parsed = parseMp3Url(ep.mp3_url)
+      if (!parsed) return NextResponse.json({ error: 'Could not parse date from URL' }, { status: 400 })
+      const fields = dateFieldsFromUrl(parsed, ep.duration)
+      await supabaseAdmin
+        .from('episode_log')
+        .update(fields)
+        .eq('id', episodeId)
+      return NextResponse.json({ ok: true, message: 'Dates updated from URL', ...fields })
     }
 
     if (action === 'retry') {
