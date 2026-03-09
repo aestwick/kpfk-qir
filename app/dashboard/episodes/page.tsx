@@ -45,6 +45,7 @@ export default function EpisodesPage() {
 
   // Confirm dialog state
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [fixDatesConfirmOpen, setFixDatesConfirmOpen] = useState(false)
 
   // Read initial state from URL params
   const statusFilter = searchParams.get('status') ?? ''
@@ -174,6 +175,26 @@ export default function EpisodesPage() {
     fetchEpisodes()
   }
 
+  async function handleBulkFixDates() {
+    try {
+      const res = await fetch('/api/episodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk-fix-dates' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(data.error ?? 'Failed to fix dates')
+        return
+      }
+      alert(data.message ?? 'Dates fixed')
+    } catch {
+      alert('Network error: could not reach server')
+      return
+    }
+    fetchEpisodes()
+  }
+
   function handleExportCSV() {
     const params = new URLSearchParams({ format: 'csv', limit: '10000', page: '1', sort, order })
     if (statusFilter) params.set('status', statusFilter)
@@ -277,6 +298,9 @@ export default function EpisodesPage() {
         <div className="flex gap-2">
           <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 dark:bg-red-700">
             Retry Failed
+          </button>
+          <button onClick={() => setFixDatesConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-teal-600 text-white rounded hover:bg-teal-700">
+            Fix All Dates
           </button>
           <button onClick={handleExportCSV} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200">
             Export CSV
@@ -449,6 +473,20 @@ export default function EpisodesPage() {
           handleBulkRetry()
         }}
         onCancel={() => setConfirmOpen(false)}
+      />
+
+      {/* Confirm Dialog for Fix All Dates */}
+      <ConfirmDialog
+        open={fixDatesConfirmOpen}
+        title="Fix All Dates from URLs"
+        message="This will re-derive air dates and times from MP3 URLs for all episodes. This is safe — no re-transcription or re-summarization. Continue?"
+        confirmLabel="Fix All Dates"
+        confirmVariant="danger"
+        onConfirm={() => {
+          setFixDatesConfirmOpen(false)
+          handleBulkFixDates()
+        }}
+        onCancel={() => setFixDatesConfirmOpen(false)}
       />
     </div>
   )
