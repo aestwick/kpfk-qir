@@ -467,12 +467,13 @@ export default function EpisodeDetailPage() {
   }
 
   function copyFlagDetails(flag: ComplianceFlag) {
+    const ts = flag.timestamp_seconds ?? (flag.excerpt ? findTimestampFromVtt(flag.excerpt) : null)
     const lines = [
       `Show: ${episode?.show_name ?? 'Unknown'}`,
       `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
       `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
       `MP3: ${episode?.mp3_url ?? 'Unknown'}`,
-      flag.timestamp_seconds != null ? `Violation at: ${formatTimestamp(flag.timestamp_seconds)}` : null,
+      ts != null ? `Violation at: ${formatTimestamp(ts)}` : null,
       `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
       flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
     ].filter(Boolean).join('\n')
