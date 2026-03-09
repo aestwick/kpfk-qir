@@ -10,6 +10,36 @@ const parser = new XMLParser({
   isArray: (name) => name === 'item',
 })
 
+/**
+ * Parse air date and time from archive MP3 URL.
+ * Format: kpfk_YYMMDD_HHMMSSshowkey.mp3
+ * e.g. kpfk_260106_233000casc.mp3 → 2026-01-06, 23:30:00
+ */
+function parseMp3Url(mp3Url: string): {
+  airDate: string
+  airStart: string
+  showKey: string
+} | null {
+  const match = mp3Url.match(/kpfk_(\d{6})_(\d{6})([a-zA-Z]+)\.mp3/)
+  if (!match) return null
+
+  const [, datePart, timePart, showKey] = match
+  const yy = datePart.slice(0, 2)
+  const mm = datePart.slice(2, 4)
+  const dd = datePart.slice(4, 6)
+  const hh = timePart.slice(0, 2)
+  const mi = timePart.slice(2, 4)
+  const ss = timePart.slice(4, 6)
+
+  const year = parseInt(yy) >= 90 ? `19${yy}` : `20${yy}`
+
+  return {
+    airDate: `${year}-${mm}-${dd}`,
+    airStart: `${hh}:${mi}:${ss}`,
+    showKey,
+  }
+}
+
 function toPacificDate(utcDateStr: string): {
   date: string
   airDate: string
@@ -101,7 +131,7 @@ async function processShow(show: { key: string; show_name: string; category: str
 
       if (existing?.length) continue
 
-      // Parse date/time
+      // Parse date/time — prefer URL-derived date (most reliable), fall back to RSS pubDate
       let dateInfo = {
         date: null as string | null,
         airDate: null as string | null,
@@ -110,6 +140,9 @@ async function processShow(show: { key: string; show_name: string; category: str
         airStart: null as string | null,
         airEnd: null as string | null,
       }
+
+      const urlParsed = parseMp3Url(mp3Url)
+
       if (pubDate) {
         const p = toPacificDate(pubDate)
         dateInfo = {
@@ -139,6 +172,41 @@ async function processShow(show: { key: string; show_name: string; category: str
           }).format(endDate)
           dateInfo.endTime = endTimeFmt
           dateInfo.airEnd = endTime24
+        }
+      }
+
+      // Override with URL-parsed date/time (ground truth from archive filename)
+      if (urlParsed) {
+        dateInfo.airDate = urlParsed.airDate
+        dateInfo.airStart = urlParsed.airStart
+
+        // Reformat display date from URL
+        const [year, month, day] = urlParsed.airDate.split('-').map(Number)
+        const urlDate = new Date(year, month - 1, day)
+        dateInfo.date = new Intl.DateTimeFormat('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        }).format(urlDate)
+
+        // Reformat display start time from URL
+        const hh = parseInt(urlParsed.airStart.slice(0, 2))
+        const mi = urlParsed.airStart.slice(3, 5)
+        const ampm = hh >= 12 ? 'PM' : 'AM'
+        const hh12 = hh === 0 ? 12 : hh > 12 ? hh - 12 : hh
+        dateInfo.startTime = `${hh12}:${mi} ${ampm}`
+
+        // Recalculate end time from URL start + duration
+        if (durationMinutes) {
+          const startMinutes = parseInt(urlParsed.airStart.slice(0, 2)) * 60 + parseInt(urlParsed.airStart.slice(3, 5))
+          const endMinutes = startMinutes + durationMinutes
+          const endHH = Math.floor(endMinutes / 60) % 24
+          const endMI = endMinutes % 60
+          const endAmpm = endHH >= 12 ? 'PM' : 'AM'
+          const endHH12 = endHH === 0 ? 12 : endHH > 12 ? endHH - 12 : endHH
+          dateInfo.endTime = `${endHH12}:${String(endMI).padStart(2, '0')} ${endAmpm}`
+          dateInfo.airEnd = `${String(endHH).padStart(2, '0')}:${String(endMI).padStart(2, '0')}:00`
         }
       }
 
