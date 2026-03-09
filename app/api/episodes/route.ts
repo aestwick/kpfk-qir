@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,6 +93,33 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json({ ok: true, message: 'All failed episodes reset to pending' })
+    }
+
+    if (body.action === 'bulk-fix-dates') {
+      const { from, to } = body as { from?: string; to?: string }
+      // Fetch episodes in date range, re-derive dates from MP3 URLs
+      let query = supabaseAdmin
+        .from('episode_log')
+        .select('id, mp3_url, duration, air_date')
+      if (from) query = query.gte('air_date', from)
+      if (to) query = query.lte('air_date', to)
+      const { data: episodes, error: fetchErr } = await query
+
+      if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
+
+      let fixed = 0
+      for (const ep of episodes || []) {
+        const parsed = parseMp3Url(ep.mp3_url)
+        if (!parsed) continue
+        const fields = dateFieldsFromUrl(parsed, ep.duration)
+        const { error: updateErr } = await supabaseAdmin
+          .from('episode_log')
+          .update(fields)
+          .eq('id', ep.id)
+        if (!updateErr) fixed++
+      }
+
+      return NextResponse.json({ ok: true, message: `Fixed dates for ${fixed} episodes` })
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })

@@ -46,6 +46,7 @@ export default function EpisodesPage() {
   // Confirm dialog state
   const [confirmOpen, setConfirmOpen] = useState(false)
 
+
   // Read initial state from URL params
   const statusFilter = searchParams.get('status') ?? ''
   const quarterFilter = searchParams.get('quarter') ?? ''
@@ -278,7 +279,7 @@ export default function EpisodesPage() {
           <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 dark:bg-red-700">
             Retry Failed
           </button>
-          <button onClick={handleExportCSV} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200">
+<button onClick={handleExportCSV} className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200">
             Export CSV
           </button>
         </div>
