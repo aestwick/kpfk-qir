@@ -434,6 +434,26 @@ export default function EpisodeDetailPage() {
 
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  /** Search VTT captions for excerpt text and return the cue start time, or null */
+  function findTimestampFromVtt(excerpt: string): number | null {
+    if (!showVtt) return null
+    const needle = excerpt.toLowerCase().slice(0, 80)
+    const blocks = showVtt.split(/\n\n+/)
+    for (const block of blocks) {
+      const lines = block.trim().split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(/(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->/)
+        if (match) {
+          const text = lines.slice(i + 1).join(' ').toLowerCase()
+          if (text.includes(needle)) {
+            return +match[1] * 3600 + +match[2] * 60 + +match[3] + +match[4] / 1000
+          }
+        }
+      }
+    }
+    return null
+  }
+
   function jumpToTimestamp(seconds: number, excerpt?: string | null) {
     if (seekToRef.current) {
       seekToRef.current(seconds)
@@ -715,25 +735,32 @@ export default function EpisodeDetailPage() {
                         &ldquo;...{flag.excerpt}...&rdquo;
                       </button>
                     )}
-                    {flag.timestamp_seconds !== null ? (
-                      <button
-                        onClick={() => jumpToTimestamp(flag.timestamp_seconds!, flag.excerpt)}
-                        className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
-                        title="Play audio from this timestamp"
-                      >
-                        <span>&#9654;</span> Listen at {formatTimestamp(flag.timestamp_seconds)}
-                      </button>
-                    ) : flag.excerpt && (
-                      <button
-                        onClick={() => {
-                          setHighlightText(flag.excerpt!.slice(0, 60))
-                        }}
-                        className="text-[10px] text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 mt-1 flex items-center gap-1"
-                        title="Find this excerpt in the transcript"
-                      >
-                        <span>&#128269;</span> Find in transcript
-                      </button>
-                    )}
+                    {(() => {
+                      const ts = flag.timestamp_seconds ?? (flag.excerpt ? findTimestampFromVtt(flag.excerpt) : null)
+                      if (ts !== null) {
+                        return (
+                          <button
+                            onClick={() => jumpToTimestamp(ts, flag.excerpt)}
+                            className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
+                            title="Play audio from this timestamp"
+                          >
+                            <span>&#9654;</span> Listen at {formatTimestamp(ts)}
+                          </button>
+                        )
+                      }
+                      if (flag.excerpt) {
+                        return (
+                          <button
+                            onClick={() => setHighlightText(flag.excerpt!.slice(0, 60))}
+                            className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                            title="Find this excerpt in the transcript"
+                          >
+                            <span>&#128269;</span> Find in transcript
+                          </button>
+                        )
+                      }
+                      return null
+                    })()}
                     {/* "Not a real word" shortcut for profanity flags */}
                     {flag.flag_type === 'profanity' && flag.excerpt && (
                       <button
