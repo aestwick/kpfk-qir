@@ -113,6 +113,12 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; type: 'word' | 'correction' } | null>(null)
 
+  // Fix dates state
+  const [fixDatesFrom, setFixDatesFrom] = useState('')
+  const [fixDatesTo, setFixDatesTo] = useState('')
+  const [fixDatesLoading, setFixDatesLoading] = useState(false)
+  const [fixDatesResult, setFixDatesResult] = useState<string | null>(null)
+
   // Shows tab state
   const [shows, setShows] = useState<Show[]>([])
   const [showSearch, setShowSearch] = useState('')
@@ -380,6 +386,34 @@ export default function SettingsPage() {
     setSaving(null)
   }
 
+  // ── Fix dates handler ──
+
+  async function handleBulkFixDates() {
+    if (!fixDatesFrom || !fixDatesTo) {
+      toast('error', 'Select both a start and end date')
+      return
+    }
+    setFixDatesLoading(true)
+    setFixDatesResult(null)
+    try {
+      const res = await fetch('/api/episodes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk-fix-dates', from: fixDatesFrom, to: fixDatesTo }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setFixDatesResult(data.message ?? 'Done')
+        toast('success', data.message ?? 'Dates fixed')
+      } else {
+        toast('error', data.error ?? 'Failed to fix dates')
+      }
+    } catch {
+      toast('error', 'Network error')
+    }
+    setFixDatesLoading(false)
+  }
+
   // ── Shows tab handlers ──
 
   function startShowEdit(show: Show, field: string) {
@@ -602,6 +636,48 @@ export default function SettingsPage() {
                 </div>
               )
             })}
+          </div>
+
+          {/* Maintenance */}
+          <div className="bg-white rounded-lg shadow p-4 space-y-3 dark:bg-surface-raised dark:shadow-card-dark">
+            <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Maintenance</h3>
+
+            <div>
+              <p className="text-sm text-gray-600 dark:text-warm-400 mb-2">
+                Re-derive air dates and times from MP3 URLs for episodes in a date range.
+                This fixes dates that were wrong from the RSS feed. No re-transcription or AI tokens.
+              </p>
+              <div className="flex items-end gap-3 flex-wrap">
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">From</label>
+                  <input
+                    type="date"
+                    value={fixDatesFrom}
+                    onChange={(e) => setFixDatesFrom(e.target.value)}
+                    className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">To</label>
+                  <input
+                    type="date"
+                    value={fixDatesTo}
+                    onChange={(e) => setFixDatesTo(e.target.value)}
+                    className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                  />
+                </div>
+                <button
+                  onClick={handleBulkFixDates}
+                  disabled={fixDatesLoading || !fixDatesFrom || !fixDatesTo}
+                  className="px-4 py-1.5 text-sm bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {fixDatesLoading ? 'Fixing...' : 'Fix Dates from URLs'}
+                </button>
+              </div>
+              {fixDatesResult && (
+                <p className="text-sm text-green-600 dark:text-green-400 mt-2">{fixDatesResult}</p>
+              )}
+            </div>
           </div>
         </div>
       )}

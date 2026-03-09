@@ -96,10 +96,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === 'bulk-fix-dates') {
-      // Fetch all episodes, re-derive dates from MP3 URLs
-      const { data: episodes, error: fetchErr } = await supabaseAdmin
+      const { from, to } = body as { from?: string; to?: string }
+      // Fetch episodes in date range, re-derive dates from MP3 URLs
+      let query = supabaseAdmin
         .from('episode_log')
-        .select('id, mp3_url, duration')
+        .select('id, mp3_url, duration, air_date')
+      if (from) query = query.gte('air_date', from)
+      if (to) query = query.lte('air_date', to)
+      const { data: episodes, error: fetchErr } = await query
 
       if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 })
 
