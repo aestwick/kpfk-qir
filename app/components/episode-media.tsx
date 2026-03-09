@@ -41,7 +41,7 @@ export function AudioPlayerWithCaptions({
   onReady?: (seekTo: SeekToFn) => void
 }) {
   const [currentTime, setCurrentTime] = useState(0)
-  const [autoScroll, setAutoScroll] = useState(true)
+  const [autoScroll, setAutoScroll] = useState(false)
   const audioRef = useRef<HTMLAudioElement>(null)
   const activeCueRef = useRef<HTMLDivElement>(null)
   const captionsRef = useRef<HTMLDivElement>(null)
