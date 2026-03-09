@@ -132,6 +132,15 @@ export default function SettingsPage() {
   const [csvImporting, setCsvImporting] = useState(false)
   const csvFileRef = useRef<HTMLInputElement>(null)
 
+  // Pipeline health state
+  const [healthCounts, setHealthCounts] = useState<Record<string, number>>({})
+  const [errorEpisodes, setErrorEpisodes] = useState<Array<{
+    id: number; show_key: string; show_name: string | null; air_date: string | null
+    status: string; error_message: string | null; created_at: string; updated_at: string | null; retry_count: number | null
+  }>>([])
+  const [stuckEpisodes, setStuckEpisodes] = useState<typeof errorEpisodes>([])
+  const [healthLoading, setHealthLoading] = useState(false)
+
   // Auto-save debounce timers
   const autoSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
@@ -190,6 +199,27 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Fetch pipeline health data when pipeline tab is active
+  const fetchHealth = useCallback(async () => {
+    setHealthLoading(true)
+    try {
+      const res = await fetch('/api/episodes/counts?health=true')
+      if (res.ok) {
+        const data = await res.json()
+        setHealthCounts(data.counts ?? {})
+        setErrorEpisodes(data.errorEpisodes ?? [])
+        setStuckEpisodes(data.stuckEpisodes ?? [])
+      }
+    } catch {
+      // silent
+    }
+    setHealthLoading(false)
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'pipeline') fetchHealth()
+  }, [activeTab, fetchHealth])
 
   // Unsaved changes warning for prompts
   useEffect(() => {
@@ -636,6 +666,134 @@ export default function SettingsPage() {
                 </div>
               )
             })}
+          </div>
+
+          {/* Pipeline Health */}
+          <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Pipeline Health</h3>
+              <button
+                onClick={fetchHealth}
+                disabled={healthLoading}
+                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50"
+              >
+                {healthLoading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+
+            {/* Status Counts */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {[
+                { key: 'pending', label: 'Pending', color: 'text-gray-600 dark:text-warm-400' },
+                { key: 'transcribed', label: 'Transcribed', color: 'text-blue-600 dark:text-blue-400' },
+                { key: 'summarized', label: 'Summarized', color: 'text-indigo-600 dark:text-indigo-400' },
+                { key: 'compliance_checked', label: 'Compliance Checked', color: 'text-green-600 dark:text-green-400' },
+                { key: 'failed', label: 'Failed', color: 'text-red-600 dark:text-red-400' },
+                { key: 'transcript_missing', label: 'Transcript Missing', color: 'text-orange-600 dark:text-orange-400' },
+                { key: 'unavailable', label: 'Unavailable', color: 'text-gray-400 dark:text-warm-500' },
+                { key: 'dead', label: 'Dead', color: 'text-gray-400 dark:text-warm-500' },
+              ].map(({ key, label, color }) => (
+                <div key={key} className="border rounded-lg p-2.5 dark:border-warm-700">
+                  <p className="text-xs text-gray-500 dark:text-warm-400">{label}</p>
+                  <p className={`text-xl font-bold ${color}`}>{healthCounts[key] ?? 0}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Error Episodes */}
+            {errorEpisodes.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-red-600 dark:text-red-400 mb-2">
+                  Error Episodes ({errorEpisodes.length})
+                </h4>
+                <div className="overflow-x-auto max-h-64 overflow-y-auto border rounded-lg dark:border-warm-700">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0 dark:bg-warm-700">
+                      <tr>
+                        <th className="text-left px-2 py-1.5 font-medium">ID</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Show</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Date</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Status</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Error</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Retries</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y dark:divide-warm-700">
+                      {errorEpisodes.map((ep) => (
+                        <tr key={ep.id} className="hover:bg-gray-50 dark:hover:bg-warm-700/50">
+                          <td className="px-2 py-1.5">
+                            <a href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
+                          </td>
+                          <td className="px-2 py-1.5 max-w-[120px] truncate" title={ep.show_name ?? ep.show_key}>
+                            {ep.show_name ?? ep.show_key}
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-500 dark:text-warm-400">{ep.air_date ?? '—'}</td>
+                          <td className="px-2 py-1.5">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                              ep.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                              : ep.status === 'transcript_missing' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-300'
+                            }`}>
+                              {ep.status}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 max-w-[200px] truncate text-gray-500 dark:text-warm-400" title={ep.error_message ?? ''}>
+                            {ep.error_message ?? '—'}
+                          </td>
+                          <td className="px-2 py-1.5 text-center text-gray-500 dark:text-warm-400">{ep.retry_count ?? 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Stuck Episodes */}
+            {stuckEpisodes.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-amber-600 dark:text-amber-400 mb-2">
+                  Stuck Episodes ({stuckEpisodes.length})
+                  <span className="text-xs font-normal text-gray-500 dark:text-warm-400 ml-2">
+                    in pending/transcribed for &gt;2 hours
+                  </span>
+                </h4>
+                <div className="overflow-x-auto max-h-48 overflow-y-auto border rounded-lg dark:border-warm-700">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 sticky top-0 dark:bg-warm-700">
+                      <tr>
+                        <th className="text-left px-2 py-1.5 font-medium">ID</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Show</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Status</th>
+                        <th className="text-left px-2 py-1.5 font-medium">Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y dark:divide-warm-700">
+                      {stuckEpisodes.map((ep) => (
+                        <tr key={ep.id} className="hover:bg-gray-50 dark:hover:bg-warm-700/50">
+                          <td className="px-2 py-1.5">
+                            <a href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
+                          </td>
+                          <td className="px-2 py-1.5 max-w-[150px] truncate">{ep.show_name ?? ep.show_key}</td>
+                          <td className="px-2 py-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[10px] font-medium dark:bg-amber-900/30 dark:text-amber-300">
+                              {ep.status}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 text-gray-500 dark:text-warm-400">
+                            {ep.updated_at ? new Date(ep.updated_at).toLocaleString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {errorEpisodes.length === 0 && stuckEpisodes.length === 0 && !healthLoading && (
+              <p className="text-sm text-green-600 dark:text-green-400">All clear — no stuck or error episodes.</p>
+            )}
           </div>
 
           {/* Maintenance */}

@@ -25,7 +25,9 @@ const statusColors: Record<string, string> = {
   summarized: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
   compliance_checked: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
   failed: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+  transcript_missing: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   unavailable: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
+  dead: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-400',
 }
 
 export default function EpisodesPage() {
@@ -289,7 +291,7 @@ export default function EpisodesPage() {
       <div className="flex gap-3 flex-wrap">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
           <option value="">All Statuses</option>
-          {['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable'].map((s) => (
+          {['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'transcript_missing', 'unavailable', 'dead'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>

@@ -268,8 +268,8 @@ export async function processTranscribe(job: Job) {
       const correctedTranscript = applyCorrections(rawTranscript, corrections)
       const vtt = buildVtt(allSegments, corrections)
 
-      // Store transcript
-      await supabaseAdmin.from('transcripts').upsert(
+      // Store transcript — check for errors before marking episode as transcribed
+      const { error: upsertError } = await supabaseAdmin.from('transcripts').upsert(
         {
           episode_id: episode.id,
           transcript: correctedTranscript,
@@ -280,6 +280,20 @@ export async function processTranscribe(job: Job) {
         },
         { onConflict: 'episode_id' }
       )
+
+      if (upsertError) {
+        throw new Error(`Failed to store transcript: ${upsertError.message}`)
+      }
+
+      // Verify transcript was actually stored before updating status
+      const { count: transcriptCount } = await supabaseAdmin
+        .from('transcripts')
+        .select('episode_id', { count: 'exact', head: true })
+        .eq('episode_id', episode.id)
+
+      if (!transcriptCount || transcriptCount === 0) {
+        throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
+      }
 
       // Update episode status
       await supabaseAdmin
