@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
-import { isPipelinePaused } from '@/lib/settings'
+import { isPipelinePaused, getPipelineMode } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,22 +15,22 @@ export async function POST(request: NextRequest) {
       const paused = action === 'pause_pipeline'
       const { error } = await supabaseAdmin
         .from('qir_settings')
-        .upsert({ key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() }, { onConflict: 'key' })
+        .upsert({ key: 'pipeline_paused', value: paused, updated_at: new Date().toISOString() }, { onConflict: 'key' })
       if (error) throw error
       return NextResponse.json({ ok: true, message: paused ? 'Pipeline paused' : 'Pipeline resumed', paused })
     }
 
-    // Pipeline mode toggle
+    // Pipeline mode: constant (fully automated) or surgical (manual only)
     if (action === 'set_pipeline_mode') {
       const { mode } = body
-      if (mode !== 'steady' && mode !== 'catch-up') {
-        return NextResponse.json({ error: 'Invalid mode. Use "steady" or "catch-up"' }, { status: 400 })
+      if (mode !== 'constant' && mode !== 'surgical') {
+        return NextResponse.json({ error: 'Invalid mode. Use "constant" or "surgical"' }, { status: 400 })
       }
       const { error } = await supabaseAdmin
         .from('qir_settings')
-        .upsert({ key: 'pipeline_mode', value: JSON.stringify(mode), updated_at: new Date().toISOString() }, { onConflict: 'key' })
+        .upsert({ key: 'pipeline_mode', value: mode, updated_at: new Date().toISOString() }, { onConflict: 'key' })
       if (error) throw error
-      return NextResponse.json({ ok: true, message: `Pipeline mode set to ${mode}` })
+      return NextResponse.json({ ok: true, message: `Pipeline mode set to ${mode}`, mode })
     }
 
     // Clear failed jobs from a queue
@@ -220,7 +220,7 @@ export async function GET() {
       },
     }
 
-    const paused = await isPipelinePaused()
+    const [paused, pipelineMode] = await Promise.all([isPipelinePaused(), getPipelineMode()])
 
     const data: Record<string, unknown> = {}
     for (const result of results) {
@@ -232,6 +232,7 @@ export async function GET() {
     }
     data.backlog = backlog
     data.pipeline_paused = paused
+    data.pipeline_mode = pipelineMode
 
     return NextResponse.json(data)
   } catch (err) {

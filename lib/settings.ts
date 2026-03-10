@@ -58,6 +58,14 @@ export async function isPipelinePaused(): Promise<boolean> {
   return (await getSetting<boolean>('pipeline_paused')) ?? false
 }
 
+export type PipelineMode = 'constant' | 'surgical'
+
+export async function getPipelineMode(): Promise<PipelineMode> {
+  const mode = await getSetting<string>('pipeline_mode')
+  if (mode === 'constant' || mode === 'surgical') return mode
+  return 'surgical' // default to surgical (safe) until user opts into constant
+}
+
 export async function getIssueCategories(): Promise<string[]> {
   return (await getSetting<string[]>('issue_categories')) ?? [
     'Civil Rights / Social Justice',

@@ -43,6 +43,7 @@ interface DashData {
   qualityFlags: QualityFlag[]
   lastFiledQir: { id: number; year: number; quarter: number; version: number; updated_at: string } | null
   pipelinePaused: boolean
+  pipelineMode: 'constant' | 'surgical'
 }
 
 const BADGE_COLORS: Record<string, string> = {
@@ -188,6 +189,28 @@ export default function DashboardOverview() {
     }
   }
 
+  async function toggleMode() {
+    const newMode = data?.pipelineMode === 'constant' ? 'surgical' : 'constant'
+    setActionLoading('mode')
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_pipeline_mode', mode: newMode }),
+      })
+      if (!res.ok) {
+        toast('error', 'Failed to switch mode')
+        return
+      }
+      toast('success', `Switched to ${newMode} mode`)
+      setTimeout(fetchData, 1000)
+    } catch {
+      toast('error', 'Network error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   async function triggerAction(action: string) {
     setActionLoading(action)
     try {
@@ -264,7 +287,7 @@ export default function DashboardOverview() {
 
   if (!data) return <div className="text-red-600 card p-6">Failed to load dashboard data.</div>
 
-  const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
+  const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused, pipelineMode } = data
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -350,13 +373,44 @@ export default function DashboardOverview() {
               <span className="text-sm text-warm-400">All caught up</span>
             </div>
           )}
-          {!pipelinePaused && (
+          {!pipelinePaused && pipelineMode === 'constant' && (
             <span className="text-2xs text-warm-400 hidden md:inline tabular-nums">
               Next ingest in {nextIngest} min
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Mode toggle: Constant / Surgical */}
+          <div className="flex rounded-lg border border-warm-200 dark:border-warm-600 overflow-hidden mr-1">
+            <button
+              onClick={() => { if (pipelineMode !== 'constant') toggleMode() }}
+              disabled={actionLoading !== null}
+              className={`text-xs font-medium px-3 py-1.5 transition-colors ${
+                pipelineMode === 'constant'
+                  ? 'bg-kpfk-gold/20 text-kpfk-gold-dark border-r border-warm-200 dark:bg-kpfk-gold-dark/20 dark:text-kpfk-gold dark:border-warm-600'
+                  : 'bg-white text-warm-400 hover:bg-warm-50 border-r border-warm-200 dark:bg-warm-800 dark:text-warm-500 dark:hover:bg-warm-700 dark:border-warm-600'
+              }`}
+              title="Fully automated — cron ingests, auto-chains all stages"
+            >
+              {actionLoading === 'mode' && pipelineMode !== 'constant' ? (
+                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+              ) : 'Constant'}
+            </button>
+            <button
+              onClick={() => { if (pipelineMode !== 'surgical') toggleMode() }}
+              disabled={actionLoading !== null}
+              className={`text-xs font-medium px-3 py-1.5 transition-colors ${
+                pipelineMode === 'surgical'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                  : 'bg-white text-warm-400 hover:bg-warm-50 dark:bg-warm-800 dark:text-warm-500 dark:hover:bg-warm-700'
+              }`}
+              title="Manual only — you trigger each stage, nothing runs automatically"
+            >
+              {actionLoading === 'mode' && pipelineMode !== 'surgical' ? (
+                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+              ) : 'Surgical'}
+            </button>
+          </div>
           <button
             onClick={togglePause}
             disabled={actionLoading !== null}
@@ -368,8 +422,9 @@ export default function DashboardOverview() {
           >
             {actionLoading === 'pause' ? (
               <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
-            ) : pipelinePaused ? 'Resume Pipeline' : 'Pause Pipeline'}
+            ) : pipelinePaused ? 'Resume' : 'Pause'}
           </button>
+          {/* Manual trigger buttons — always available (they're the point of surgical mode) */}
           {!pipelinePaused && (['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
             <button
               key={action}

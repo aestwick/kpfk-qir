@@ -5,16 +5,9 @@ import { processSummarize } from './summarize'
 import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
-import { getSetting, isPipelinePaused } from '../lib/settings'
+import { isPipelinePaused, getPipelineMode, type PipelineMode } from '../lib/settings'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
-
-// -- Pipeline Mode Presets --
-const PIPELINE_MODES: Record<string, { transcribe: number; summarize: number }> = {
-  steady: { transcribe: 1, summarize: 5 },
-  'catch-up': { transcribe: 3, summarize: 10 },
-}
-const DEFAULT_MODE = 'steady'
 
 function parseRedisUrl(url: string) {
   const parsed = new URL(url)
@@ -69,6 +62,9 @@ const autoRetryQueue = new Queue('auto-retry', {
   },
 })
 
+// Track current pipeline mode for auto-chaining decisions
+let currentPipelineMode: PipelineMode = 'surgical'
+
 // -- Ingest Worker --
 const ingestWorker = new Worker('ingest', processIngest, {
   connection,
@@ -78,32 +74,44 @@ const ingestWorker = new Worker('ingest', processIngest, {
 ingestWorker.on('completed', async (job) => {
   const newCount = job.returnvalue?.newEpisodes ?? 0
   console.log(`[ingest] completed — ${newCount} new episodes`)
-  // No auto-chain: transcription must be triggered manually from the dashboard
+  // In constant mode, auto-chain to transcription if new episodes found
+  if (currentPipelineMode === 'constant' && newCount > 0) {
+    console.log('[ingest] constant mode — auto-triggering transcription')
+    await transcribeQueue.add('auto-transcribe', {})
+  }
 })
 ingestWorker.on('failed', (job, err) => {
   console.error(`[ingest] failed:`, err.message)
 })
 
 // -- Transcribe Worker --
-const initialMode = PIPELINE_MODES[DEFAULT_MODE]
 const transcribeWorker = new Worker('transcribe', processTranscribe, {
   connection,
-  concurrency: initialMode.transcribe,
+  concurrency: 1,
 })
 
 transcribeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.transcribed ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[transcribe] completed — ${count} episodes transcribed${remaining ? ' (more remaining)' : ''}`)
-  // No auto-chain to summarize: must be triggered manually from the dashboard
-  if (remaining) {
-    if (count === 0) {
-      console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', {}, { delay: 5 * 60 * 1000 })
-    } else {
-      await transcribeQueue.add('transcribe-continue', {})
+
+  if (currentPipelineMode === 'constant') {
+    // Auto-chain to summarization
+    if (count > 0) {
+      console.log('[transcribe] constant mode — auto-triggering summarization')
+      await summarizeQueue.add('auto-summarize', {})
+    }
+    // Auto-continue if more to transcribe
+    if (remaining) {
+      if (count === 0) {
+        console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
+        await transcribeQueue.add('transcribe-backoff', {}, { delay: 5 * 60 * 1000 })
+      } else {
+        await transcribeQueue.add('transcribe-continue', {})
+      }
     }
   }
+  // In surgical mode: no auto-chain, no auto-continue
 })
 transcribeWorker.on('failed', (job, err) => {
   console.error(`[transcribe] failed:`, err.message)
@@ -112,22 +120,31 @@ transcribeWorker.on('failed', (job, err) => {
 // -- Summarize Worker --
 const summarizeWorker = new Worker('summarize', processSummarize, {
   connection,
-  concurrency: initialMode.summarize,
+  concurrency: 5,
 })
 
 summarizeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.summarized ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[summarize] completed — ${count} episodes summarized${remaining ? ' (more remaining)' : ''}`)
-  // No auto-chain to compliance: must be triggered manually from the dashboard
-  if (remaining) {
-    if (count === 0) {
-      console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', {}, { delay: 5 * 60 * 1000 })
-    } else {
-      await summarizeQueue.add('summarize-continue', {})
+
+  if (currentPipelineMode === 'constant') {
+    // Auto-chain to compliance
+    if (count > 0) {
+      console.log('[summarize] constant mode — auto-triggering compliance')
+      await complianceQueue.add('auto-compliance', {})
+    }
+    // Auto-continue if more to summarize
+    if (remaining) {
+      if (count === 0) {
+        console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
+        await summarizeQueue.add('summarize-backoff', {}, { delay: 5 * 60 * 1000 })
+      } else {
+        await summarizeQueue.add('summarize-continue', {})
+      }
     }
   }
+  // In surgical mode: no auto-chain, no auto-continue
 })
 summarizeWorker.on('failed', (job, err) => {
   console.error(`[summarize] failed:`, err.message)
@@ -143,9 +160,10 @@ complianceWorker.on('completed', async (job) => {
   const count = job.returnvalue?.checked ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
-  if (remaining) {
+  if (currentPipelineMode === 'constant' && remaining) {
     await complianceQueue.add('compliance-continue', {})
   }
+  // In surgical mode: no auto-continue
 })
 complianceWorker.on('failed', (job, err) => {
   console.error(`[compliance] failed:`, err.message)
@@ -174,15 +192,32 @@ const autoRetryWorker = new Worker('auto-retry', processAutoRetry, {
 autoRetryWorker.on('completed', async (job) => {
   const { retried, dead } = job.returnvalue ?? {}
   console.log(`[auto-retry] completed — ${retried ?? 0} retried, ${dead ?? 0} moved to dead`)
-  // No auto-chain: retried episodes wait in pending until manually triggered
 })
 autoRetryWorker.on('failed', (job, err) => {
   console.error(`[auto-retry] failed:`, err.message)
 })
 
 // -- Cron Schedules --
-async function setupCron() {
-  // Remove any existing repeatable jobs first
+let cronActive = false
+
+async function enableCron() {
+  if (cronActive) return
+  await ingestQueue.add(
+    'ingest-cron',
+    {},
+    { repeat: { pattern: '2 * * * *' } } // minute :02 of every hour
+  )
+  await autoRetryQueue.add(
+    'auto-retry-cron',
+    {},
+    { repeat: { pattern: '17 */4 * * *' } } // every 4 hours at minute :17
+  )
+  cronActive = true
+  console.log('[cron] enabled — hourly ingest at :02, auto-retry every 4h at :17')
+}
+
+async function disableCron() {
+  if (!cronActive) return
   const existingIngest = await ingestQueue.getRepeatableJobs()
   for (const job of existingIngest) {
     await ingestQueue.removeRepeatableByKey(job.key)
@@ -191,39 +226,14 @@ async function setupCron() {
   for (const job of existingRetry) {
     await autoRetryQueue.removeRepeatableByKey(job.key)
   }
-
-  await ingestQueue.add(
-    'ingest-cron',
-    {},
-    {
-      repeat: { pattern: '2 * * * *' }, // minute :02 of every hour
-    }
-  )
-
-  await autoRetryQueue.add(
-    'auto-retry-cron',
-    {},
-    {
-      repeat: { pattern: '17 */4 * * *' }, // every 4 hours at minute :17
-    }
-  )
-
-  console.log('[cron] hourly ingest scheduled at minute :02')
-  console.log('[cron] auto-retry scheduled every 4 hours at minute :17')
+  cronActive = false
+  console.log('[cron] disabled — no automatic scheduling')
 }
 
-setupCron().catch(console.error)
-
-// Run ingest immediately on startup
-ingestQueue.add('ingest-startup', {}).then(() => {
-  console.log('[workers] startup ingest queued')
-}).catch(console.error)
-
-// -- Pipeline Mode Polling --
-let currentMode = DEFAULT_MODE
+// -- Pipeline Mode + Pause Sync --
 let currentlyPaused = false
 
-async function syncPipelineMode() {
+async function syncPipelineState() {
   try {
     // Check pause state
     const paused = await isPipelinePaused()
@@ -250,31 +260,56 @@ async function syncPipelineMode() {
       }
     }
 
-    // Check mode (only matters when not paused)
-    const mode = (await getSetting<string>('pipeline_mode')) ?? DEFAULT_MODE
-    const preset = PIPELINE_MODES[mode]
-    if (!preset) return
-    if (mode !== currentMode) {
-      transcribeWorker.concurrency = preset.transcribe
-      summarizeWorker.concurrency = preset.summarize
-      console.log(`[workers] pipeline mode changed: ${currentMode} → ${mode} (transcribe=${preset.transcribe}, summarize=${preset.summarize})`)
-      currentMode = mode
+    // Check pipeline mode
+    const mode = await getPipelineMode()
+    if (mode !== currentPipelineMode) {
+      console.log(`[workers] pipeline mode changed: ${currentPipelineMode} → ${mode}`)
+      currentPipelineMode = mode
+
+      if (mode === 'constant') {
+        await enableCron()
+      } else {
+        await disableCron()
+      }
     }
   } catch (err) {
-    console.error('[workers] failed to sync pipeline mode:', err)
+    console.error('[workers] failed to sync pipeline state:', err)
   }
 }
 
-// Check on startup, then every 30s
-syncPipelineMode()
-const modeInterval = setInterval(syncPipelineMode, 30_000)
+// Initialize: read mode, set up accordingly
+async function init() {
+  const mode = await getPipelineMode()
+  currentPipelineMode = mode
+  console.log(`[workers] starting in ${mode} mode`)
+
+  if (mode === 'constant') {
+    // Clear old crons and set up fresh
+    await disableCron()
+    await enableCron()
+    // Run ingest immediately on startup
+    await ingestQueue.add('ingest-startup', {})
+    console.log('[workers] startup ingest queued')
+  } else {
+    // Surgical: clear any leftover crons
+    await disableCron()
+    console.log('[workers] surgical mode — no automatic scheduling, waiting for manual triggers')
+  }
+}
+
+init().catch(console.error)
+
+// Sync every 30s
+const syncInterval = setInterval(syncPipelineState, 30_000)
+// Also sync once on startup (after init)
+setTimeout(() => syncPipelineState(), 5_000)
 
 console.log('[workers] all workers started')
 
 // Graceful shutdown
 async function shutdown() {
   console.log('[workers] shutting down...')
-  clearInterval(modeInterval)
+  clearInterval(syncInterval)
   await Promise.all([
     ingestWorker.close(),
     transcribeWorker.close(),
