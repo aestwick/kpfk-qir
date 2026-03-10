@@ -90,7 +90,7 @@ export default function JobsPage() {
   const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [pipelineMode, setPipelineMode] = useState<PipelineMode>('steady')
-  const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> | null>(null)
+  const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> & { backlog?: EpisodeBacklog } | null>(null)
   const [confirmClear, setConfirmClear] = useState<string | null>(null)
   const [sseTimedOut, setSseTimedOut] = useState(false)
   const [shows, setShows] = useState<ShowOption[]>([])
@@ -304,7 +304,7 @@ export default function JobsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {queueNames.map((name) => {
               const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
-              const bl = failedDetails.backlog as EpisodeBacklog | undefined
+              const bl = failedDetails.backlog
               const episodeCompleted = getEpisodeCompleted(name, bl?.episodeCounts)
               const episodeFailed = bl?.episodeCounts?.failed ?? null
               return (
