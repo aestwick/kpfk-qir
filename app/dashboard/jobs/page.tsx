@@ -15,12 +15,23 @@ interface FailedJob {
   finishedOn: number
 }
 
+interface JobDetail {
+  id: string
+  name: string
+  data: Record<string, unknown>
+  state: 'active' | 'waiting' | 'completed'
+  timestamp: number
+  processedOn: number | null
+  finishedOn: number | null
+}
+
 interface QueueWithFailed {
   active: number
   waiting: number
   completed: number
   failed: number
   failedJobs: FailedJob[]
+  jobs?: JobDetail[]
 }
 
 // backlog is accessed separately from failedDetails via queues?.backlog (SSE) or polling
@@ -46,6 +57,11 @@ function getBacklogCount(name: typeof queueNames[number], backlog?: EpisodeBackl
   }
 }
 
+interface ShowOption {
+  key: string
+  show_name: string
+}
+
 export default function JobsPage() {
   const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -54,9 +70,24 @@ export default function JobsPage() {
   const [failedExpanded, setFailedExpanded] = useState(false)
   const [confirmClear, setConfirmClear] = useState<string | null>(null)
   const [sseTimedOut, setSseTimedOut] = useState(false)
+  const [shows, setShows] = useState<ShowOption[]>([])
+  const [complianceShowKey, setComplianceShowKey] = useState<string>('')
+  const [jobsExpanded, setJobsExpanded] = useState(true)
   const { toast } = useToast()
 
   const anyLoading = actionLoading !== null
+
+  // Fetch show list for compliance show picker
+  useEffect(() => {
+    fetch('/api/settings?resource=shows')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.shows) {
+          setShows(data.shows.map((s: { key: string; show_name: string }) => ({ key: s.key, show_name: s.show_name })))
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   // Fetch failed job details and pipeline mode setting
   const fetchDetails = useCallback(async () => {
@@ -114,10 +145,14 @@ export default function JobsPage() {
 
     setActionLoading(action)
     try {
+      const payload: Record<string, string> = { action }
+      if (action === 'compliance' && complianceShowKey) {
+        payload.show_key = complianceShowKey
+      }
       const res = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify(payload),
       })
       if (res.ok) {
         const msg = backlogCount && backlogCount > 0
@@ -315,6 +350,18 @@ export default function JobsPage() {
                   {actionLoading === name ? 'Queuing...' : 'Run Now'}
                 </button>
               </div>
+              {name === 'compliance' && shows.length > 0 && (
+                <select
+                  value={complianceShowKey}
+                  onChange={(e) => setComplianceShowKey(e.target.value)}
+                  className="w-full text-xs border rounded px-2 py-1 bg-white dark:bg-warm-800 dark:border-warm-600 dark:text-warm-200"
+                >
+                  <option value="">All shows</option>
+                  {shows.map((s) => (
+                    <option key={s.key} value={s.key}>{s.show_name}</option>
+                  ))}
+                </select>
+              )}
               {backlogCount !== null && backlogCount > 0 && (
                 <div className="bg-orange-50 border border-orange-200 dark:bg-orange-900/20 dark:border-orange-800/40 rounded px-3 py-1.5 text-sm">
                   <span className="font-semibold text-orange-700 dark:text-orange-300">{backlogCount}</span>
@@ -360,6 +407,95 @@ export default function JobsPage() {
           </div>
         </div>
       )}
+
+      {/* Job Activity — active, waiting, recently completed */}
+      {failedDetails && (() => {
+        const allJobs: (JobDetail & { queue: string })[] = []
+        for (const name of queueNames) {
+          const q = failedDetails[name] as QueueWithFailed | undefined
+          if (q?.jobs) {
+            for (const job of q.jobs) {
+              allJobs.push({ ...job, queue: name })
+            }
+          }
+        }
+        if (allJobs.length === 0) return null
+        // Sort: active first, then waiting, then completed (most recent first)
+        allJobs.sort((a, b) => {
+          const stateOrder = { active: 0, waiting: 1, completed: 2 }
+          const orderDiff = stateOrder[a.state] - stateOrder[b.state]
+          if (orderDiff !== 0) return orderDiff
+          return (b.timestamp ?? 0) - (a.timestamp ?? 0)
+        })
+        return (
+          <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark">
+            <button
+              onClick={() => setJobsExpanded(!jobsExpanded)}
+              className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 dark:hover:bg-warm-700/50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold">Job Activity</h3>
+                <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-2 py-0.5 rounded-full font-medium">
+                  {allJobs.filter((j) => j.state === 'active').length} active
+                </span>
+                {allJobs.filter((j) => j.state === 'waiting').length > 0 && (
+                  <span className="text-xs bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 px-2 py-0.5 rounded-full font-medium">
+                    {allJobs.filter((j) => j.state === 'waiting').length} waiting
+                  </span>
+                )}
+              </div>
+              <svg
+                className={`w-5 h-5 text-gray-400 dark:text-warm-500 transition-transform ${jobsExpanded ? 'rotate-180' : ''}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {jobsExpanded && (
+              <div className="border-t dark:border-warm-700 px-4 pb-4">
+                <div className="divide-y dark:divide-warm-700">
+                  {allJobs.map((job) => (
+                    <div key={`${job.queue}-${job.id}`} className="flex items-center gap-3 py-2.5 text-sm">
+                      <span className={`shrink-0 w-2 h-2 rounded-full ${
+                        job.state === 'active' ? 'bg-blue-500 animate-pulse' :
+                        job.state === 'waiting' ? 'bg-yellow-400' :
+                        'bg-green-400'
+                      }`} />
+                      <span className="text-xs font-medium text-gray-400 dark:text-warm-500 uppercase w-20 shrink-0">
+                        {queueLabels[job.queue as typeof queueNames[number]] ?? job.queue}
+                      </span>
+                      <span className="text-gray-700 dark:text-warm-300 truncate flex-1 min-w-0">
+                        {job.name}
+                        {job.data?.show_key ? <span className="text-gray-400 ml-1">({String(job.data.show_key)})</span> : null}
+                        {job.data?.episodeId ? <span className="text-gray-400 ml-1">(ep {String(job.data.episodeId).slice(0, 8)})</span> : null}
+                      </span>
+                      <span className="text-xs text-gray-400 dark:text-warm-500 shrink-0 tabular-nums">
+                        {job.state === 'active' && job.processedOn
+                          ? `running ${formatDuration(Date.now() - job.processedOn)}`
+                          : job.state === 'waiting'
+                          ? `queued ${formatRelativeTime(job.timestamp)}`
+                          : job.finishedOn && job.processedOn
+                          ? `took ${formatDuration(job.finishedOn - job.processedOn)}`
+                          : job.finishedOn
+                          ? formatRelativeTime(job.finishedOn)
+                          : ''}
+                      </span>
+                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                        job.state === 'active' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                        job.state === 'waiting' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                        'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                      }`}>
+                        {job.state}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Pipeline Mode Toggle */}
       <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4">
@@ -534,4 +670,15 @@ function formatRelativeTime(timestamp: number): string {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return `${days}d ago`
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const remainSec = seconds % 60
+  if (minutes < 60) return `${minutes}m ${remainSec}s`
+  const hours = Math.floor(minutes / 60)
+  const remainMin = minutes % 60
+  return `${hours}h ${remainMin}m`
 }

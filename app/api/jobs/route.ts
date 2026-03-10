@@ -136,10 +136,23 @@ export async function GET() {
       Promise.all(
         queueNames.map(async (name) => {
           const queue = queues[name]
-          const [counts, failed] = await Promise.all([
+          const [counts, failed, active, waiting, completed] = await Promise.all([
             queue.getJobCounts(),
             queue.getFailed(0, 20),
+            queue.getActive(0, 20),
+            queue.getWaiting(0, 20),
+            queue.getCompleted(0, 10),
           ])
+          const mapJob = (job: { id: string | undefined; name: string; data: Record<string, unknown>; timestamp: number; processedOn?: number | null; finishedOn?: number | null; failedReason?: string }, state: string) => ({
+            id: job.id,
+            name: job.name,
+            data: job.data,
+            state,
+            timestamp: job.timestamp,
+            processedOn: job.processedOn ?? null,
+            finishedOn: job.finishedOn ?? null,
+            failedReason: state === 'failed' ? job.failedReason : undefined,
+          })
           return {
             name,
             counts: {
@@ -148,7 +161,7 @@ export async function GET() {
               completed: counts.completed ?? 0,
               failed: counts.failed ?? 0,
             },
-            failedJobs: failed.map((job) => ({
+            failedJobs: failed.map((job: any) => ({
               id: job.id,
               name: job.name,
               data: job.data,
@@ -156,6 +169,11 @@ export async function GET() {
               timestamp: job.timestamp,
               finishedOn: job.finishedOn,
             })),
+            jobs: [
+              ...active.map((j: any) => mapJob(j, 'active')),
+              ...waiting.map((j: any) => mapJob(j, 'waiting')),
+              ...completed.map((j: any) => mapJob(j, 'completed')),
+            ],
           }
         })
       ),
@@ -187,6 +205,7 @@ export async function GET() {
       data[result.name] = {
         ...result.counts,
         failedJobs: result.failedJobs,
+        jobs: result.jobs,
       }
     }
     data.backlog = backlog
