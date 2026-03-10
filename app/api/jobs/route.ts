@@ -141,9 +141,9 @@ export async function GET() {
             queue.getFailed(0, 20),
             queue.getActive(0, 20),
             queue.getWaiting(0, 20),
-            queue.getCompleted(0, 10),
+            queue.getCompleted(0, 30),
           ])
-          const mapJob = (job: { id: string | undefined; name: string; data: Record<string, unknown>; timestamp: number; processedOn?: number | null; finishedOn?: number | null; failedReason?: string }, state: string) => ({
+          const mapJob = (job: { id: string | undefined; name: string; data: Record<string, unknown>; timestamp: number; processedOn?: number | null; finishedOn?: number | null; failedReason?: string; progress?: unknown; returnvalue?: unknown }, state: string) => ({
             id: job.id,
             name: job.name,
             data: job.data,
@@ -152,6 +152,8 @@ export async function GET() {
             processedOn: job.processedOn ?? null,
             finishedOn: job.finishedOn ?? null,
             failedReason: state === 'failed' ? job.failedReason : undefined,
+            progress: job.progress ?? null,
+            returnvalue: state === 'completed' ? job.returnvalue ?? null : null,
           })
           return {
             name,

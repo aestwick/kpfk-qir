@@ -367,7 +367,9 @@ export async function processCompliance(job: Job) {
 
   let checked = 0
 
-  for (const episode of episodes) {
+  for (let i = 0; i < episodes.length; i++) {
+    const episode = episodes[i]
+    await job.updateProgress({ current: i + 1, total: episodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
     try {
       const data = transcriptMap.get(episode.id)
       if (!data?.transcript) {
