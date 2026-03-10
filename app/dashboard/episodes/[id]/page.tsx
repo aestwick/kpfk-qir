@@ -398,18 +398,74 @@ export default function EpisodeDetailPage() {
     executeAction(action)
   }
 
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
   async function executeAction(action: string) {
     setConfirmAction(null)
     setActionLoading(action)
-    await fetch(`/api/episodes/${id}`, {
+
+    const res = await fetch(`/api/episodes/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
     })
-    setTimeout(() => {
-      fetchEpisode()
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      setToast(data.error ?? `Action failed: ${res.status}`)
       setActionLoading(null)
-    }, 1500)
+      return
+    }
+
+    const data = await res.json().catch(() => ({}))
+
+    // For background jobs, poll until status changes
+    const bgActions = ['re-transcribe', 're-summarize']
+    if (bgActions.includes(action)) {
+      const waitingStatus = action === 're-transcribe' ? 'pending' : 'transcribed'
+      setToast(data.message ?? `${action} queued — waiting for worker...`)
+
+      let polls = 0
+      const maxPolls = 60 // 5 minutes at 5s intervals
+      if (pollRef.current) clearInterval(pollRef.current)
+      pollRef.current = setInterval(async () => {
+        polls++
+        try {
+          const epRes = await fetch(`/api/episodes/${id}`)
+          if (epRes.ok) {
+            const epData = await epRes.json()
+            const currentStatus = epData.episode?.status
+            if (currentStatus && currentStatus !== waitingStatus) {
+              // Job completed (or failed)
+              if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+              setActionLoading(null)
+              await fetchEpisode()
+              if (currentStatus === 'failed') {
+                setToast(`${action} failed: ${epData.episode.error_message ?? 'unknown error'}`)
+              } else {
+                setToast(`${action} complete`)
+              }
+            }
+          }
+        } catch { /* network error, keep polling */ }
+        if (polls >= maxPolls) {
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+          setActionLoading(null)
+          await fetchEpisode()
+          setToast('Still processing — check back shortly')
+        }
+      }, 5000)
+    } else {
+      // Immediate actions (retry, fix-dates, etc)
+      setToast(data.message ?? 'Done')
+      await fetchEpisode()
+      setActionLoading(null)
+    }
   }
 
   async function resolveFlag(flagId: number) {
@@ -467,12 +523,13 @@ export default function EpisodeDetailPage() {
   }
 
   function copyFlagDetails(flag: ComplianceFlag) {
+    const ts = flag.timestamp_seconds ?? (flag.excerpt ? findTimestampFromVtt(flag.excerpt) : null)
     const lines = [
       `Show: ${episode?.show_name ?? 'Unknown'}`,
       `Date: ${episode?.air_date ?? episode?.date ?? 'Unknown'}`,
       `Time: ${episode?.start_time ? `${episode.start_time}–${episode.end_time ?? ''}` : 'Unknown'}`,
       `MP3: ${episode?.mp3_url ?? 'Unknown'}`,
-      flag.timestamp_seconds != null ? `Violation at: ${formatTimestamp(flag.timestamp_seconds)}` : null,
+      ts != null ? `Violation at: ${formatTimestamp(ts)}` : null,
       `Flag: ${FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type} (${flag.severity})`,
       flag.excerpt ? `Quote: "${flag.excerpt}"` : null,
     ].filter(Boolean).join('\n')
@@ -635,10 +692,10 @@ export default function EpisodeDetailPage() {
           </button>
         )}
         <button onClick={() => handleAction('re-transcribe')} disabled={actionLoading !== null} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-          {actionLoading === 're-transcribe' ? 'Queuing...' : 'Re-Transcribe'}
+          {actionLoading === 're-transcribe' ? (pollRef.current ? 'Transcribing...' : 'Queuing...') : 'Re-Transcribe'}
         </button>
         <button onClick={() => handleAction('re-summarize')} disabled={actionLoading !== null || !transcript?.transcript} className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded hover:bg-purple-700 disabled:opacity-50">
-          {actionLoading === 're-summarize' ? 'Queuing...' : 'Re-Summarize'}
+          {actionLoading === 're-summarize' ? (pollRef.current ? 'Summarizing...' : 'Queuing...') : 'Re-Summarize'}
         </button>
         <button onClick={() => handleAction('fix-dates')} disabled={actionLoading !== null} className="px-3 py-1.5 text-sm bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50">
           {actionLoading === 'fix-dates' ? 'Fixing...' : 'Fix Dates from URL'}
