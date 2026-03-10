@@ -78,9 +78,7 @@ const ingestWorker = new Worker('ingest', processIngest, {
 ingestWorker.on('completed', async (job) => {
   const newCount = job.returnvalue?.newEpisodes ?? 0
   console.log(`[ingest] completed — ${newCount} new episodes`)
-  if (newCount > 0) {
-    await transcribeQueue.add('transcribe-batch', {})
-  }
+  // No auto-chain: transcription must be triggered manually from the dashboard
 })
 ingestWorker.on('failed', (job, err) => {
   console.error(`[ingest] failed:`, err.message)
@@ -97,9 +95,7 @@ transcribeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.transcribed ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[transcribe] completed — ${count} episodes transcribed${remaining ? ' (more remaining)' : ''}`)
-  if (count > 0) {
-    await summarizeQueue.add('summarize-batch', {})
-  }
+  // No auto-chain to summarize: must be triggered manually from the dashboard
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
@@ -123,12 +119,9 @@ summarizeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.summarized ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[summarize] completed — ${count} episodes summarized${remaining ? ' (more remaining)' : ''}`)
-  if (count > 0) {
-    await complianceQueue.add('compliance-batch', {})
-  }
+  // No auto-chain to compliance: must be triggered manually from the dashboard
   if (remaining) {
     if (count === 0) {
-      // Zero progress — back off 5 minutes to avoid hot-looping on stuck episodes
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
       await summarizeQueue.add('summarize-backoff', {}, { delay: 5 * 60 * 1000 })
     } else {
@@ -181,9 +174,7 @@ const autoRetryWorker = new Worker('auto-retry', processAutoRetry, {
 autoRetryWorker.on('completed', async (job) => {
   const { retried, dead } = job.returnvalue ?? {}
   console.log(`[auto-retry] completed — ${retried ?? 0} retried, ${dead ?? 0} moved to dead`)
-  if (retried > 0) {
-    await transcribeQueue.add('transcribe-batch', {})
-  }
+  // No auto-chain: retried episodes wait in pending until manually triggered
 })
 autoRetryWorker.on('failed', (job, err) => {
   console.error(`[auto-retry] failed:`, err.message)

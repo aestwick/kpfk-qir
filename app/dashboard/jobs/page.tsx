@@ -90,7 +90,7 @@ export default function JobsPage() {
   const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [pipelineMode, setPipelineMode] = useState<PipelineMode>('steady')
-  const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> | null>(null)
+  const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> & { backlog?: EpisodeBacklog } | null>(null)
   const [confirmClear, setConfirmClear] = useState<string | null>(null)
   const [sseTimedOut, setSseTimedOut] = useState(false)
   const [shows, setShows] = useState<ShowOption[]>([])
@@ -304,7 +304,7 @@ export default function JobsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {queueNames.map((name) => {
               const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
-              const bl = failedDetails.backlog as EpisodeBacklog | undefined
+              const bl = failedDetails.backlog
               const episodeCompleted = getEpisodeCompleted(name, bl?.episodeCounts)
               const episodeFailed = bl?.episodeCounts?.failed ?? null
               return (
@@ -692,10 +692,9 @@ export default function JobsPage() {
       <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4">
         <h3 className="font-semibold mb-3">Cron Schedule</h3>
         <div className="space-y-1.5 text-sm text-gray-600 dark:text-warm-400">
-          <p>Ingest runs at minute :02 of every hour.</p>
-          <p>Transcription triggers automatically after ingest finds new episodes.</p>
-          <p>Summarization triggers after transcription completes.</p>
-          <p>Compliance triggers after summarization completes.</p>
+          <p>Ingest runs at minute :02 of every hour (does not auto-trigger other stages).</p>
+          <p>Transcribe, Summarize, and Compliance must be triggered manually via Run Now or Advance Pipeline.</p>
+          <p>Within a stage, batches auto-continue until all pending episodes are processed.</p>
           <p>Auto-retry runs every 4 hours for failed episodes (max 3 retries).</p>
         </div>
         <p className="text-xs text-gray-400 dark:text-warm-500 mt-3">
