@@ -90,6 +90,7 @@ export default function JobsPage() {
   const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [pipelineMode, setPipelineMode] = useState<PipelineMode>('steady')
+  const [pipelinePaused, setPipelinePaused] = useState(false)
   const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> & { backlog?: EpisodeBacklog } | null>(null)
   const [confirmClear, setConfirmClear] = useState<string | null>(null)
   const [sseTimedOut, setSseTimedOut] = useState(false)
@@ -128,6 +129,9 @@ export default function JobsPage() {
       if (jobsRes.ok) {
         const data = await jobsRes.json()
         setFailedDetails(data)
+        if (typeof data.pipeline_paused === 'boolean') {
+          setPipelinePaused(data.pipeline_paused)
+        }
       }
       if (settingsRes.ok) {
         const data = await settingsRes.json()
@@ -391,17 +395,67 @@ export default function JobsPage() {
 
   const totalCurrentJobs = activeJobsFromSSE.length + waitingJobs.length
 
+  async function togglePause() {
+    const action = pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
+    setActionLoading('pause')
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        toast('error', 'Failed to toggle pipeline')
+        return
+      }
+      setPipelinePaused(!pipelinePaused)
+      toast('success', pipelinePaused ? 'Pipeline resumed' : 'Pipeline paused')
+      setTimeout(fetchDetails, 1000)
+    } catch {
+      toast('error', 'Network error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
+      {pipelinePaused && (
+        <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/40 px-5 py-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="inline-flex rounded-full h-3 w-3 bg-red-500" />
+            <span className="text-sm font-semibold text-red-700 dark:text-red-300">Pipeline is paused</span>
+            <span className="text-xs text-red-500 dark:text-red-400">No jobs will run until resumed. Cron jobs will be skipped.</span>
+          </div>
+          <button
+            onClick={togglePause}
+            disabled={anyLoading}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50 transition-colors"
+          >
+            {actionLoading === 'pause' ? '...' : 'Resume Pipeline'}
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Jobs</h2>
-        <button
-          onClick={advancePipeline}
-          disabled={anyLoading}
-          className="px-5 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
-        >
-          {actionLoading === 'advance-pipeline' ? 'Starting...' : totalBacklog > 0 ? `Advance Pipeline (${totalBacklog} episodes)` : 'Advance Pipeline'}
-        </button>
+        <div className="flex items-center gap-2">
+          {!pipelinePaused && (
+            <button
+              onClick={togglePause}
+              disabled={anyLoading}
+              className="px-4 py-2.5 text-sm font-medium bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
+            >
+              {actionLoading === 'pause' ? '...' : 'Pause Pipeline'}
+            </button>
+          )}
+          <button
+            onClick={advancePipeline}
+            disabled={anyLoading || pipelinePaused}
+            className="px-5 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+          >
+            {actionLoading === 'advance-pipeline' ? 'Starting...' : totalBacklog > 0 ? `Advance Pipeline (${totalBacklog} episodes)` : 'Advance Pipeline'}
+          </button>
+        </div>
       </div>
 
       {/* Queue Cards — collapsible */}

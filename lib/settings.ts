@@ -54,6 +54,10 @@ export async function isComplianceBlocking(): Promise<boolean> {
   return (await getSetting<boolean>('compliance_blocking')) ?? false
 }
 
+export async function isPipelinePaused(): Promise<boolean> {
+  return (await getSetting<boolean>('pipeline_paused')) ?? false
+}
+
 export async function getIssueCategories(): Promise<string[]> {
   return (await getSetting<string[]>('issue_categories')) ?? [
     'Civil Rights / Social Justice',

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories } from '@/lib/settings'
+import { getIssueCategories, isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -413,5 +413,6 @@ export async function GET() {
     qualityFlags,
     lastFiledQir: lastFiled,
     lastCompletedJobs: lastJobTimestamps,
+    pipelinePaused: await isPipelinePaused(),
   })
 }

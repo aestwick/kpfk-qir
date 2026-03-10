@@ -5,7 +5,7 @@ import { processSummarize } from './summarize'
 import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
-import { getSetting } from '../lib/settings'
+import { getSetting, isPipelinePaused } from '../lib/settings'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -221,9 +221,36 @@ ingestQueue.add('ingest-startup', {}).then(() => {
 
 // -- Pipeline Mode Polling --
 let currentMode = DEFAULT_MODE
+let currentlyPaused = false
 
 async function syncPipelineMode() {
   try {
+    // Check pause state
+    const paused = await isPipelinePaused()
+    if (paused !== currentlyPaused) {
+      currentlyPaused = paused
+      if (paused) {
+        console.log('[workers] pipeline PAUSED — all workers will skip new jobs')
+        await Promise.all([
+          ingestWorker.pause(),
+          transcribeWorker.pause(),
+          summarizeWorker.pause(),
+          complianceWorker.pause(),
+          generateQirWorker.pause(),
+        ])
+      } else {
+        console.log('[workers] pipeline RESUMED — workers accepting jobs again')
+        await Promise.all([
+          ingestWorker.resume(),
+          transcribeWorker.resume(),
+          summarizeWorker.resume(),
+          complianceWorker.resume(),
+          generateQirWorker.resume(),
+        ])
+      }
+    }
+
+    // Check mode (only matters when not paused)
     const mode = (await getSetting<string>('pipeline_mode')) ?? DEFAULT_MODE
     const preset = PIPELINE_MODES[mode]
     if (!preset) return

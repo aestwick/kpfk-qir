@@ -2,7 +2,7 @@ import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logSummarizationUsage } from '../lib/usage'
-import { getExcludedCategories, getSummarizeBatchSize } from '../lib/settings'
+import { getExcludedCategories, getSummarizeBatchSize, isPipelinePaused } from '../lib/settings'
 
 const SYSTEM_PROMPT = `You are an expert public radio producer for KPFK.
 Your task is to produce an internal archival log of a radio broadcast based on a transcript, and to flag any clear conflicts with provided metadata.
@@ -61,6 +61,10 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
 }
 
 export async function processSummarize(job: Job) {
+  if (await isPipelinePaused()) {
+    console.log('[summarize] pipeline paused — skipping')
+    return { summarized: 0, remaining: false, skipped: true }
+  }
   console.log('[summarize] starting batch...')
 
   const openaiKey = process.env.OPENAI_API_KEY

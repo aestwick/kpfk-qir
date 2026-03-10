@@ -6,7 +6,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
-import { getExcludedCategories, getTranscribeBatchSize } from '../lib/settings'
+import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
 
 const execFileAsync = promisify(execFile)
 
@@ -154,6 +154,10 @@ async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
 }
 
 export async function processTranscribe(job: Job) {
+  if (await isPipelinePaused()) {
+    console.log('[transcribe] pipeline paused — skipping')
+    return { transcribed: 0, remaining: false, skipped: true }
+  }
   console.log('[transcribe] starting batch...')
 
   const excludedCategories = await getExcludedCategories()

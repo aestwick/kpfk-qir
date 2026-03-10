@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
+import { isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,16 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { action } = body
+
+    // Pipeline pause/resume
+    if (action === 'pause_pipeline' || action === 'resume_pipeline') {
+      const paused = action === 'pause_pipeline'
+      const { error } = await supabaseAdmin
+        .from('qir_settings')
+        .upsert({ key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      if (error) throw error
+      return NextResponse.json({ ok: true, message: paused ? 'Pipeline paused' : 'Pipeline resumed', paused })
+    }
 
     // Pipeline mode toggle
     if (action === 'set_pipeline_mode') {
@@ -209,6 +220,8 @@ export async function GET() {
       },
     }
 
+    const paused = await isPipelinePaused()
+
     const data: Record<string, unknown> = {}
     for (const result of results) {
       data[result.name] = {
@@ -218,6 +231,7 @@ export async function GET() {
       }
     }
     data.backlog = backlog
+    data.pipeline_paused = paused
 
     return NextResponse.json(data)
   } catch (err) {
