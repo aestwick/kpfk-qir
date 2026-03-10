@@ -7,11 +7,20 @@ interface QueueCounts {
   failed: number
 }
 
+export interface EpisodeCounts {
+  ingested: number
+  transcribed: number
+  summarized: number
+  complianceChecked: number
+  failed: number
+}
+
 export interface EpisodeBacklog {
   pendingTranscription: number
   pendingSummarization: number
   pendingCompliance: number
   failed: number
+  episodeCounts?: EpisodeCounts
 }
 
 export interface QueueData {
