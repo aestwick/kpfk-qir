@@ -1,7 +1,7 @@
 import { Job } from 'bullmq'
 import { XMLParser } from 'fast-xml-parser'
 import { supabaseAdmin } from '../lib/supabase'
-import { getExcludedCategories } from '../lib/settings'
+import { getExcludedCategories, isPipelinePaused } from '../lib/settings'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
 
 const parser = new XMLParser({
@@ -200,6 +200,10 @@ async function processShow(show: { key: string; show_name: string; category: str
 }
 
 export async function processIngest(job: Job) {
+  if (await isPipelinePaused()) {
+    console.log('[ingest] pipeline paused — skipping')
+    return { newEpisodes: 0, skipped: true }
+  }
   console.log('[ingest] starting RSS fetch...')
 
   const excludedCategories = await getExcludedCategories()

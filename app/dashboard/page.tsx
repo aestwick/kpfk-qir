@@ -42,6 +42,7 @@ interface DashData {
   qirStatus: { status: string; version: number; entryCount: number } | null
   qualityFlags: QualityFlag[]
   lastFiledQir: { id: number; year: number; quarter: number; version: number; updated_at: string } | null
+  pipelinePaused: boolean
 }
 
 const BADGE_COLORS: Record<string, string> = {
@@ -165,6 +166,28 @@ export default function DashboardOverview() {
     return () => clearInterval(timer)
   }, [])
 
+  async function togglePause() {
+    const action = data?.pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
+    setActionLoading('pause')
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      })
+      if (!res.ok) {
+        toast('error', 'Failed to toggle pipeline')
+        return
+      }
+      toast('success', action === 'pause_pipeline' ? 'Pipeline paused' : 'Pipeline resumed')
+      setTimeout(fetchData, 1000)
+    } catch {
+      toast('error', 'Network error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   async function triggerAction(action: string) {
     setActionLoading(action)
     try {
@@ -241,7 +264,7 @@ export default function DashboardOverview() {
 
   if (!data) return <div className="text-red-600 card p-6">Failed to load dashboard data.</div>
 
-  const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags } = data
+  const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -290,12 +313,20 @@ export default function DashboardOverview() {
 
       {/* ═══ 1. ON AIR STATUS STRIP ═══ */}
       <div className={`rounded-xl border px-5 py-3.5 flex items-center justify-between transition-all duration-300 ${
-        anyProcessing
-          ? 'bg-gradient-to-r from-kpfk-cream to-kpfk-cream-dark border-kpfk-gold/25 shadow-glow-gold dark:from-warm-800 dark:to-warm-800 dark:border-kpfk-gold-dark/30 dark:shadow-glow-gold-dark'
-          : 'bg-white border-warm-200 dark:bg-surface-raised dark:border-warm-700'
+        pipelinePaused
+          ? 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800/40'
+          : anyProcessing
+            ? 'bg-gradient-to-r from-kpfk-cream to-kpfk-cream-dark border-kpfk-gold/25 shadow-glow-gold dark:from-warm-800 dark:to-warm-800 dark:border-kpfk-gold-dark/30 dark:shadow-glow-gold-dark'
+            : 'bg-white border-warm-200 dark:bg-surface-raised dark:border-warm-700'
       }`}>
         <div className="flex items-center gap-4">
-          {anyProcessing ? (
+          {pipelinePaused ? (
+            <div className="flex items-center gap-2.5">
+              <span className="inline-flex rounded-full h-3 w-3 bg-red-500" />
+              <span className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase tracking-wider">Paused</span>
+              <span className="text-sm text-red-500 dark:text-red-400">Pipeline is stopped — no jobs will run</span>
+            </div>
+          ) : anyProcessing ? (
             <>
               <div className="flex items-center gap-2.5">
                 <span className="relative flex h-3 w-3">
@@ -319,12 +350,27 @@ export default function DashboardOverview() {
               <span className="text-sm text-warm-400">All caught up</span>
             </div>
           )}
-          <span className="text-2xs text-warm-400 hidden md:inline tabular-nums">
-            Next ingest in {nextIngest} min
-          </span>
+          {!pipelinePaused && (
+            <span className="text-2xs text-warm-400 hidden md:inline tabular-nums">
+              Next ingest in {nextIngest} min
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {(['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
+          <button
+            onClick={togglePause}
+            disabled={actionLoading !== null}
+            className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+              pipelinePaused
+                ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
+                : 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300'
+            }`}
+          >
+            {actionLoading === 'pause' ? (
+              <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+            ) : pipelinePaused ? 'Resume Pipeline' : 'Pause Pipeline'}
+          </button>
+          {!pipelinePaused && (['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
             <button
               key={action}
               onClick={() => triggerAction(action)}
@@ -706,13 +752,13 @@ export default function DashboardOverview() {
       </div>
 
       {/* ═══ 9. SYSTEM HEALTH FOOTER ═══ */}
-      <SystemHealthFooter queues={queues} activity={activity24h} lastFiled={data.lastFiledQir} />
+      <SystemHealthFooter queues={queues} activity={activity24h} lastFiled={data.lastFiledQir} paused={pipelinePaused} />
     </div>
   )
 }
 
 /* ─── System Health Footer ─── */
-function SystemHealthFooter({ queues, activity, lastFiled }: { queues: DashData['queues']; activity: ActivityItem[]; lastFiled: DashData['lastFiledQir'] }) {
+function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: DashData['queues']; activity: ActivityItem[]; lastFiled: DashData['lastFiledQir']; paused: boolean }) {
   const lastIngest = activity.find((a) => a.status === 'pending')?.time
   const lastTranscribe = activity.find((a) => a.status === 'transcribed')?.time
   const lastSummarize = activity.find((a) => a.status === 'summarized' || a.status === 'compliance_checked')?.time
@@ -734,6 +780,7 @@ function SystemHealthFooter({ queues, activity, lastFiled }: { queues: DashData[
 
   return (
     <div className="rounded-xl border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-surface-raised px-5 py-3 flex items-center gap-6 text-xs text-warm-500 dark:text-warm-400 flex-wrap tabular-nums">
+      <span>Pipeline: <span className={`font-medium ${paused ? 'text-red-600' : 'text-emerald-600'}`}>{paused ? 'paused' : 'active'}</span></span>
       <span>Workers: <span className={`font-medium ${workerColor}`}>{workersRunning ? 'running' : 'idle'}</span></span>
       <span>Last ingest: <span className={`font-medium ${ingestInfo.color}`}>{ingestInfo.label}</span></span>
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>

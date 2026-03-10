@@ -2,7 +2,7 @@ import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logComplianceUsage } from '../lib/usage'
-import { getComplianceChecksEnabled, getCompliancePrompt, getSummarizeBatchSize } from '../lib/settings'
+import { getComplianceChecksEnabled, getCompliancePrompt, getSummarizeBatchSize, isPipelinePaused } from '../lib/settings'
 
 interface ComplianceFlagInsert {
   episode_id: number
@@ -300,6 +300,10 @@ async function runAiComplianceCheck(
 }
 
 export async function processCompliance(job: Job) {
+  if (await isPipelinePaused()) {
+    console.log('[compliance] pipeline paused — skipping')
+    return { checked: 0, remaining: false, skipped: true }
+  }
   const showKey = job.data?.show_key as string | undefined
   console.log(`[compliance] starting batch...${showKey ? ` (show: ${showKey})` : ''}`)
 
