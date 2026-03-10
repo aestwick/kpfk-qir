@@ -186,18 +186,25 @@ export async function GET() {
         return supabaseAdmin
           .from('episode_log')
           .select('status')
-          .in('status', ['pending', 'transcribed', 'summarized', 'failed'])
           .gte('air_date', start)
           .lte('air_date', end)
       })(),
     ])
 
     const episodes = backlogResult.data ?? []
+    const statuses: string[] = episodes.map((e: { status: string }) => e.status)
     const backlog = {
-      pendingTranscription: episodes.filter((e: { status: string }) => e.status === 'pending').length,
-      pendingSummarization: episodes.filter((e: { status: string }) => e.status === 'transcribed').length,
-      pendingCompliance: episodes.filter((e: { status: string }) => e.status === 'summarized').length,
-      failed: episodes.filter((e: { status: string }) => e.status === 'failed').length,
+      pendingTranscription: statuses.filter((s: string) => s === 'pending').length,
+      pendingSummarization: statuses.filter((s: string) => s === 'transcribed').length,
+      pendingCompliance: statuses.filter((s: string) => s === 'summarized').length,
+      failed: statuses.filter((s: string) => s === 'failed').length,
+      episodeCounts: {
+        ingested: statuses.length,
+        transcribed: statuses.filter((s: string) => s === 'transcribed' || s === 'summarized' || s === 'compliance_checked').length,
+        summarized: statuses.filter((s: string) => s === 'summarized' || s === 'compliance_checked').length,
+        complianceChecked: statuses.filter((s: string) => s === 'compliance_checked').length,
+        failed: statuses.filter((s: string) => s === 'failed').length,
+      },
     }
 
     const data: Record<string, unknown> = {}

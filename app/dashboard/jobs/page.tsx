@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { SkeletonCard } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
-import { useQueueSSE, EpisodeBacklog } from '@/lib/use-sse'
+import { useQueueSSE, EpisodeBacklog, EpisodeCounts } from '@/lib/use-sse'
 
 interface FailedJob {
   id: string
@@ -53,6 +53,17 @@ function getBacklogCount(name: typeof queueNames[number], backlog?: EpisodeBackl
     case 'transcribe': return backlog.pendingTranscription
     case 'summarize': return backlog.pendingSummarization
     case 'compliance': return backlog.pendingCompliance
+    default: return null
+  }
+}
+
+function getEpisodeCompleted(name: typeof queueNames[number], counts?: EpisodeCounts | null): number | null {
+  if (!counts) return null
+  switch (name) {
+    case 'ingest': return counts.ingested
+    case 'transcribe': return counts.transcribed
+    case 'summarize': return counts.summarized
+    case 'compliance': return counts.complianceChecked
     default: return null
   }
 }
@@ -256,14 +267,17 @@ export default function JobsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {queueNames.map((name) => {
               const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
+              const bl = failedDetails.backlog as EpisodeBacklog | undefined
+              const episodeCompleted = getEpisodeCompleted(name, bl?.episodeCounts)
+              const episodeFailed = bl?.episodeCounts?.failed ?? null
               return (
                 <div key={name} className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4 space-y-3 opacity-75">
                   <h3 className="font-semibold">{queueLabels[name]}</h3>
                   <div className="grid grid-cols-2 gap-2">
                     <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
                     <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
-                    <CountCell count={q.completed} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
-                    <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={q.failed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={q.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
+                    <CountCell count={episodeCompleted ?? 0} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
+                    <CountCell count={episodeFailed ?? 0} label="Failed" bg={(episodeFailed ?? 0) > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={(episodeFailed ?? 0) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={(episodeFailed ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
                   </div>
                 </div>
               )
@@ -338,6 +352,8 @@ export default function JobsPage() {
         {queueNames.map((name) => {
           const q = queues[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
           const backlogCount = getBacklogCount(name, queues?.backlog)
+          const episodeCompleted = getEpisodeCompleted(name, queues?.backlog?.episodeCounts)
+          const episodeFailed = queues?.backlog?.episodeCounts?.failed ?? null
           return (
             <div key={name} className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -371,8 +387,8 @@ export default function JobsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
                 <CountCell count={q.waiting} label="Queued" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
-                <CountCell count={q.completed} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
-                <CountCell count={q.failed} label="Failed" bg={q.failed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={q.failed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={q.failed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
+                <CountCell count={episodeCompleted ?? 0} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
+                <CountCell count={episodeFailed ?? 0} label="Failed" bg={(episodeFailed ?? 0) > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={(episodeFailed ?? 0) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={(episodeFailed ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
               </div>
             </div>
           )
