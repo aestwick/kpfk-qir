@@ -184,7 +184,9 @@ export async function processTranscribe(job: Job) {
   const corrections = await loadCorrections()
   let transcribed = 0
 
-  for (const episode of filteredEpisodes) {
+  for (let i = 0; i < filteredEpisodes.length; i++) {
+    const episode = filteredEpisodes[i]
+    await job.updateProgress({ current: i + 1, total: filteredEpisodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
     const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}`)
     try {
       await fs.mkdir(tmpDir, { recursive: true })

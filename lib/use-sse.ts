@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 
+export interface ActiveJobInfo {
+  id: string
+  name: string
+  progress: { current?: number; total?: number; episodeId?: number; showName?: string; airDate?: string } | null
+  processedOn: number | null
+}
+
 interface QueueCounts {
   active: number
   waiting: number
   completed: number
   failed: number
+  activeJobs?: ActiveJobInfo[]
 }
 
 export interface EpisodeCounts {

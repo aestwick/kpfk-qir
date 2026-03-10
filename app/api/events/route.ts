@@ -4,12 +4,21 @@ import { supabaseAdmin } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 
 async function getQueueCounts(queue: typeof ingestQueue) {
-  const counts = await queue.getJobCounts()
+  const [counts, activeJobs] = await Promise.all([
+    queue.getJobCounts(),
+    queue.getActive(0, 5),
+  ])
   return {
     active: counts.active ?? 0,
     waiting: counts.waiting ?? 0,
     completed: counts.completed ?? 0,
     failed: counts.failed ?? 0,
+    activeJobs: activeJobs.map((j: any) => ({
+      id: j.id,
+      name: j.name,
+      progress: j.progress ?? null,
+      processedOn: j.processedOn ?? null,
+    })),
   }
 }
 
