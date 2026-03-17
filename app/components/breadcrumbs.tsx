@@ -9,6 +9,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/dashboard/jobs': 'Jobs',
   '/dashboard/activity': 'Activity',
   '/dashboard/usage': 'Usage',
+  '/dashboard/shows/audit': 'Show Audit',
   '/dashboard/generate': 'Generate QIR',
   '/dashboard/downloads': 'Downloads',
   '/dashboard/settings': 'Settings',
