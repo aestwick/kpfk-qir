@@ -6,22 +6,23 @@ export const dynamic = 'force-dynamic'
 
 /**
  * POST /api/shows/audit/process
- * Body: { episode_ids: number[], stages: ('transcribe' | 'summarize' | 'compliance')[] }
+ * Body: { episode_ids: number[] }
  *
- * Queues processing jobs for specific episodes. Only processes episodes that
- * are in the right status for the requested stage.
+ * Prepares episodes for processing by resetting statuses, then triggers
+ * batch worker jobs. Workers are batch processors — they pick up episodes
+ * by status from the DB, so we just need to:
+ * 1. Reset failed episodes to pending
+ * 2. Trigger one batch job per stage that has work
+ *
+ * The workers will pick up the episodes on their own.
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { episode_ids, stages } = body as { episode_ids: number[]; stages: string[] }
+    const { episode_ids } = body as { episode_ids: number[] }
 
     if (!Array.isArray(episode_ids) || episode_ids.length === 0) {
       return NextResponse.json({ error: 'episode_ids array required' }, { status: 400 })
-    }
-
-    if (!Array.isArray(stages) || stages.length === 0) {
-      return NextResponse.json({ error: 'stages array required (transcribe, summarize, compliance)' }, { status: 400 })
     }
 
     // Fetch current status for all requested episodes
@@ -32,49 +33,63 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error
 
-    const results = {
-      transcribe: { queued: 0, skipped: 0, ids: [] as number[] },
-      summarize: { queued: 0, skipped: 0, ids: [] as number[] },
-      compliance: { queued: 0, skipped: 0, ids: [] as number[] },
+    const statuses = {
+      pending: 0,
+      failed: 0,
+      transcribed: 0,
+      summarized: 0,
+      already_done: 0,
     }
 
+    // Count what we have
     for (const ep of episodes ?? []) {
-      if (stages.includes('transcribe') && (ep.status === 'pending' || ep.status === 'failed')) {
-        // Reset to pending and queue transcription
-        await supabaseAdmin
-          .from('episode_log')
-          .update({ status: 'pending', error_message: null })
-          .eq('id', ep.id)
-        await transcribeQueue.add(`audit-transcribe-${ep.id}`, { episodeId: ep.id })
-        results.transcribe.queued++
-        results.transcribe.ids.push(ep.id)
-      } else if (stages.includes('transcribe')) {
-        results.transcribe.skipped++
-      }
-
-      if (stages.includes('summarize') && ep.status === 'transcribed') {
-        await summarizeQueue.add(`audit-summarize-${ep.id}`, { episodeId: ep.id })
-        results.summarize.queued++
-        results.summarize.ids.push(ep.id)
-      } else if (stages.includes('summarize')) {
-        results.summarize.skipped++
-      }
-
-      if (stages.includes('compliance') && ep.status === 'summarized') {
-        await complianceQueue.add(`audit-compliance-${ep.id}`, { episodeId: ep.id })
-        results.compliance.queued++
-        results.compliance.ids.push(ep.id)
-      } else if (stages.includes('compliance')) {
-        results.compliance.skipped++
-      }
+      if (ep.status === 'failed') statuses.failed++
+      else if (ep.status === 'pending') statuses.pending++
+      else if (ep.status === 'transcribed') statuses.transcribed++
+      else if (ep.status === 'summarized') statuses.summarized++
+      else statuses.already_done++
     }
 
-    const totalQueued = results.transcribe.queued + results.summarize.queued + results.compliance.queued
+    // Reset failed episodes to pending so workers will pick them up
+    const failedIds = (episodes ?? []).filter((ep) => ep.status === 'failed').map((ep) => ep.id)
+    if (failedIds.length > 0) {
+      await supabaseAdmin
+        .from('episode_log')
+        .update({ status: 'pending', error_message: null })
+        .in('id', failedIds)
+    }
+
+    // Trigger batch worker jobs for each stage that has work.
+    // Workers query the DB for episodes in the right status, so we just
+    // need one job per stage — no per-episode jobs needed.
+    const triggered: string[] = []
+
+    const needsTranscription = statuses.pending + statuses.failed
+    if (needsTranscription > 0) {
+      await transcribeQueue.add('audit-transcribe', {})
+      triggered.push(`transcribe (${needsTranscription} episodes)`)
+    }
+
+    if (statuses.transcribed > 0) {
+      await summarizeQueue.add('audit-summarize', {})
+      triggered.push(`summarize (${statuses.transcribed} episodes)`)
+    }
+
+    if (statuses.summarized > 0) {
+      await complianceQueue.add('audit-compliance', {})
+      triggered.push(`compliance (${statuses.summarized} episodes)`)
+    }
+
+    const totalToProcess = needsTranscription + statuses.transcribed + statuses.summarized
+    const message = totalToProcess > 0
+      ? `Processing ${totalToProcess} episodes: ${triggered.join(', ')}. Workers will auto-continue through stages.`
+      : 'All episodes are already fully processed!'
 
     return NextResponse.json({
       ok: true,
-      message: `Queued ${totalQueued} jobs across ${stages.join(', ')} stages`,
-      results,
+      message,
+      statuses,
+      triggered,
     })
   } catch (err) {
     console.error('POST /api/shows/audit/process failed:', err)

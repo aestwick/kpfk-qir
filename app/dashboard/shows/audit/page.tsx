@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 
 interface Show {
   key: string
@@ -42,10 +42,9 @@ interface AuditData {
   total: number
   statusCounts: Record<string, number>
   issueCategories: Record<string, number>
+  isCurrentQuarter: boolean
   processing: {
-    needsTranscription: number
-    needsSummarization: number
-    needsCompliance: number
+    episodesNeedingWork: number
     estimatedCost: {
       transcription: number
       summarization: number
@@ -100,6 +99,16 @@ export default function ShowAuditPage() {
   const [processMessage, setProcessMessage] = useState('')
   const [expandedEpisode, setExpandedEpisode] = useState<number | null>(null)
   const [pollCount, setPollCount] = useState(0)
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+      }
+    }
+  }, [])
 
   // Load shows list
   useEffect(() => {
@@ -134,6 +143,12 @@ export default function ShowAuditPage() {
       if (res.ok) {
         const data = await res.json()
         setAuditData(data)
+
+        // Stop polling if all episodes are fully processed
+        if (data.processing.episodesNeedingWork === 0 && pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current)
+          pollIntervalRef.current = null
+        }
       }
     } catch (err) {
       console.error('Failed to fetch audit:', err)
@@ -151,7 +166,7 @@ export default function ShowAuditPage() {
     setProcessing(true)
     setProcessMessage('')
 
-    // Determine which episodes need what
+    // Determine which episodes need work
     const needsWork = auditData.episodes.filter(
       (ep) => ep.status === 'pending' || ep.status === 'failed' || ep.status === 'transcribed' || ep.status === 'summarized'
     )
@@ -167,7 +182,6 @@ export default function ShowAuditPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           episode_ids: needsWork.map((ep) => ep.id),
-          stages: ['transcribe', 'summarize', 'compliance'],
         }),
       })
       const data = await res.json()
@@ -175,7 +189,18 @@ export default function ShowAuditPage() {
         setProcessMessage(data.message)
         // Start polling for updates
         setPollCount(0)
-        startPolling()
+        if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+        let count = 0
+        pollIntervalRef.current = setInterval(async () => {
+          count++
+          await fetchAudit()
+          setPollCount(count)
+          // Stop after 60 polls (5 minutes at 5s intervals)
+          if (count >= 60 && pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current)
+            pollIntervalRef.current = null
+          }
+        }, 5000)
       } else {
         setProcessMessage(`Error: ${data.error}`)
       }
@@ -183,19 +208,6 @@ export default function ShowAuditPage() {
       setProcessMessage('Failed to queue processing')
     }
     setProcessing(false)
-  }
-
-  const startPolling = () => {
-    let count = 0
-    const interval = setInterval(async () => {
-      count++
-      await fetchAudit()
-      setPollCount(count)
-      // Stop after 60 polls (5 minutes at 5s intervals)
-      if (count >= 60) clearInterval(interval)
-    }, 5000)
-    // Store interval ID for cleanup
-    return () => clearInterval(interval)
   }
 
   const handleViewReport = () => {
@@ -247,9 +259,7 @@ export default function ShowAuditPage() {
     (ep) => ep.status === 'summarized' || ep.status === 'compliance_checked'
   ) ?? []
 
-  const needsWorkCount = auditData
-    ? (auditData.processing.needsTranscription + auditData.processing.needsSummarization + auditData.processing.needsCompliance)
-    : 0
+  const episodesNeedingWork = auditData?.processing.episodesNeedingWork ?? 0
 
   return (
     <div className="space-y-6">
@@ -413,8 +423,8 @@ export default function ShowAuditPage() {
               <p className="text-xs text-gray-500 dark:text-warm-400">Fully Processed</p>
             </div>
             <div className="bg-white dark:bg-warm-800 rounded-xl border dark:border-warm-700 p-4">
-              <p className="text-2xl font-bold text-yellow-600">{auditData.processing.needsTranscription + auditData.processing.needsSummarization + auditData.processing.needsCompliance}</p>
-              <p className="text-xs text-gray-500 dark:text-warm-400">Need Processing</p>
+              <p className="text-2xl font-bold text-yellow-600">{episodesNeedingWork}</p>
+              <p className="text-xs text-gray-500 dark:text-warm-400">Episodes Need Work</p>
             </div>
             <div className="bg-white dark:bg-warm-800 rounded-xl border dark:border-warm-700 p-4">
               <p className="text-2xl font-bold text-gray-900 dark:text-white">${auditData.actualCostTotal.toFixed(3)}</p>
@@ -422,26 +432,40 @@ export default function ShowAuditPage() {
             </div>
           </div>
 
+          {/* Past quarter warning */}
+          {!auditData.isCurrentQuarter && episodesNeedingWork > 0 && (
+            <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-xl p-4">
+              <p className="text-sm text-orange-800 dark:text-orange-300">
+                <strong>Note:</strong> This date range is outside the current quarter. The processing pipeline
+                only picks up episodes from the current quarter. To process these episodes, use the{' '}
+                <a href="/dashboard/episodes" className="underline hover:no-underline">Episodes page</a>{' '}
+                to re-transcribe or re-summarize individual episodes, or use the{' '}
+                <a href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</a>{' '}
+                to advance the pipeline.
+              </p>
+            </div>
+          )}
+
           {/* Cost estimate + Process button */}
-          {needsWorkCount > 0 && (
+          {episodesNeedingWork > 0 && auditData.isCurrentQuarter && (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-5">
               <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Processing Required</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mb-3">
-                {auditData.processing.needsTranscription > 0 && (
+                {auditData.processing.estimatedCost.transcription > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-amber-700 dark:text-amber-400">Transcription ({auditData.processing.needsTranscription} eps)</span>
+                    <span className="text-amber-700 dark:text-amber-400">Transcription</span>
                     <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.transcription.toFixed(3)}</span>
                   </div>
                 )}
-                {auditData.processing.needsSummarization > 0 && (
+                {auditData.processing.estimatedCost.summarization > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-amber-700 dark:text-amber-400">Summarization ({auditData.processing.needsSummarization} eps)</span>
+                    <span className="text-amber-700 dark:text-amber-400">Summarization</span>
                     <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.summarization.toFixed(3)}</span>
                   </div>
                 )}
-                {auditData.processing.needsCompliance > 0 && (
+                {auditData.processing.estimatedCost.compliance > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-amber-700 dark:text-amber-400">Compliance ({auditData.processing.needsCompliance} eps)</span>
+                    <span className="text-amber-700 dark:text-amber-400">Compliance</span>
                     <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.compliance.toFixed(3)}</span>
                   </div>
                 )}
@@ -449,7 +473,7 @@ export default function ShowAuditPage() {
               <div className="flex items-center justify-between border-t border-amber-200 dark:border-amber-700 pt-3">
                 <div>
                   <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                    Estimated Total: ${auditData.processing.estimatedCost.total.toFixed(3)}
+                    Est. Total: ${auditData.processing.estimatedCost.total.toFixed(3)} for {episodesNeedingWork} episode{episodesNeedingWork !== 1 ? 's' : ''}
                   </span>
                 </div>
                 <button
@@ -471,7 +495,7 @@ export default function ShowAuditPage() {
             </div>
           )}
 
-          {needsWorkCount === 0 && auditData.total > 0 && (
+          {episodesNeedingWork === 0 && auditData.total > 0 && (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-xl p-5 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-green-800 dark:text-green-300">All Episodes Processed</h3>
@@ -583,7 +607,7 @@ export default function ShowAuditPage() {
                             <div key={i} className={`text-xs px-2 py-1.5 rounded ${severityColors[flag.severity] ?? 'bg-gray-100 text-gray-600'}`}>
                               <span className="font-medium">{flag.flag_type}</span>
                               {flag.details && <span className="ml-1">&mdash; {flag.details}</span>}
-                              {flag.excerpt && <span className="block mt-0.5 opacity-75">"{flag.excerpt}"</span>}
+                              {flag.excerpt && <span className="block mt-0.5 opacity-75">&quot;{flag.excerpt}&quot;</span>}
                             </div>
                           ))}
                         </div>

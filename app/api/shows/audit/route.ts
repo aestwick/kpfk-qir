@@ -9,6 +9,39 @@ const GROQ_COST_PER_SECOND = 0.111 / 3600
 const ESTIMATED_SUMMARIZE_COST = 0.003
 const ESTIMATED_COMPLIANCE_COST = 0.002
 
+// Supabase .in() can handle long lists, but we batch to avoid overly large queries
+const IN_BATCH_SIZE = 200
+
+/** Helper to batch Supabase .in() queries for large ID arrays */
+async function batchInQuery<T>(
+  table: string,
+  column: string,
+  ids: number[],
+  selectCols: string
+): Promise<T[]> {
+  if (ids.length === 0) return []
+  const results: T[] = []
+  for (let i = 0; i < ids.length; i += IN_BATCH_SIZE) {
+    const batch = ids.slice(i, i + IN_BATCH_SIZE)
+    const { data } = await supabaseAdmin
+      .from(table)
+      .select(selectCols)
+      .in(column, batch)
+    if (data) results.push(...(data as T[]))
+  }
+  return results
+}
+
+function getCurrentQuarterBounds(): { start: string; end: string } {
+  const now = new Date()
+  const year = now.getFullYear()
+  const quarter = Math.floor(now.getMonth() / 3)
+  const startMonth = quarter * 3
+  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
+  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
+  return { start, end }
+}
+
 /**
  * GET /api/shows/audit?show_keys=key1,key2&from=2026-01-01&to=2026-01-31
  *
@@ -34,6 +67,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'At least one show_key required' }, { status: 400 })
     }
 
+    // Determine if the date range falls within the current quarter
+    // (workers only process episodes from the current quarter)
+    const qBounds = getCurrentQuarterBounds()
+    const isCurrentQuarter = from >= qBounds.start && to <= qBounds.end
+
     // Fetch episodes for these shows in the date range
     const { data: episodes, error: epError } = await supabaseAdmin
       .from('episode_log')
@@ -46,29 +84,25 @@ export async function GET(request: NextRequest) {
     if (epError) throw epError
 
     const eps = episodes ?? []
-
-    // Fetch compliance flags for these episodes
     const episodeIds = eps.map((e) => e.id)
-    let complianceFlags: Array<{ episode_id: number; flag_type: string; severity: string; excerpt: string | null; details: string | null; resolved: boolean }> = []
-    if (episodeIds.length > 0) {
-      const { data: flags } = await supabaseAdmin
-        .from('compliance_flags')
-        .select('episode_id, flag_type, severity, excerpt, details, resolved')
-        .in('episode_id', episodeIds)
-      complianceFlags = flags ?? []
-    }
 
-    // Fetch past usage costs for already-processed episodes
-    let usageByEpisode: Record<number, number> = {}
-    if (episodeIds.length > 0) {
-      const { data: usageRows } = await supabaseAdmin
-        .from('usage_log')
-        .select('episode_id, estimated_cost')
-        .in('episode_id', episodeIds)
-      for (const row of usageRows ?? []) {
-        if (row.episode_id) {
-          usageByEpisode[row.episode_id] = (usageByEpisode[row.episode_id] ?? 0) + (Number(row.estimated_cost) || 0)
-        }
+    // Fetch compliance flags and usage costs in parallel, with batched .in() queries
+    const [complianceFlags, usageRows] = await Promise.all([
+      batchInQuery<{ episode_id: number; flag_type: string; severity: string; excerpt: string | null; details: string | null; resolved: boolean }>(
+        'compliance_flags', 'episode_id', episodeIds,
+        'episode_id, flag_type, severity, excerpt, details, resolved'
+      ),
+      batchInQuery<{ episode_id: number; estimated_cost: number }>(
+        'usage_log', 'episode_id', episodeIds,
+        'episode_id, estimated_cost'
+      ),
+    ])
+
+    // Aggregate usage costs by episode
+    const usageByEpisode: Record<number, number> = {}
+    for (const row of usageRows) {
+      if (row.episode_id) {
+        usageByEpisode[row.episode_id] = (usageByEpisode[row.episode_id] ?? 0) + (Number(row.estimated_cost) || 0)
       }
     }
 
@@ -78,7 +112,7 @@ export async function GET(request: NextRequest) {
       statusCounts[ep.status] = (statusCounts[ep.status] ?? 0) + 1
     }
 
-    // Build compliance summary
+    // Build compliance flags by episode
     const flagsByEpisode: Record<number, typeof complianceFlags> = {}
     for (const flag of complianceFlags) {
       if (!flagsByEpisode[flag.episode_id]) flagsByEpisode[flag.episode_id] = []
@@ -86,30 +120,25 @@ export async function GET(request: NextRequest) {
     }
 
     // Estimate costs for unprocessed episodes
+    // Track unique episodes per stage (pending episodes cascade through all stages)
     let estimatedTranscribeCost = 0
     let estimatedSummarizeCost = 0
     let estimatedComplianceCost = 0
-    const needsTranscription: number[] = []
-    const needsSummarization: number[] = []
-    const needsCompliance: number[] = []
+    let episodesNeedingWork = 0
 
     for (const ep of eps) {
       if (ep.status === 'pending' || ep.status === 'failed') {
-        needsTranscription.push(ep.id)
+        episodesNeedingWork++
         const durationSec = (ep.duration ?? 60) * 60
         estimatedTranscribeCost += durationSec * GROQ_COST_PER_SECOND
-        // Will also need summarization and compliance after transcription
-        needsSummarization.push(ep.id)
         estimatedSummarizeCost += ESTIMATED_SUMMARIZE_COST
-        needsCompliance.push(ep.id)
         estimatedComplianceCost += ESTIMATED_COMPLIANCE_COST
       } else if (ep.status === 'transcribed') {
-        needsSummarization.push(ep.id)
+        episodesNeedingWork++
         estimatedSummarizeCost += ESTIMATED_SUMMARIZE_COST
-        needsCompliance.push(ep.id)
         estimatedComplianceCost += ESTIMATED_COMPLIANCE_COST
       } else if (ep.status === 'summarized') {
-        needsCompliance.push(ep.id)
+        episodesNeedingWork++
         estimatedComplianceCost += ESTIMATED_COMPLIANCE_COST
       }
     }
@@ -134,10 +163,9 @@ export async function GET(request: NextRequest) {
       total: eps.length,
       statusCounts,
       issueCategories,
+      isCurrentQuarter,
       processing: {
-        needsTranscription: needsTranscription.length,
-        needsSummarization: needsSummarization.length,
-        needsCompliance: needsCompliance.length,
+        episodesNeedingWork,
         estimatedCost: {
           transcription: Math.round(estimatedTranscribeCost * 1000) / 1000,
           summarization: Math.round(estimatedSummarizeCost * 1000) / 1000,
