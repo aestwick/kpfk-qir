@@ -99,6 +99,8 @@ export default function ShowAuditPage() {
   const [processMessage, setProcessMessage] = useState('')
   const [expandedEpisode, setExpandedEpisode] = useState<number | null>(null)
   const [pollCount, setPollCount] = useState(0)
+  const [workerStatus, setWorkerStatus] = useState<string>('')
+  const [pipelinePaused, setPipelinePaused] = useState(false)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Clean up polling on unmount
@@ -148,6 +150,8 @@ export default function ShowAuditPage() {
         if (data.processing.episodesNeedingWork === 0 && pollIntervalRef.current) {
           clearInterval(pollIntervalRef.current)
           pollIntervalRef.current = null
+          setWorkerStatus('')
+          setProcessMessage('All episodes processed!')
         }
       }
     } catch (err) {
@@ -187,18 +191,45 @@ export default function ShowAuditPage() {
       const data = await res.json()
       if (data.ok) {
         setProcessMessage(data.message)
-        // Start polling for updates
+        setWorkerStatus('Starting workers...')
+        // Start polling for updates — fetch both audit data and job status
         setPollCount(0)
         if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
         let count = 0
         pollIntervalRef.current = setInterval(async () => {
           count++
-          await fetchAudit()
+          // Fetch audit data and job status in parallel
+          const [, jobsRes] = await Promise.all([
+            fetchAudit(),
+            fetch('/api/jobs').then((r) => r.ok ? r.json() : null).catch(() => null),
+          ])
           setPollCount(count)
+
+          // Build a human-readable worker status from queue data
+          if (jobsRes) {
+            setPipelinePaused(!!jobsRes.pipeline_paused)
+            const parts: string[] = []
+            for (const qName of ['transcribe', 'summarize', 'compliance'] as const) {
+              const q = jobsRes[qName]
+              if (!q) continue
+              if (q.active > 0) parts.push(`${qName}: processing`)
+              else if (q.waiting > 0) parts.push(`${qName}: queued (${q.waiting})`)
+              else if (q.failed > 0) parts.push(`${qName}: ${q.failed} failed`)
+            }
+            if (parts.length > 0) {
+              setWorkerStatus(parts.join(' · '))
+            } else if (jobsRes.pipeline_paused) {
+              setWorkerStatus('Pipeline is paused — unpause from the Jobs page')
+            } else {
+              setWorkerStatus('Workers idle — waiting for jobs')
+            }
+          }
+
           // Stop after 60 polls (5 minutes at 5s intervals)
           if (count >= 60 && pollIntervalRef.current) {
             clearInterval(pollIntervalRef.current)
             pollIntervalRef.current = null
+            setWorkerStatus('')
           }
         }, 5000)
       } else {
@@ -487,10 +518,23 @@ export default function ShowAuditPage() {
               {processMessage && (
                 <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">{processMessage}</p>
               )}
-              {pollCount > 0 && (
-                <p className="mt-1 text-xs text-amber-600 dark:text-amber-500">
-                  Auto-refreshing... (check {pollCount})
+              {pipelinePaused && pollCount > 0 && (
+                <p className="mt-2 text-sm font-semibold text-red-600 dark:text-red-400">
+                  Pipeline is paused! Unpause from the <a href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</a> for processing to begin.
                 </p>
+              )}
+              {pollCount > 0 && (
+                <div className="mt-2 space-y-1">
+                  {workerStatus && (
+                    <p className="text-sm text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                      <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      {workerStatus}
+                    </p>
+                  )}
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    Auto-refreshing... (check {pollCount})
+                  </p>
+                </div>
               )}
             </div>
           )}
