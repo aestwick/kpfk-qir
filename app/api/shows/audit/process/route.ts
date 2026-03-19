@@ -66,17 +66,17 @@ export async function POST(request: NextRequest) {
 
     const needsTranscription = statuses.pending + statuses.failed
     if (needsTranscription > 0) {
-      await transcribeQueue.add('audit-transcribe', {})
+      await transcribeQueue.add('audit-transcribe', { source: 'audit', chain: true })
       triggered.push(`transcribe (${needsTranscription} episodes)`)
     }
 
     if (statuses.transcribed > 0) {
-      await summarizeQueue.add('audit-summarize', {})
+      await summarizeQueue.add('audit-summarize', { source: 'audit', chain: true })
       triggered.push(`summarize (${statuses.transcribed} episodes)`)
     }
 
     if (statuses.summarized > 0) {
-      await complianceQueue.add('audit-compliance', {})
+      await complianceQueue.add('audit-compliance', { source: 'audit' })
       triggered.push(`compliance (${statuses.summarized} episodes)`)
     }
 

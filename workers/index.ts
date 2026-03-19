@@ -95,14 +95,18 @@ transcribeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.transcribed ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[transcribe] completed — ${count} episodes transcribed${remaining ? ' (more remaining)' : ''}`)
-  // No auto-chain to summarize: must be triggered manually from the dashboard
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
       await transcribeQueue.add('transcribe-backoff', {}, { delay: 5 * 60 * 1000 })
     } else {
-      await transcribeQueue.add('transcribe-continue', {})
+      await transcribeQueue.add('transcribe-continue', job.data?.chain ? { source: job.data.source, chain: true } : {})
     }
+  }
+  // Auto-chain to summarize when triggered from audit
+  if (job.data?.source === 'audit' && job.data?.chain && count > 0) {
+    console.log('[transcribe] audit auto-chain → summarize')
+    await summarizeQueue.add('audit-summarize', { source: 'audit', chain: true })
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -119,14 +123,18 @@ summarizeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.summarized ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[summarize] completed — ${count} episodes summarized${remaining ? ' (more remaining)' : ''}`)
-  // No auto-chain to compliance: must be triggered manually from the dashboard
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
       await summarizeQueue.add('summarize-backoff', {}, { delay: 5 * 60 * 1000 })
     } else {
-      await summarizeQueue.add('summarize-continue', {})
+      await summarizeQueue.add('summarize-continue', job.data?.chain ? { source: job.data.source, chain: true } : {})
     }
+  }
+  // Auto-chain to compliance when triggered from audit
+  if (job.data?.source === 'audit' && job.data?.chain && count > 0) {
+    console.log('[summarize] audit auto-chain → compliance')
+    await complianceQueue.add('audit-compliance', { source: 'audit' })
   }
 })
 summarizeWorker.on('failed', (job, err) => {
