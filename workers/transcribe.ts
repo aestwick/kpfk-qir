@@ -131,6 +131,7 @@ async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
       method: 'POST',
       headers: { Authorization: `Bearer ${groqKey}` },
       body: formData,
+      signal: AbortSignal.timeout(5 * 60 * 1000), // 5 min timeout per chunk
     })
 
     if (response.ok) {

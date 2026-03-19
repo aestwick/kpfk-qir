@@ -39,6 +39,7 @@ const transcribeQueue = new Queue('transcribe', {
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
+    timeout: 30 * 60 * 1000, // 30 min max per job (batch of episodes)
   },
 })
 const summarizeQueue = new Queue('summarize', {
@@ -46,6 +47,7 @@ const summarizeQueue = new Queue('summarize', {
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
+    timeout: 15 * 60 * 1000, // 15 min max per job
   },
 })
 const complianceQueue = new Queue('compliance', {
@@ -53,6 +55,7 @@ const complianceQueue = new Queue('compliance', {
   defaultJobOptions: {
     attempts: 2,
     backoff: { type: 'exponential', delay: 5000 },
+    timeout: 15 * 60 * 1000, // 15 min max per job
   },
 })
 const generateQirQueue = new Queue('generate-qir', {
