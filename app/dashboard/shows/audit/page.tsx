@@ -169,6 +169,20 @@ export default function ShowAuditPage() {
     if (!auditData) return
     setProcessing(true)
     setProcessMessage('')
+    setWorkerStatus('')
+
+    // Pre-flight: check if pipeline is paused or workers are responsive
+    try {
+      const jobsCheck = await fetch('/api/jobs').then((r) => r.ok ? r.json() : null).catch(() => null)
+      if (jobsCheck?.pipeline_paused) {
+        setPipelinePaused(true)
+        setProcessMessage('Cannot process — pipeline is paused. Unpause from the Jobs page first.')
+        setProcessing(false)
+        return
+      }
+    } catch {
+      // Non-blocking — proceed anyway
+    }
 
     // Determine which episodes need work
     const needsWork = auditData.episodes.filter(
@@ -196,6 +210,7 @@ export default function ShowAuditPage() {
         setPollCount(0)
         if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
         let count = 0
+        let waitingStreak = 0
         pollIntervalRef.current = setInterval(async () => {
           count++
           // Fetch audit data and job status in parallel
@@ -209,14 +224,26 @@ export default function ShowAuditPage() {
           if (jobsRes) {
             setPipelinePaused(!!jobsRes.pipeline_paused)
             const parts: string[] = []
+            let hasActive = false
+            let hasWaiting = false
             for (const qName of ['transcribe', 'summarize', 'compliance'] as const) {
               const q = jobsRes[qName]
               if (!q) continue
-              if (q.active > 0) parts.push(`${qName}: processing`)
-              else if (q.waiting > 0) parts.push(`${qName}: queued (${q.waiting})`)
+              if (q.active > 0) { parts.push(`${qName}: processing`); hasActive = true }
+              else if (q.waiting > 0) { parts.push(`${qName}: queued (${q.waiting})`); hasWaiting = true }
               else if (q.failed > 0) parts.push(`${qName}: ${q.failed} failed`)
             }
-            if (parts.length > 0) {
+
+            // Detect stale jobs — if waiting but never active for 3+ polls, workers likely aren't running
+            if (hasWaiting && !hasActive) {
+              waitingStreak++
+            } else {
+              waitingStreak = 0
+            }
+
+            if (waitingStreak >= 3) {
+              setWorkerStatus('Jobs queued but no worker is picking them up — the worker process may not be running. Check the Jobs page or server logs.')
+            } else if (parts.length > 0) {
               setWorkerStatus(parts.join(' · '))
             } else if (jobsRes.pipeline_paused) {
               setWorkerStatus('Pipeline is paused — unpause from the Jobs page')
@@ -526,8 +553,8 @@ export default function ShowAuditPage() {
               {pollCount > 0 && (
                 <div className="mt-2 space-y-1">
                   {workerStatus && (
-                    <p className="text-sm text-amber-700 dark:text-amber-400 flex items-center gap-2">
-                      <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                    <p className={`text-sm flex items-center gap-2 ${workerStatus.includes('not be running') ? 'font-semibold text-red-600 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}`}>
+                      <span className={`inline-block w-2 h-2 rounded-full ${workerStatus.includes('not be running') ? 'bg-red-500' : 'bg-amber-500'} animate-pulse`} />
                       {workerStatus}
                     </p>
                   )}
