@@ -456,6 +456,19 @@ export default function CompliancePage() {
     }
   }
 
+  // Build URL for the public compliance report page with current filters
+  function buildReportUrl(): string {
+    const params = new URLSearchParams()
+    if (filterType) params.set('type', filterType)
+    if (filterSeverity) params.set('severity', filterSeverity)
+    if (filterResolution === 'unresolved') params.set('unresolved', 'true')
+    else if (filterResolution === 'resolved') params.set('unresolved', 'false')
+    else params.set('unresolved', 'false') // "all" shows everything
+    if (filterQuarter) params.set('quarter', filterQuarter)
+    if (filterShow) params.set('show', filterShow)
+    return params.toString()
+  }
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -476,7 +489,17 @@ export default function CompliancePage() {
   return (
     <div className="space-y-6">
       <Breadcrumbs />
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
+        <a
+          href={`/compliance-report?${buildReportUrl()}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+        >
+          View Report
+        </a>
+      </div>
 
       {/* Summary Stats Strip — uses dedicated stats query for accurate totals */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
