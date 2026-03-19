@@ -33,30 +33,37 @@ function getCurrentQuarterBounds() {
 
 async function getEpisodeBacklog() {
   const { start, end } = getCurrentQuarterBounds()
-  const { data, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('status')
-    .gte('air_date', start)
-    .lte('air_date', end)
 
-  if (error || !data) return {
-    pendingTranscription: 0, pendingSummarization: 0, pendingCompliance: 0, failed: 0,
-    episodeCounts: { ingested: 0, transcribed: 0, summarized: 0, complianceChecked: 0, failed: 0 },
-  }
+  // Use count queries to avoid Supabase's default 1000-row limit
+  const baseQuery = () => supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).gte('air_date', start).lte('air_date', end)
 
-  const statuses: string[] = data.map((e: { status: string }) => e.status)
+  const [pending, transcribed, summarized, complianceChecked, failed, total] = await Promise.all([
+    baseQuery().eq('status', 'pending'),
+    baseQuery().eq('status', 'transcribed'),
+    baseQuery().eq('status', 'summarized'),
+    baseQuery().eq('status', 'compliance_checked'),
+    baseQuery().eq('status', 'failed'),
+    baseQuery(),
+  ])
+
+  const pendingCount = pending.count ?? 0
+  const transcribedCount = transcribed.count ?? 0
+  const summarizedCount = summarized.count ?? 0
+  const complianceCheckedCount = complianceChecked.count ?? 0
+  const failedCount = failed.count ?? 0
+  const totalCount = total.count ?? 0
 
   return {
-    pendingTranscription: statuses.filter((s: string) => s === 'pending').length,
-    pendingSummarization: statuses.filter((s: string) => s === 'transcribed').length,
-    pendingCompliance: statuses.filter((s: string) => s === 'summarized').length,
-    failed: statuses.filter((s: string) => s === 'failed').length,
+    pendingTranscription: pendingCount,
+    pendingSummarization: transcribedCount,
+    pendingCompliance: summarizedCount,
+    failed: failedCount,
     episodeCounts: {
-      ingested: statuses.length,
-      transcribed: statuses.filter((s: string) => s === 'transcribed' || s === 'summarized' || s === 'compliance_checked').length,
-      summarized: statuses.filter((s: string) => s === 'summarized' || s === 'compliance_checked').length,
-      complianceChecked: statuses.filter((s: string) => s === 'compliance_checked').length,
-      failed: statuses.filter((s: string) => s === 'failed').length,
+      ingested: totalCount,
+      transcribed: transcribedCount + summarizedCount + complianceCheckedCount,
+      summarized: summarizedCount + complianceCheckedCount,
+      complianceChecked: complianceCheckedCount,
+      failed: failedCount,
     },
   }
 }
