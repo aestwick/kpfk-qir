@@ -56,7 +56,7 @@ export async function PATCH(
     if (action === 're-transcribe') {
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'pending', error_message: null })
+        .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
       await transcribeQueue.add('re-transcribe', { episodeId })
       return NextResponse.json({ ok: true, message: 'Re-transcription queued' })
@@ -65,7 +65,7 @@ export async function PATCH(
     if (action === 're-summarize') {
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'transcribed', error_message: null })
+        .update({ status: 'transcribed', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
       await summarizeQueue.add('re-summarize', { episodeId })
       return NextResponse.json({ ok: true, message: 'Re-summarization queued' })
@@ -91,7 +91,7 @@ export async function PATCH(
     if (action === 'retry') {
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'pending', error_message: null })
+        .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
       return NextResponse.json({ ok: true, message: 'Episode reset to pending' })
     }

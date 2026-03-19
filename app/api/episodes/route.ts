@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     if (body.action === 'bulk-retry') {
       const { error } = await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'pending', error_message: null })
+        .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
         .eq('status', 'failed')
 
       if (error) {

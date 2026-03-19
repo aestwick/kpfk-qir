@@ -121,6 +121,7 @@ export async function processSummarize(job: Job) {
           .update({
             status: 'transcript_missing',
             error_message: 'Episode marked as transcribed but no transcript found in database',
+            updated_at: new Date().toISOString(),
           })
           .eq('id', episode.id)
         continue
@@ -190,6 +191,7 @@ ${transcriptText}`
           compliance_report: parsed.discrepancy || null,
           status: 'summarized',
           error_message: null,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)
 
@@ -214,6 +216,7 @@ ${transcriptText}`
           status: 'failed',
           error_message: errMsg.slice(0, 1000),
           retry_count: (episode.retry_count ?? 0) + 1,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)
     }

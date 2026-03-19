@@ -19,7 +19,7 @@ export async function processAutoRetry(job: Job) {
     const deadIds = deadEpisodes.map((ep) => ep.id)
     await supabaseAdmin
       .from('episode_log')
-      .update({ status: 'dead' })
+      .update({ status: 'dead', updated_at: new Date().toISOString() })
       .in('id', deadIds)
     console.log(`[auto-retry] moved ${deadIds.length} episodes to dead status`)
   }
@@ -44,7 +44,7 @@ export async function processAutoRetry(job: Job) {
   const retryIds = retryable.map((ep) => ep.id)
   await supabaseAdmin
     .from('episode_log')
-    .update({ status: 'pending', error_message: null })
+    .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
     .in('id', retryIds)
 
   console.log(`[auto-retry] reset ${retryIds.length} episodes to pending`)
