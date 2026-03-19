@@ -381,7 +381,7 @@ export async function processCompliance(job: Job) {
         // Still mark as checked - no transcript means nothing to check
         await supabaseAdmin
           .from('episode_log')
-          .update({ status: 'compliance_checked' })
+          .update({ status: 'compliance_checked', updated_at: new Date().toISOString() })
           .eq('id', episode.id)
         checked++
         continue
@@ -432,7 +432,7 @@ export async function processCompliance(job: Job) {
       // Update status
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'compliance_checked', error_message: null })
+        .update({ status: 'compliance_checked', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episode.id)
 
       checked++
@@ -446,6 +446,7 @@ export async function processCompliance(job: Job) {
         .from('episode_log')
         .update({
           error_message: `Compliance check failed: ${errMsg.slice(0, 500)}`,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)
     }

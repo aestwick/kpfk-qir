@@ -213,7 +213,7 @@ export async function processTranscribe(job: Job) {
         if (errMsg.includes('404') || errMsg.includes('Server returned')) {
           await supabaseAdmin
             .from('episode_log')
-            .update({ status: 'unavailable', error_message: 'MP3 not found (404)' })
+            .update({ status: 'unavailable', error_message: 'MP3 not found (404)', updated_at: new Date().toISOString() })
             .eq('id', episode.id)
           console.warn(`[transcribe] episode ${episode.id} unavailable (404)`)
           continue
@@ -305,7 +305,7 @@ export async function processTranscribe(job: Job) {
       // Update episode status
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'transcribed', error_message: null })
+        .update({ status: 'transcribed', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episode.id)
 
       // Log usage
@@ -324,6 +324,7 @@ export async function processTranscribe(job: Job) {
           status: 'failed',
           error_message: errMsg.slice(0, 1000),
           retry_count: (episode.retry_count ?? 0) + 1,
+          updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)
     } finally {
