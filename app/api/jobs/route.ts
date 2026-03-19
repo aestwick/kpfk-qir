@@ -190,35 +190,49 @@ export async function GET() {
           }
         })
       ),
-      (() => {
+      (async () => {
         const now = new Date()
         const q = Math.floor(now.getMonth() / 3)
         const year = now.getFullYear()
         const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
         const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
-        return supabaseAdmin
-          .from('episode_log')
-          .select('status')
-          .gte('air_date', start)
-          .lte('air_date', end)
+
+        // Use count queries to avoid Supabase's default 1000-row limit
+        const baseQuery = () => supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).gte('air_date', start).lte('air_date', end)
+
+        const [pending, transcribed, summarized, complianceChecked, failed, total] = await Promise.all([
+          baseQuery().eq('status', 'pending'),
+          baseQuery().eq('status', 'transcribed'),
+          baseQuery().eq('status', 'summarized'),
+          baseQuery().eq('status', 'compliance_checked'),
+          baseQuery().eq('status', 'failed'),
+          baseQuery(),
+        ])
+
+        const pendingCount = pending.count ?? 0
+        const transcribedCount = transcribed.count ?? 0
+        const summarizedCount = summarized.count ?? 0
+        const complianceCheckedCount = complianceChecked.count ?? 0
+        const failedCount = failed.count ?? 0
+        const totalCount = total.count ?? 0
+
+        return {
+          pendingTranscription: pendingCount,
+          pendingSummarization: transcribedCount,
+          pendingCompliance: summarizedCount,
+          failed: failedCount,
+          episodeCounts: {
+            ingested: totalCount,
+            transcribed: transcribedCount + summarizedCount + complianceCheckedCount,
+            summarized: summarizedCount + complianceCheckedCount,
+            complianceChecked: complianceCheckedCount,
+            failed: failedCount,
+          },
+        }
       })(),
     ])
 
-    const episodes = backlogResult.data ?? []
-    const statuses: string[] = episodes.map((e: { status: string }) => e.status)
-    const backlog = {
-      pendingTranscription: statuses.filter((s: string) => s === 'pending').length,
-      pendingSummarization: statuses.filter((s: string) => s === 'transcribed').length,
-      pendingCompliance: statuses.filter((s: string) => s === 'summarized').length,
-      failed: statuses.filter((s: string) => s === 'failed').length,
-      episodeCounts: {
-        ingested: statuses.length,
-        transcribed: statuses.filter((s: string) => s === 'transcribed' || s === 'summarized' || s === 'compliance_checked').length,
-        summarized: statuses.filter((s: string) => s === 'summarized' || s === 'compliance_checked').length,
-        complianceChecked: statuses.filter((s: string) => s === 'compliance_checked').length,
-        failed: statuses.filter((s: string) => s === 'failed').length,
-      },
-    }
+    const backlog = backlogResult
 
     const paused = await isPipelinePaused()
 

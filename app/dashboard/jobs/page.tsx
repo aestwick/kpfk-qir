@@ -310,7 +310,7 @@ export default function JobsPage() {
               const q = failedDetails[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
               const bl = failedDetails.backlog
               const episodeCompleted = getEpisodeCompleted(name, bl?.episodeCounts)
-              const episodeFailed = bl?.episodeCounts?.failed ?? null
+              const queueFailed = q.failed ?? 0
               return (
                 <div key={name} className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4 space-y-3 opacity-75">
                   <h3 className="font-semibold">{queueLabels[name]}</h3>
@@ -318,7 +318,7 @@ export default function JobsPage() {
                     <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
                     <CountCell count={q.waiting} label="Waiting" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
                     <CountCell count={episodeCompleted ?? 0} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
-                    <CountCell count={episodeFailed ?? 0} label="Failed" bg={(episodeFailed ?? 0) > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={(episodeFailed ?? 0) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={(episodeFailed ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
+                    <CountCell count={queueFailed} label="Failed" bg={queueFailed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={queueFailed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={queueFailed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
                   </div>
                 </div>
               )
@@ -469,7 +469,7 @@ export default function JobsPage() {
             const q = queues[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
             const backlogCount = getBacklogCount(name, queues?.backlog)
             const episodeCompleted = getEpisodeCompleted(name, queues?.backlog?.episodeCounts)
-            const episodeFailed = queues?.backlog?.episodeCounts?.failed ?? null
+            const queueFailed = q.failed ?? 0
             return (
               <div key={name} className="bg-gray-50 dark:bg-warm-800/50 rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
@@ -504,7 +504,7 @@ export default function JobsPage() {
                   <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
                   <CountCell count={q.waiting} label="Queued" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
                   <CountCell count={episodeCompleted ?? 0} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
-                  <CountCell count={episodeFailed ?? 0} label="Failed" bg={(episodeFailed ?? 0) > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={(episodeFailed ?? 0) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={(episodeFailed ?? 0) > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
+                  <CountCell count={queueFailed} label="Failed" bg={queueFailed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={queueFailed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={queueFailed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
                 </div>
               </div>
             )
