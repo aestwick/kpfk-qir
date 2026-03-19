@@ -280,6 +280,9 @@ export async function processTranscribe(job: Job) {
           episode_id: episode.id,
           transcript: correctedTranscript,
           vtt,
+          language: detectedLanguage,
+          english_transcript: null,
+          english_vtt: null,
         },
         { onConflict: 'episode_id' }
       )
