@@ -70,7 +70,7 @@ export async function processSummarize(job: Job) {
   const openaiKey = process.env.OPENAI_API_KEY
   if (!openaiKey) throw new Error('OPENAI_API_KEY not set')
 
-  const openai = new OpenAI({ apiKey: openaiKey })
+  const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
   const excludedCategories = await getExcludedCategories()
   const batchSize = await getSummarizeBatchSize()
   const { start, end } = getCurrentQuarterBounds()

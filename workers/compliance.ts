@@ -365,7 +365,7 @@ export async function processCompliance(job: Job) {
     if (!openaiKey) {
       console.warn('[compliance] OPENAI_API_KEY not set, skipping AI checks')
     } else {
-      openai = new OpenAI({ apiKey: openaiKey })
+      openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
     }
   }
 
