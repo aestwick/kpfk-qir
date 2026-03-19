@@ -16,8 +16,16 @@ export async function getSetting<T = unknown>(key: string): Promise<T | null> {
     .single()
 
   if (data) {
-    settingsCache.set(key, { value: data.value, fetchedAt: Date.now() })
-    return data.value as T
+    let parsed: unknown = data.value
+    if (typeof data.value === 'string') {
+      try {
+        parsed = JSON.parse(data.value)
+      } catch {
+        // keep as string if not valid JSON
+      }
+    }
+    settingsCache.set(key, { value: parsed, fetchedAt: Date.now() })
+    return parsed as T
   }
 
   return null
