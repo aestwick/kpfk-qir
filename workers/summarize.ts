@@ -2,44 +2,7 @@ import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logSummarizationUsage } from '../lib/usage'
-import { getExcludedCategories, getSummarizeBatchSize, isPipelinePaused } from '../lib/settings'
-
-const SYSTEM_PROMPT = `You are an expert public radio producer for KPFK.
-Your task is to produce an internal archival log of a radio broadcast based on a transcript, and to flag any clear conflicts with provided metadata.
-This is NOT a program description or promotional summary.
-INPUTS:
-- Episode metadata (may include show title, air date/time, listed host(s), listed guest(s))
-- A transcript of the broadcast
-GENERAL RULES:
-- Be concise, neutral, and factual.
-- Do NOT add opinions, analysis, praise, criticism, political framing, or moral judgment.
-- Do NOT explain why topics matter.
-- Do NOT describe significance, impact, importance, implications, or future outcomes.
-- Do NOT narrate structure, flow, or progression.
-- Never invent names, roles, relationships, motivations, or conclusions.
-- If something is unclear or not explicitly stated, leave it blank.
-LANGUAGE RULES:
-- Do NOT use: "In this episode", "This episode", "The show", "The program", "This broadcast".
-- Do NOT describe beginnings, endings, transitions, or conclusions.
-- Do NOT use verbs such as: "highlights", "emphasizes", "underscores", "examines", "explores", "addresses", "reflects", "focuses on", "concludes", "reviews".
-- Use only neutral, descriptive verbs such as: "discusses", "describes", "outlines", "explains", "states", "argues".
-- Prefer speaker-led or topic-led sentences.
-- When a claim or opinion appears, attribute it to the speaker.
-DISCREPANCY RULE:
-- Compare the provided metadata fields (show name, air date, host, guest) with what is explicitly stated in the transcript.
-- Only flag a conflict when a metadata field directly contradicts an explicit statement in the transcript (e.g., listed host name differs from who introduces themselves).
-- A New Year's greeting or holiday reference that matches the air date year is NOT a discrepancy.
-- Do NOT compare transcript content against your own knowledge or the current date — only compare against the provided metadata.
-- Do NOT guess, infer, resolve, or explain conflicts.
-- If there is no clear conflict, leave "discrepancy" blank.
-CONTENT REQUIREMENTS:
-HEADLINE: One short declarative sentence listing main subjects. No dates, adjectives, or conclusions.
-SUMMARY: 4-8 sentences. Each states a topic or speaker statement. No structure descriptions. Under 900 characters.
-HOST: Name(s) only if explicitly stated in transcript. Comma-separated if multiple. Blank if unclear.
-GUEST: Name(s) only if explicitly introduced. Comma-separated if multiple. Blank if none/unclear.
-ISSUE_CATEGORY: One of: Civil Rights / Social Justice, Immigration, Economy / Labor, Environment / Climate, Government / Politics, Health, International Affairs / War & Peace, Arts & Culture.
-OUTPUT: Return ONLY valid JSON. No markdown, no extra text.
-{"headline":"string","summary":"string","host":"string","guest":"string","discrepancy":"string","issue_category":"string"}`
+import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused } from '../lib/settings'
 
 interface SummaryResponse {
   headline: string
@@ -73,6 +36,7 @@ export async function processSummarize(job: Job) {
   const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
   const excludedCategories = await getExcludedCategories()
   const batchSize = await getSummarizeBatchSize()
+  const systemPrompt = await getSummarizationPrompt()
   const { start, end } = getCurrentQuarterBounds()
 
   // Get transcribed episodes from current quarter (including those with null air_date
@@ -143,7 +107,7 @@ ${transcriptText}`
           response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
-              { role: 'system', content: SYSTEM_PROMPT },
+              { role: 'system', content: systemPrompt },
               { role: 'user', content: userMessage },
             ],
             temperature: 0.3,

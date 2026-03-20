@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
+import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
 
 /* ─── lazy-loaded corrections component ─── */
 const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-corrections').then(m => ({ default: m.TranscriptCorrections })), {
@@ -60,8 +61,6 @@ const settingFields: SettingField[] = [
   { key: 'transcription_model', label: 'Transcription Model', type: 'text', autoSave: true },
   { key: 'transcribe_batch_size', label: 'Transcribe Batch Size', type: 'number', autoSave: true },
   { key: 'summarize_batch_size', label: 'Summarize Batch Size', type: 'number', autoSave: true },
-  { key: 'summarization_prompt', label: 'Summarization Prompt', type: 'textarea' },
-  { key: 'curation_prompt', label: 'Curation Prompt', type: 'textarea' },
 ]
 
 const PIPELINE_MODES = [
@@ -92,7 +91,8 @@ const DEFAULT_CATEGORIES = [
   'Arts & Culture',
 ]
 
-type Tab = 'pipeline' | 'shows' | 'compliance' | 'corrections'
+type Tab = 'pipeline' | 'prompts' | 'shows' | 'compliance' | 'corrections'
+
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('pipeline')
@@ -110,6 +110,10 @@ export default function SettingsPage() {
   const [complianceChecks, setComplianceChecks] = useState<Record<string, boolean>>({})
   const [compliancePrompt, setCompliancePrompt] = useState('')
   const [savedCompliancePrompt, setSavedCompliancePrompt] = useState('')
+  const [summarizationPrompt, setSummarizationPrompt] = useState('')
+  const [savedSummarizationPrompt, setSavedSummarizationPrompt] = useState('')
+  const [curationPrompt, setCurationPrompt] = useState('')
+  const [savedCurationPrompt, setSavedCurationPrompt] = useState('')
   const [loading, setLoading] = useState(true)
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: number; type: 'word' | 'correction' } | null>(null)
 
@@ -182,6 +186,14 @@ export default function SettingsPage() {
         setCompliancePrompt(data.settings.compliance_prompt as string)
         setSavedCompliancePrompt(data.settings.compliance_prompt as string)
       }
+      if (data.settings?.summarization_prompt) {
+        setSummarizationPrompt(data.settings.summarization_prompt as string)
+        setSavedSummarizationPrompt(data.settings.summarization_prompt as string)
+      }
+      if (data.settings?.curation_prompt) {
+        setCurationPrompt(data.settings.curation_prompt as string)
+        setSavedCurationPrompt(data.settings.curation_prompt as string)
+      }
     }
     if (correctionsRes.ok) {
       const data = await correctionsRes.json()
@@ -226,6 +238,8 @@ export default function SettingsPage() {
     const hasUnsaved = settingFields.some(f =>
       (f.type === 'textarea' || f.type === 'json') && editValues[f.key] !== savedValues[f.key]
     ) || compliancePrompt !== savedCompliancePrompt
+      || summarizationPrompt !== savedSummarizationPrompt
+      || curationPrompt !== savedCurationPrompt
 
     if (!hasUnsaved) return
 
@@ -416,6 +430,48 @@ export default function SettingsPage() {
     setSaving(null)
   }
 
+  async function savePrompt(key: string, value: string, label: string, setSaved: (v: string) => void) {
+    setSaving(key)
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+      if (res.ok) {
+        setSaved(value)
+        toast('success', `${label} saved`)
+      } else {
+        toast('error', `Failed to save ${label.toLowerCase()}`)
+      }
+    } catch {
+      toast('error', 'Network error')
+    }
+    setSaving(null)
+  }
+
+  async function resetPromptToDefault(key: string, defaultValue: string, label: string, setCurrent: (v: string) => void, setSaved: (v: string) => void) {
+    setSaving(key)
+    try {
+      // Delete the setting so the code falls back to the hardcoded default
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value: null }),
+      })
+      if (res.ok) {
+        setCurrent('')
+        setSaved('')
+        toast('success', `${label} reset to default`)
+      } else {
+        toast('error', `Failed to reset ${label.toLowerCase()}`)
+      }
+    } catch {
+      toast('error', 'Network error')
+    }
+    setSaving(null)
+  }
+
   // ── Fix dates handler ──
 
   async function handleBulkFixDates() {
@@ -548,6 +604,7 @@ export default function SettingsPage() {
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'pipeline', label: 'Pipeline' },
+    { key: 'prompts', label: 'Prompts' },
     { key: 'shows', label: 'Shows', count: shows.length },
     { key: 'compliance', label: 'Compliance' },
     { key: 'corrections', label: 'Corrections', count: corrections.length },
@@ -834,6 +891,170 @@ export default function SettingsPage() {
               </div>
               {fixDatesResult && (
                 <p className="text-sm text-green-600 dark:text-green-400 mt-2">{fixDatesResult}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════ */}
+      {/* Prompts Tab */}
+      {/* ════════════════════════════════════════════════════ */}
+      {activeTab === 'prompts' && (
+        <div className="space-y-6">
+          <p className="text-sm text-gray-600 dark:text-warm-400">
+            Edit the AI prompts used by the pipeline. Changes take effect on the next processing run. If a prompt is empty, the built-in default is used.
+          </p>
+
+          {/* Summarization Prompt */}
+          <div className="bg-white rounded-lg shadow p-4 space-y-3 dark:bg-surface-raised dark:shadow-card-dark">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-warm-100">Summarization Prompt</h3>
+                <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
+                  System prompt sent to OpenAI when summarizing each episode transcript. Controls headline, summary, host/guest extraction, and issue categorization.
+                </p>
+              </div>
+            </div>
+            <div className={summarizationPrompt !== savedSummarizationPrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
+              <textarea
+                value={summarizationPrompt || ''}
+                onChange={(e) => setSummarizationPrompt(e.target.value)}
+                placeholder={DEFAULT_SUMMARIZATION_PROMPT}
+                rows={16}
+                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 placeholder:text-gray-300 dark:placeholder:text-warm-600"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => savePrompt('summarization_prompt', summarizationPrompt, 'Summarization prompt', setSavedSummarizationPrompt)}
+                disabled={saving === 'summarization_prompt' || summarizationPrompt === savedSummarizationPrompt}
+                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+              >
+                {saving === 'summarization_prompt' ? 'Saving...' : 'Save'}
+              </button>
+              {summarizationPrompt !== savedSummarizationPrompt && (
+                <button
+                  onClick={() => setSummarizationPrompt(savedSummarizationPrompt)}
+                  className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-300"
+                >
+                  Discard changes
+                </button>
+              )}
+              <div className="flex-1" />
+              {summarizationPrompt ? (
+                <button
+                  onClick={() => resetPromptToDefault('summarization_prompt', DEFAULT_SUMMARIZATION_PROMPT, 'Summarization prompt', setSummarizationPrompt, setSavedSummarizationPrompt)}
+                  disabled={saving === 'summarization_prompt'}
+                  className="px-3 py-1.5 text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                >
+                  Reset to default
+                </button>
+              ) : (
+                <span className="text-xs text-green-600 dark:text-green-400">Using built-in default</span>
+              )}
+            </div>
+            {!summarizationPrompt && (
+              <button
+                onClick={() => setSummarizationPrompt(DEFAULT_SUMMARIZATION_PROMPT)}
+                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Load default into editor to customize
+              </button>
+            )}
+          </div>
+
+          {/* Curation Prompt */}
+          <div className="bg-white rounded-lg shadow p-4 space-y-3 dark:bg-surface-raised dark:shadow-card-dark">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-warm-100">Curation Prompt</h3>
+                <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
+                  System prompt sent to OpenAI when selecting episodes for the QIR draft. Controls how entries are prioritized and filtered for the final report.
+                </p>
+              </div>
+            </div>
+            <div className={curationPrompt !== savedCurationPrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
+              <textarea
+                value={curationPrompt || ''}
+                onChange={(e) => setCurationPrompt(e.target.value)}
+                placeholder={DEFAULT_CURATION_PROMPT}
+                rows={12}
+                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 placeholder:text-gray-300 dark:placeholder:text-warm-600"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => savePrompt('curation_prompt', curationPrompt, 'Curation prompt', setSavedCurationPrompt)}
+                disabled={saving === 'curation_prompt' || curationPrompt === savedCurationPrompt}
+                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+              >
+                {saving === 'curation_prompt' ? 'Saving...' : 'Save'}
+              </button>
+              {curationPrompt !== savedCurationPrompt && (
+                <button
+                  onClick={() => setCurationPrompt(savedCurationPrompt)}
+                  className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-300"
+                >
+                  Discard changes
+                </button>
+              )}
+              <div className="flex-1" />
+              {curationPrompt ? (
+                <button
+                  onClick={() => resetPromptToDefault('curation_prompt', DEFAULT_CURATION_PROMPT, 'Curation prompt', setCurationPrompt, setSavedCurationPrompt)}
+                  disabled={saving === 'curation_prompt'}
+                  className="px-3 py-1.5 text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                >
+                  Reset to default
+                </button>
+              ) : (
+                <span className="text-xs text-green-600 dark:text-green-400">Using built-in default</span>
+              )}
+            </div>
+            {!curationPrompt && (
+              <button
+                onClick={() => setCurationPrompt(DEFAULT_CURATION_PROMPT)}
+                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Load default into editor to customize
+              </button>
+            )}
+          </div>
+
+          {/* Compliance Prompt */}
+          <div className="bg-white rounded-lg shadow p-4 space-y-3 dark:bg-surface-raised dark:shadow-card-dark">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-warm-100">Compliance Prompt</h3>
+                <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
+                  System prompt for AI-powered compliance checks (payola/plugola, sponsor ID, indecency). Also editable from the Compliance tab.
+                </p>
+              </div>
+            </div>
+            <div className={compliancePrompt !== savedCompliancePrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
+              <textarea
+                value={compliancePrompt}
+                onChange={(e) => setCompliancePrompt(e.target.value)}
+                rows={10}
+                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={saveCompliancePrompt}
+                disabled={saving === 'compliance_prompt' || compliancePrompt === savedCompliancePrompt}
+                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+              >
+                {saving === 'compliance_prompt' ? 'Saving...' : 'Save'}
+              </button>
+              {compliancePrompt !== savedCompliancePrompt && (
+                <button
+                  onClick={() => setCompliancePrompt(savedCompliancePrompt)}
+                  className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-300"
+                >
+                  Discard changes
+                </button>
               )}
             </div>
           </div>
