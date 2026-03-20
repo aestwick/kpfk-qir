@@ -2,7 +2,7 @@ import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
-import { getSetting } from '../lib/settings'
+import { getSetting, getCurationPrompt } from '../lib/settings'
 import {
   episodeToQirEntry,
   formatFullReport,
@@ -10,20 +10,6 @@ import {
   getQuarterDateRange,
   type QirEntry,
 } from '../lib/qir-format'
-
-const CURATION_SYSTEM_PROMPT = `You are an expert public radio producer helping select the most significant programming entries for an FCC Quarterly Issues Report.
-
-You will receive a list of radio program entries grouped by issue category. For each category, select up to the specified maximum number of entries that best demonstrate community service.
-
-SELECTION CRITERIA (in order of priority):
-1. Variety of shows — avoid picking many entries from the same show
-2. Substantive content — clear topics, identified guests, meaningful descriptions
-3. Date range — spread across the quarter, not clustered in one period
-4. EXCLUDE: pledge drives, promotions, entertainment without clear community issue connection
-
-OUTPUT: Return ONLY valid JSON. No markdown, no extra text.
-Return an object where keys are category names and values are arrays of episode IDs that should be included.
-Example: {"Civil Rights / Social Justice": [123, 456, 789], "Health": [101, 202]}`
 
 export interface GenerateQirOptions {
   year: number
@@ -46,6 +32,7 @@ export async function processGenerateQir(job: Job) {
   const openai = new OpenAI({ apiKey: openaiKey })
   const { start, end } = getQuarterDateRange(year, quarter)
 
+  const curationSystemPrompt = await getCurationPrompt()
   const maxPerCategory =
     (await getSetting<number>('max_entries_per_category')) ?? 12
   const issueCategories =
@@ -123,7 +110,7 @@ ${categorySummaries.join('\n')}`
   const response = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: CURATION_SYSTEM_PROMPT },
+      { role: 'system', content: curationSystemPrompt },
       { role: 'user', content: userMessage },
     ],
     temperature: 0.3,
