@@ -186,14 +186,12 @@ export default function SettingsPage() {
         setCompliancePrompt(data.settings.compliance_prompt as string)
         setSavedCompliancePrompt(data.settings.compliance_prompt as string)
       }
-      if (data.settings?.summarization_prompt) {
-        setSummarizationPrompt(data.settings.summarization_prompt as string)
-        setSavedSummarizationPrompt(data.settings.summarization_prompt as string)
-      }
-      if (data.settings?.curation_prompt) {
-        setCurationPrompt(data.settings.curation_prompt as string)
-        setSavedCurationPrompt(data.settings.curation_prompt as string)
-      }
+      const sumPrompt = (data.settings?.summarization_prompt as string) || DEFAULT_SUMMARIZATION_PROMPT
+      setSummarizationPrompt(sumPrompt)
+      setSavedSummarizationPrompt(sumPrompt)
+      const curPrompt = (data.settings?.curation_prompt as string) || DEFAULT_CURATION_PROMPT
+      setCurationPrompt(curPrompt)
+      setSavedCurationPrompt(curPrompt)
     }
     if (correctionsRes.ok) {
       const data = await correctionsRes.json()
@@ -922,7 +920,7 @@ export default function SettingsPage() {
                 onChange={(e) => setSummarizationPrompt(e.target.value)}
                 placeholder={DEFAULT_SUMMARIZATION_PROMPT}
                 rows={16}
-                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 placeholder:text-gray-300 dark:placeholder:text-warm-600"
+                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 placeholder:text-gray-400 dark:placeholder:text-warm-500 placeholder:whitespace-pre-wrap"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -942,26 +940,14 @@ export default function SettingsPage() {
                 </button>
               )}
               <div className="flex-1" />
-              {summarizationPrompt ? (
-                <button
-                  onClick={() => resetPromptToDefault('summarization_prompt', DEFAULT_SUMMARIZATION_PROMPT, 'Summarization prompt', setSummarizationPrompt, setSavedSummarizationPrompt)}
-                  disabled={saving === 'summarization_prompt'}
-                  className="px-3 py-1.5 text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                >
-                  Reset to default
-                </button>
-              ) : (
-                <span className="text-xs text-green-600 dark:text-green-400">Using built-in default</span>
-              )}
-            </div>
-            {!summarizationPrompt && (
               <button
-                onClick={() => setSummarizationPrompt(DEFAULT_SUMMARIZATION_PROMPT)}
-                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                onClick={() => resetPromptToDefault('summarization_prompt', DEFAULT_SUMMARIZATION_PROMPT, 'Summarization prompt', setSummarizationPrompt, setSavedSummarizationPrompt)}
+                disabled={saving === 'summarization_prompt' || summarizationPrompt === DEFAULT_SUMMARIZATION_PROMPT}
+                className="px-3 py-1.5 text-xs text-red-600 hover:text-red-800 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
               >
-                Load default into editor to customize
+                Reset to default
               </button>
-            )}
+            </div>
           </div>
 
           {/* Curation Prompt */}
@@ -980,7 +966,7 @@ export default function SettingsPage() {
                 onChange={(e) => setCurationPrompt(e.target.value)}
                 placeholder={DEFAULT_CURATION_PROMPT}
                 rows={12}
-                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 placeholder:text-gray-300 dark:placeholder:text-warm-600"
+                className="w-full border rounded px-3 py-2 text-sm font-mono leading-relaxed dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 placeholder:text-gray-400 dark:placeholder:text-warm-500 placeholder:whitespace-pre-wrap"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -1000,26 +986,14 @@ export default function SettingsPage() {
                 </button>
               )}
               <div className="flex-1" />
-              {curationPrompt ? (
-                <button
-                  onClick={() => resetPromptToDefault('curation_prompt', DEFAULT_CURATION_PROMPT, 'Curation prompt', setCurationPrompt, setSavedCurationPrompt)}
-                  disabled={saving === 'curation_prompt'}
-                  className="px-3 py-1.5 text-xs text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
-                >
-                  Reset to default
-                </button>
-              ) : (
-                <span className="text-xs text-green-600 dark:text-green-400">Using built-in default</span>
-              )}
-            </div>
-            {!curationPrompt && (
               <button
-                onClick={() => setCurationPrompt(DEFAULT_CURATION_PROMPT)}
-                className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                onClick={() => resetPromptToDefault('curation_prompt', DEFAULT_CURATION_PROMPT, 'Curation prompt', setCurationPrompt, setSavedCurationPrompt)}
+                disabled={saving === 'curation_prompt' || curationPrompt === DEFAULT_CURATION_PROMPT}
+                className="px-3 py-1.5 text-xs text-red-600 hover:text-red-800 disabled:opacity-50 dark:text-red-400 dark:hover:text-red-300"
               >
-                Load default into editor to customize
+                Reset to default
               </button>
-            )}
+            </div>
           </div>
 
           {/* Compliance Prompt */}
