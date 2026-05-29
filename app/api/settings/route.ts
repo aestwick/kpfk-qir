@@ -46,22 +46,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ shows })
     }
 
-    // Default: return qir_settings (global config — left unscoped this phase)
-    const { data, error } = await supabaseAdmin
-      .from('qir_settings')
-      .select('*')
-      .order('key')
+    // Default: return the EFFECTIVE settings for the active station — global
+    // qir_settings overlaid with this station's station_settings overrides.
+    const [globalRes, overrideRes] = await Promise.all([
+      supabaseAdmin.from('qir_settings').select('*').order('key'),
+      supabase.from('station_settings').select('key, value').eq('station_id', stationId),
+    ])
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    if (globalRes.error) {
+      return NextResponse.json({ error: globalRes.error.message }, { status: 500 })
+    }
+    if (overrideRes.error) {
+      return NextResponse.json({ error: overrideRes.error.message }, { status: 500 })
     }
 
     const settings: Record<string, unknown> = {}
-    for (const row of data ?? []) {
+    for (const row of globalRes.data ?? []) {
+      settings[row.key] = row.value
+    }
+    // Per-station override wins.
+    for (const row of overrideRes.data ?? []) {
       settings[row.key] = row.value
     }
 
-    return NextResponse.json({ settings, rows: data })
+    return NextResponse.json({ settings, rows: globalRes.data })
   } catch (err) {
     console.error('GET /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 })
@@ -72,6 +80,7 @@ export async function PUT(request: NextRequest) {
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
 
     const body = await request.json()
     const { key, value } = body
@@ -80,10 +89,11 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'key is required' }, { status: 400 })
     }
 
-    // qir_settings is global config this phase — written with service role.
-    const { error } = await supabaseAdmin
-      .from('qir_settings')
-      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    // Settings edits are saved as per-station overrides in station_settings;
+    // global qir_settings remains the fallback layer (resolved in lib/settings).
+    const { error } = await supabase
+      .from('station_settings')
+      .upsert({ station_id: stationId, key, value, updated_at: new Date().toISOString() }, { onConflict: 'station_id,key' })
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

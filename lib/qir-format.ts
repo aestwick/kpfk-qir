@@ -58,10 +58,11 @@ export function getQuarterDateRange(year: number, quarter: number): { start: str
 export function formatFullReport(
   entries: QirEntry[],
   year: number,
-  quarter: number
+  quarter: number,
+  stationName: string
 ): string {
   const { label } = getQuarterDateRange(year, quarter)
-  const header = `KPFK, Los Angeles - Quarterly Issues Report\n${label}\n`
+  const header = `${stationName} - Quarterly Issues Report\n${label}\n`
   const separator = '='.repeat(60)
 
   const grouped = groupByCategory(entries)
@@ -81,9 +82,10 @@ export function formatFullReport(
 export function formatCuratedReport(
   entries: QirEntry[],
   year: number,
-  quarter: number
+  quarter: number,
+  stationName: string
 ): string {
-  return formatFullReport(entries, year, quarter)
+  return formatFullReport(entries, year, quarter, stationName)
 }
 
 function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {

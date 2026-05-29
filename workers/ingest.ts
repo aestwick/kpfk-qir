@@ -242,7 +242,7 @@ export async function processIngest(job: Job) {
   }
   console.log(`[ingest] starting RSS fetch for ${station.slug}...`)
 
-  const excludedCategories = await getExcludedCategories()
+  const excludedCategories = await getExcludedCategories(stationId)
 
   // Get this station's active shows, excluding Music/Español
   const { data: shows, error: showsErr } = await supabaseAdmin

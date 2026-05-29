@@ -38,9 +38,9 @@ export async function processSummarize(job: Job) {
   if (!stationId) throw new Error('[summarize] stationId is required in job data')
 
   const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
-  const excludedCategories = await getExcludedCategories()
-  const batchSize = await getSummarizeBatchSize()
-  const systemPrompt = await getSummarizationPrompt()
+  const excludedCategories = await getExcludedCategories(stationId)
+  const batchSize = await getSummarizeBatchSize(stationId)
+  const systemPrompt = await getSummarizationPrompt(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
   // Get candidate transcribed episodes from current quarter (including those with null

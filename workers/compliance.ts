@@ -324,9 +324,9 @@ export async function processCompliance(job: Job) {
   const showKey = job.data?.show_key as string | undefined
   console.log(`[compliance] starting batch for ${station.slug}...${showKey ? ` (show: ${showKey})` : ''}`)
 
-  const checksEnabled = await getComplianceChecksEnabled()
-  const compliancePrompt = await getCompliancePrompt()
-  const batchSize = await getSummarizeBatchSize()
+  const checksEnabled = await getComplianceChecksEnabled(stationId)
+  const compliancePrompt = await getCompliancePrompt(stationId)
+  const batchSize = await getSummarizeBatchSize(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
   // Build query — when processing a specific show, include already-checked episodes

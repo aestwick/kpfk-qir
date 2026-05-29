@@ -322,7 +322,7 @@ export async function GET(request: NextRequest) {
       .map((r) => r.issue_category)
       .filter(Boolean)
   )
-  const allIssueCategories = await getIssueCategories()
+  const allIssueCategories = await getIssueCategories(stationId)
 
   // Compliance summary
   const complianceFlagCounts: Record<string, { count: number; critical: number }> = {}

@@ -165,8 +165,8 @@ export async function processTranscribe(job: Job) {
   if (!stationId) throw new Error('[transcribe] stationId is required in job data')
   console.log(`[transcribe] starting batch for station ${stationId}...`)
 
-  const excludedCategories = await getExcludedCategories()
-  const batchSize = await getTranscribeBatchSize()
+  const excludedCategories = await getExcludedCategories(stationId)
+  const batchSize = await getTranscribeBatchSize(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
   // Get candidate pending episodes from current quarter (including those with null
