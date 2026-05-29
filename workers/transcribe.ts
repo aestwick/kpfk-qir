@@ -7,6 +7,7 @@ import * as os from 'os'
 import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
+import { isSpendLimitError } from '../lib/retry-policy'
 
 const execFileAsync = promisify(execFile)
 
@@ -351,12 +352,15 @@ export async function processTranscribe(job: Job) {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       console.error(`[transcribe] ep ${episode.id} failed:`, errMsg)
+      // A spend-limit block is org-wide, not this episode's fault — don't spend
+      // a retry on it, or a billing outage will eventually mark the backlog dead.
+      const spendBlocked = isSpendLimitError(errMsg)
       await supabaseAdmin
         .from('episode_log')
         .update({
           status: 'failed',
           error_message: errMsg.slice(0, 1000),
-          retry_count: (episode.retry_count ?? 0) + 1,
+          retry_count: spendBlocked ? (episode.retry_count ?? 0) : (episode.retry_count ?? 0) + 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)
