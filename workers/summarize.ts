@@ -39,25 +39,48 @@ export async function processSummarize(job: Job) {
   const systemPrompt = await getSummarizationPrompt()
   const { start, end } = getCurrentQuarterBounds()
 
-  // Get transcribed episodes from current quarter (including those with null air_date
-  // that were created during this quarter — older ingests didn't populate air_date)
-  const { data: episodes, error } = await supabaseAdmin
+  // Get candidate transcribed episodes from current quarter (including those with null
+  // air_date that were created during this quarter — older ingests didn't populate it)
+  const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
-    .select('*')
+    .select('id, category')
     .eq('status', 'transcribed')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
     .limit(batchSize)
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!episodes?.length) {
+  if (!candidates?.length) {
     console.log('[summarize] no transcribed episodes')
     return { summarized: 0 }
   }
 
-  const filteredEpisodes = episodes.filter(
-    (ep) => !excludedCategories.some((exc) => ep.category?.includes(exc))
-  )
+  // Drop excluded categories before claiming so they stay transcribed (not stuck mid-stage)
+  const claimIds = candidates
+    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
+    .map((ep) => ep.id)
+
+  if (!claimIds.length) {
+    console.log('[summarize] only excluded-category episodes transcribed')
+    return { summarized: 0 }
+  }
+
+  // Atomically claim: the `.eq('status', 'transcribed')` guard ensures overlapping
+  // runs can't grab the same episode (see transcribe.ts for the full rationale).
+  const { data: episodes, error: claimError } = await supabaseAdmin
+    .from('episode_log')
+    .update({ status: 'summarizing', updated_at: new Date().toISOString() })
+    .in('id', claimIds)
+    .eq('status', 'transcribed')
+    .select('*')
+
+  if (claimError) throw new Error(`Failed to claim episodes: ${claimError.message}`)
+  if (!episodes?.length) {
+    console.log('[summarize] no episodes claimed (already taken by another run)')
+    return { summarized: 0 }
+  }
+
+  const filteredEpisodes = episodes
 
   // Batch-fetch all transcripts upfront to avoid N+1 queries
   const epIds = filteredEpisodes.map((ep) => ep.id)
