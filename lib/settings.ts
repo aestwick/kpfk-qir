@@ -15,6 +15,12 @@ function parseJsonValue(raw: unknown): unknown {
   return raw
 }
 
+// The cache is keyed by station so stations never read each other's values.
+// One canonical key builder, used by every read/write/invalidate path.
+function cacheKeyFor(key: string, stationId?: string): string {
+  return `${stationId ?? 'global'}:${key}`
+}
+
 /**
  * Resolve a setting. When stationId is given, resolution order is:
  *   1. station_settings(station_id, key)   — this station's override
@@ -27,7 +33,7 @@ function parseJsonValue(raw: unknown): unknown {
  * each other's values.
  */
 export async function getSetting<T = unknown>(key: string, stationId?: string): Promise<T | null> {
-  const cacheKey = `${stationId ?? 'global'}:${key}`
+  const cacheKey = cacheKeyFor(key, stationId)
   const cached = settingsCache.get(cacheKey)
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.value as T
@@ -69,6 +75,23 @@ export async function getSetting<T = unknown>(key: string, stationId?: string): 
   return null
 }
 
+/**
+ * Drop a cached setting (or the whole cache) so the next read hits the DB.
+ * Call after writing a setting so changes like pause/resume take effect
+ * immediately instead of lagging up to CACHE_TTL_MS. Cache keys are
+ * station-prefixed, so clear this key for every station.
+ */
+export function invalidateSetting(key?: string): void {
+  if (!key) {
+    settingsCache.clear()
+    return
+  }
+  const suffix = `:${key}`
+  for (const k of Array.from(settingsCache.keys())) {
+    if (k.endsWith(suffix)) settingsCache.delete(k)
+  }
+}
+
 export async function getExcludedCategories(stationId: string): Promise<string[]> {
   return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
 }
@@ -104,7 +127,28 @@ export async function isComplianceBlocking(stationId: string): Promise<boolean> 
 // Pipeline pause is a GLOBAL operational flag — the worker pool is shared across
 // stations, so pausing pauses everything. Kept global (no stationId) by design.
 export async function isPipelinePaused(): Promise<boolean> {
-  return (await getSetting<boolean>('pipeline_paused')) ?? false
+  // Read fresh every time — never cache. This is a control signal toggled from
+  // the dashboard and polled by both the UI and workers; a stale cached value
+  // makes Pause/Resume appear not to take effect (and shows a "PAUSED" badge
+  // over an actively-running pipeline). A single cheap boolean read is worth it.
+  const { data } = await supabaseAdmin
+    .from('qir_settings')
+    .select('value')
+    .eq('key', 'pipeline_paused')
+    .single()
+
+  let value: unknown = data?.value
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      // keep as-is
+    }
+  }
+  // Refresh the shared cache too, so getSetting('pipeline_paused') callers stay
+  // consistent — using the same station-prefixed key getSetting reads (global).
+  settingsCache.set(cacheKeyFor('pipeline_paused'), { value: value ?? false, fetchedAt: Date.now() })
+  return value === true
 }
 
 /** Replace the {{STATION_NAME}} placeholder used in parameterized prompts. */

@@ -33,7 +33,7 @@ This plan is the source of truth. Execute it **phase by phase, in order**. Each 
 
 ### Working branch
 
-- 🔒 **HARD — Develop on `claude/zealous-mayer-XuATX`.** Do not push to `main` or any other branch without explicit permission. Create a PR only if the user explicitly asks.
+- 🔒 **HARD — Develop on `claude/eager-ride-SKyzU`.** Do not push to `main` or any other branch without explicit permission. Create a PR only if the user explicitly asks.
 
 ### Recommended harness enforcement (optional, do once before starting)
 
