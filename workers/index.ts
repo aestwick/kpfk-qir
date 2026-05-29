@@ -98,15 +98,15 @@ transcribeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', {}, { delay: 5 * 60 * 1000 })
+      await transcribeQueue.add('transcribe-backoff', { stationId: job.data?.stationId }, { delay: 5 * 60 * 1000 })
     } else {
-      await transcribeQueue.add('transcribe-continue', job.data?.chain ? { source: job.data.source, chain: true } : {})
+      await transcribeQueue.add('transcribe-continue', { stationId: job.data?.stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) })
     }
   }
   // Auto-chain to summarize when triggered from audit
   if (job.data?.source === 'audit' && job.data?.chain && count > 0) {
     console.log('[transcribe] audit auto-chain → summarize')
-    await summarizeQueue.add('audit-summarize', { source: 'audit', chain: true })
+    await summarizeQueue.add('audit-summarize', { stationId: job.data?.stationId, source: 'audit', chain: true })
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -126,15 +126,15 @@ summarizeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', {}, { delay: 5 * 60 * 1000 })
+      await summarizeQueue.add('summarize-backoff', { stationId: job.data?.stationId }, { delay: 5 * 60 * 1000 })
     } else {
-      await summarizeQueue.add('summarize-continue', job.data?.chain ? { source: job.data.source, chain: true } : {})
+      await summarizeQueue.add('summarize-continue', { stationId: job.data?.stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) })
     }
   }
   // Auto-chain to compliance when triggered from audit
   if (job.data?.source === 'audit' && job.data?.chain && count > 0) {
     console.log('[summarize] audit auto-chain → compliance')
-    await complianceQueue.add('audit-compliance', { source: 'audit' })
+    await complianceQueue.add('audit-compliance', { stationId: job.data?.stationId, source: 'audit' })
   }
 })
 summarizeWorker.on('failed', (job, err) => {
@@ -152,7 +152,7 @@ complianceWorker.on('completed', async (job) => {
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
-    await complianceQueue.add('compliance-continue', {})
+    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId })
   }
 })
 complianceWorker.on('failed', (job, err) => {

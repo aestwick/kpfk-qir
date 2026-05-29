@@ -159,7 +159,11 @@ export async function processTranscribe(job: Job) {
     console.log('[transcribe] pipeline paused — skipping')
     return { transcribed: 0, remaining: false, skipped: true }
   }
-  console.log('[transcribe] starting batch...')
+  // Workers run with the service-role client (RLS bypassed), so the station_id
+  // filter below is the ONLY guard against processing another station's episodes.
+  const stationId = job.data?.stationId as string | undefined
+  if (!stationId) throw new Error('[transcribe] stationId is required in job data')
+  console.log(`[transcribe] starting batch for station ${stationId}...`)
 
   const excludedCategories = await getExcludedCategories()
   const batchSize = await getTranscribeBatchSize()
@@ -170,6 +174,7 @@ export async function processTranscribe(job: Job) {
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
+    .eq('station_id', stationId)
     .eq('status', 'pending')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
@@ -197,6 +202,7 @@ export async function processTranscribe(job: Job) {
   const { data: episodes, error: claimError } = await supabaseAdmin
     .from('episode_log')
     .update({ status: 'transcribing', updated_at: new Date().toISOString() })
+    .eq('station_id', stationId)
     .in('id', claimIds)
     .eq('status', 'pending')
     .select('*')

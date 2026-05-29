@@ -3,6 +3,8 @@ import { XMLParser } from 'fast-xml-parser'
 import { supabaseAdmin } from '../lib/supabase'
 import { getExcludedCategories, isPipelinePaused } from '../lib/settings'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
+import { listStationIds, getStation } from '../lib/stations'
+import { ingestQueue } from '../lib/queue'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -58,10 +60,15 @@ function toPacificDate(utcDateStr: string): {
   }
 }
 
-async function processShow(show: { key: string; show_name: string; category: string }): Promise<number> {
+async function processShow(
+  show: { key: string; show_name: string; category: string },
+  station: { id: string; rssBaseUrl: string; mp3Prefix: string }
+): Promise<number> {
   let newCount = 0
   try {
-    const rssUrl = `https://archive.kpfk.org/getrss.php?id=${show.key}`
+    // rss_base_url is stored as the full prefix up to '?id=' (see migration 012),
+    // so the show key is simply appended.
+    const rssUrl = `${station.rssBaseUrl}${show.key}`
     const response = await fetch(rssUrl, { signal: AbortSignal.timeout(30000) })
 
     if (!response.ok) {
@@ -93,10 +100,11 @@ async function processShow(show: { key: string; show_name: string; category: str
         ? Math.round(Number(itunesDuration) / 60)
         : null
 
-      // Check for existing episode by mp3_url
+      // Check for existing episode by mp3_url within this station
       const { data: existing } = await supabaseAdmin
         .from('episode_log')
         .select('id')
+        .eq('station_id', station.id)
         .eq('mp3_url', mp3Url)
         .limit(1)
 
@@ -112,7 +120,7 @@ async function processShow(show: { key: string; show_name: string; category: str
         airEnd: null as string | null,
       }
 
-      const urlParsed = parseMp3Url(mp3Url)
+      const urlParsed = parseMp3Url(mp3Url, station.mp3Prefix)
 
       if (pubDate) {
         const p = toPacificDate(pubDate)
@@ -160,6 +168,7 @@ async function processShow(show: { key: string; show_name: string; category: str
       const { error: insertErr } = await supabaseAdmin
         .from('episode_log')
         .insert({
+          station_id: station.id,
           show_key: show.key,
           show_name: show.show_name,
           category: show.category,
@@ -204,14 +213,42 @@ export async function processIngest(job: Job) {
     console.log('[ingest] pipeline paused — skipping')
     return { newEpisodes: 0, skipped: true }
   }
-  console.log('[ingest] starting RSS fetch...')
+
+  const stationId = job.data?.stationId as string | undefined
+
+  // Cron/startup tick (no stationId): fan out one ingest job per station.
+  if (!stationId) {
+    const ids = await listStationIds()
+    for (const id of ids) {
+      await ingestQueue.add('ingest-station', { stationId: id })
+    }
+    console.log(`[ingest] dispatched ingest for ${ids.length} station(s)`)
+    return { dispatched: ids.length }
+  }
+
+  const station = await getStation(stationId)
+  if (!station) throw new Error(`[ingest] station ${stationId} not found`)
+  // rss_base_url is required to know where to pull feeds from. Skip visibly
+  // (not silently) for stations that haven't been configured yet.
+  if (!station.rss_base_url) {
+    console.warn(`[ingest] station ${station.slug} has no rss_base_url configured — skipping`)
+    return { newEpisodes: 0, skipped: 'no rss_base_url' }
+  }
+  // mp3_filename_prefix defaults to 'kpfk' for backward compatibility (documented).
+  const stationCtx = {
+    id: station.id,
+    rssBaseUrl: station.rss_base_url,
+    mp3Prefix: station.mp3_filename_prefix ?? 'kpfk',
+  }
+  console.log(`[ingest] starting RSS fetch for ${station.slug}...`)
 
   const excludedCategories = await getExcludedCategories()
 
-  // Get all active shows, excluding Music/Español
+  // Get this station's active shows, excluding Music/Español
   const { data: shows, error: showsErr } = await supabaseAdmin
     .from('show_keys')
     .select('*')
+    .eq('station_id', stationId)
     .eq('active', true)
 
   if (showsErr) throw new Error(`Failed to fetch shows: ${showsErr.message}`)
@@ -227,7 +264,7 @@ export async function processIngest(job: Job) {
 
   for (let i = 0; i < activeShows.length; i += CONCURRENCY) {
     const batch = activeShows.slice(i, i + CONCURRENCY)
-    const results = await Promise.allSettled(batch.map((show) => processShow(show)))
+    const results = await Promise.allSettled(batch.map((show) => processShow(show, stationCtx)))
     for (const result of results) {
       if (result.status === 'fulfilled') totalNew += result.value
     }

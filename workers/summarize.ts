@@ -33,6 +33,10 @@ export async function processSummarize(job: Job) {
   const openaiKey = process.env.OPENAI_API_KEY
   if (!openaiKey) throw new Error('OPENAI_API_KEY not set')
 
+  // Service-role client bypasses RLS, so the station_id filter is the only guard.
+  const stationId = job.data?.stationId as string | undefined
+  if (!stationId) throw new Error('[summarize] stationId is required in job data')
+
   const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
   const excludedCategories = await getExcludedCategories()
   const batchSize = await getSummarizeBatchSize()
@@ -44,6 +48,7 @@ export async function processSummarize(job: Job) {
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
+    .eq('station_id', stationId)
     .eq('status', 'transcribed')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
@@ -70,6 +75,7 @@ export async function processSummarize(job: Job) {
   const { data: episodes, error: claimError } = await supabaseAdmin
     .from('episode_log')
     .update({ status: 'summarizing', updated_at: new Date().toISOString() })
+    .eq('station_id', stationId)
     .in('id', claimIds)
     .eq('status', 'transcribed')
     .select('*')

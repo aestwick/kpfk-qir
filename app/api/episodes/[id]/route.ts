@@ -109,7 +109,13 @@ export async function PATCH(
         .eq('station_id', stationId)
         .single()
       if (!ep) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      const parsed = parseMp3Url(ep.mp3_url)
+      // MP3 filename prefix is station-specific; default to 'kpfk' if unset.
+      const { data: station } = await supabase
+        .from('stations')
+        .select('mp3_filename_prefix')
+        .eq('id', stationId)
+        .maybeSingle()
+      const parsed = parseMp3Url(ep.mp3_url, station?.mp3_filename_prefix ?? 'kpfk')
       if (!parsed) return NextResponse.json({ error: 'Could not parse date from URL' }, { status: 400 })
       const fields = dateFieldsFromUrl(parsed, ep.duration)
       await supabase

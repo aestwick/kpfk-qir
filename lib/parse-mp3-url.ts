@@ -1,14 +1,18 @@
 /**
  * Parse air date, time, and show key from archive MP3 URL.
- * Format: kpfk_YYMMDD_HHMMSSshowkey.mp3
+ * Format: <prefix>_YYMMDD_HHMMSSshowkey.mp3
  * e.g. kpfk_260106_233000casc.mp3 → 2026-01-06, 23:30:00, casc
+ *
+ * The filename prefix is station-specific (stations.mp3_filename_prefix). It
+ * defaults to 'kpfk' for backward compatibility when a station hasn't set one.
  */
-export function parseMp3Url(mp3Url: string): {
+export function parseMp3Url(mp3Url: string, filenamePrefix: string = 'kpfk'): {
   airDate: string
   airStart: string
   showKey: string
 } | null {
-  const match = mp3Url.match(/kpfk_(\d{6})_(\d{6})([a-zA-Z]+)\.mp3/)
+  const safePrefix = filenamePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = mp3Url.match(new RegExp(`${safePrefix}_(\\d{6})_(\\d{6})([a-zA-Z]+)\\.mp3`))
   if (!match) return null
 
   const [, datePart, timePart, showKey] = match

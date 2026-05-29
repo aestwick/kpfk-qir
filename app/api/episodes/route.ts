@@ -107,6 +107,13 @@ export async function POST(request: NextRequest) {
 
     if (body.action === 'bulk-fix-dates') {
       const { from, to } = body as { from?: string; to?: string }
+      // The MP3 filename prefix is station-specific; default to 'kpfk' if unset.
+      const { data: station } = await supabase
+        .from('stations')
+        .select('mp3_filename_prefix')
+        .eq('id', stationId)
+        .maybeSingle()
+      const mp3Prefix = station?.mp3_filename_prefix ?? 'kpfk'
       // Fetch episodes in date range, re-derive dates from MP3 URLs
       let query = supabase
         .from('episode_log')
@@ -120,7 +127,7 @@ export async function POST(request: NextRequest) {
 
       let fixed = 0
       for (const ep of episodes || []) {
-        const parsed = parseMp3Url(ep.mp3_url)
+        const parsed = parseMp3Url(ep.mp3_url, mp3Prefix)
         if (!parsed) continue
         const fields = dateFieldsFromUrl(parsed, ep.duration)
         const { error: updateErr } = await supabase
