@@ -14,6 +14,8 @@ import {
 export interface GenerateQirOptions {
   year: number
   quarter: number
+  /** Station this draft belongs to — scopes episodes and the stored draft. */
+  stationId: string
   /** If provided, only include episodes from these show_keys */
   includedShows?: string[]
   /** Custom guidance text appended to the AI curation prompt */
@@ -21,7 +23,8 @@ export interface GenerateQirOptions {
 }
 
 export async function processGenerateQir(job: Job) {
-  const { year, quarter, includedShows, guidance } = job.data as GenerateQirOptions
+  const { year, quarter, stationId, includedShows, guidance } = job.data as GenerateQirOptions
+  if (!stationId) throw new Error('stationId is required to generate a QIR draft')
   console.log(`[generate-qir] starting Q${quarter} ${year}...`)
   if (includedShows?.length) console.log(`[generate-qir] filtering to ${includedShows.length} shows`)
   if (guidance) console.log(`[generate-qir] custom guidance provided`)
@@ -52,6 +55,7 @@ export async function processGenerateQir(job: Job) {
   const { data: episodes, error } = await supabaseAdmin
     .from('episode_log')
     .select('*')
+    .eq('station_id', stationId)
     .in('status', ['summarized', 'compliance_checked'])
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('air_date', { ascending: true })
@@ -147,6 +151,7 @@ ${categorySummaries.join('\n')}`
   const { data: existingDrafts } = await supabaseAdmin
     .from('qir_drafts')
     .select('version')
+    .eq('station_id', stationId)
     .eq('year', year)
     .eq('quarter', quarter)
     .order('version', { ascending: false })

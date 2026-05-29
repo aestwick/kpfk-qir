@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
     const show = searchParams.get('show')
@@ -18,9 +22,10 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * limit
     const format = searchParams.get('format')
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('episode_log')
       .select('*', { count: 'exact' })
+      .eq('station_id', stationId)
       .order(sort, { ascending: order === 'asc' })
       .range(offset, offset + limit - 1)
 
@@ -80,12 +85,17 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
 
     if (body.action === 'bulk-retry') {
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('episode_log')
         .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
+        .eq('station_id', stationId)
         .eq('status', 'failed')
 
       if (error) {
@@ -98,9 +108,10 @@ export async function POST(request: NextRequest) {
     if (body.action === 'bulk-fix-dates') {
       const { from, to } = body as { from?: string; to?: string }
       // Fetch episodes in date range, re-derive dates from MP3 URLs
-      let query = supabaseAdmin
+      let query = supabase
         .from('episode_log')
         .select('id, mp3_url, duration, air_date')
+        .eq('station_id', stationId)
       if (from) query = query.gte('air_date', from)
       if (to) query = query.lte('air_date', to)
       const { data: episodes, error: fetchErr } = await query
@@ -112,10 +123,11 @@ export async function POST(request: NextRequest) {
         const parsed = parseMp3Url(ep.mp3_url)
         if (!parsed) continue
         const fields = dateFieldsFromUrl(parsed, ep.duration)
-        const { error: updateErr } = await supabaseAdmin
+        const { error: updateErr } = await supabase
           .from('episode_log')
           .update(fields)
           .eq('id', ep.id)
+          .eq('station_id', stationId)
         if (!updateErr) fixed++
       }
 

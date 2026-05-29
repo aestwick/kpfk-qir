@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 // GET — list QIR drafts, optionally filtered by year/quarter
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const year = searchParams.get('year')
     const quarter = searchParams.get('quarter')
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('qir_drafts')
       .select('*')
+      .eq('station_id', stationId)
       .order('created_at', { ascending: false })
 
     if (year) query = query.eq('year', parseInt(year))
@@ -34,6 +39,10 @@ export async function GET(request: NextRequest) {
 // POST — generate a new QIR draft or finalize/un-finalize
 export async function POST(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { stationId } = result.context
+
     const body = await request.json()
 
     if (body.action === 'generate') {
@@ -44,10 +53,10 @@ export async function POST(request: NextRequest) {
 
       // Import dynamically to avoid loading worker deps in API context
       const { processGenerateQir } = await import('@/workers/generate-qir')
-      const result = await processGenerateQir({
-        data: { year, quarter, includedShows, guidance },
-      } as any)
-      return NextResponse.json(result)
+      const generated = await processGenerateQir({
+        data: { year, quarter, includedShows, guidance, stationId },
+      } as Parameters<typeof processGenerateQir>[0])
+      return NextResponse.json(generated)
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
@@ -61,6 +70,10 @@ export async function POST(request: NextRequest) {
 // PATCH — finalize or un-finalize a draft, or update curated entries
 export async function PATCH(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { id, action } = body
 
@@ -70,25 +83,28 @@ export async function PATCH(request: NextRequest) {
 
     if (action === 'finalize') {
       // First un-finalize any existing final draft for this year/quarter
-      const { data: draft } = await supabaseAdmin
+      const { data: draft } = await supabase
         .from('qir_drafts')
         .select('year, quarter')
         .eq('id', id)
+        .eq('station_id', stationId)
         .single()
 
       if (draft) {
-        await supabaseAdmin
+        await supabase
           .from('qir_drafts')
           .update({ status: 'draft' })
+          .eq('station_id', stationId)
           .eq('year', draft.year)
           .eq('quarter', draft.quarter)
           .eq('status', 'final')
       }
 
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('qir_drafts')
         .update({ status: 'final', updated_at: new Date().toISOString() })
         .eq('id', id)
+        .eq('station_id', stationId)
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
@@ -97,10 +113,11 @@ export async function PATCH(request: NextRequest) {
     }
 
     if (action === 'unfinalize') {
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('qir_drafts')
         .update({ status: 'draft', updated_at: new Date().toISOString() })
         .eq('id', id)
+        .eq('station_id', stationId)
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
@@ -114,10 +131,11 @@ export async function PATCH(request: NextRequest) {
       if (curated_entries !== undefined) update.curated_entries = curated_entries
       if (curated_text !== undefined) update.curated_text = curated_text
 
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('qir_drafts')
         .update(update)
         .eq('id', id)
+        .eq('station_id', stationId)
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
@@ -135,6 +153,10 @@ export async function PATCH(request: NextRequest) {
 // DELETE — remove a draft
 export async function DELETE(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -142,10 +164,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'id required' }, { status: 400 })
     }
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('qir_drafts')
       .delete()
       .eq('id', parseInt(id))
+      .eq('station_id', stationId)
       .neq('status', 'final')
 
     if (error) {

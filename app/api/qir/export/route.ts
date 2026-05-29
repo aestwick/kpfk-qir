@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     const format = searchParams.get('format') ?? 'csv'
@@ -13,10 +17,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'id required' }, { status: 400 })
     }
 
-    const { data: draft, error } = await supabaseAdmin
+    const { data: draft, error } = await supabase
       .from('qir_drafts')
       .select('*')
       .eq('id', parseInt(id))
+      .eq('station_id', stationId)
       .single()
 
     if (error || !draft) {

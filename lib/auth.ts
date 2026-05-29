@@ -1,6 +1,6 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { SupabaseClient } from '@supabase/supabase-js'
-import { createServerClient } from '@/lib/supabase'
+import { createServerClient, supabaseAdmin } from '@/lib/supabase'
 import { StationRole } from '@/lib/types'
 
 // Header/cookie the dashboard uses to declare which station the request acts on.
@@ -126,4 +126,35 @@ export async function getStationContext(request: NextRequest): Promise<StationCo
       supabase,
     },
   }
+}
+
+/** Map a StationContextError to a JSON NextResponse with the right status. */
+export function stationErrorResponse(error: StationContextError): NextResponse {
+  return NextResponse.json({ error: error.error }, { status: error.status })
+}
+
+/**
+ * Resolve a station id from a URL-safe slug using the service-role client (no
+ * user JWT). For public/no-auth paths only — the SSE activity stream (scoped by
+ * the qir_station cookie) and public RSS feeds (scoped by an explicit ?station
+ * slug). Returns null when the slug is missing or unknown. Callers MUST handle
+ * null explicitly rather than defaulting to a station.
+ */
+export async function resolveStationIdBySlug(slug: string | null | undefined): Promise<string | null> {
+  if (!slug) return null
+  const { data, error } = await supabaseAdmin
+    .from('stations')
+    .select('id')
+    .eq('slug', slug)
+    .maybeSingle()
+  if (error) {
+    console.error(`resolveStationIdBySlug('${slug}') failed:`, error.message)
+    return null
+  }
+  return data?.id ?? null
+}
+
+/** Read the active-station slug from the qir_station cookie (SSE path). */
+export function stationSlugFromCookie(request: NextRequest): string | null {
+  return request.cookies.get(STATION_COOKIE)?.value ?? null
 }
