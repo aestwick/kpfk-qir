@@ -5,6 +5,7 @@ import { createBrowserClient } from '@/lib/supabase'
 import { usePathname } from 'next/navigation'
 import { ErrorBoundary } from '@/app/components/error-boundary'
 import { ToastProvider } from '@/app/components/toast'
+import { StationSwitcher } from '@/app/components/station-switcher'
 
 /* ─── Nav Icons (inline SVGs, 20x20) ─── */
 const icons = {
@@ -176,6 +177,9 @@ export default function DashboardLayout({
             </div>
           </div>
         </div>
+
+        {/* Station switcher (only shown when the user has more than one station) */}
+        <StationSwitcher />
 
         {/* Navigation */}
         <div className="flex-1 px-3 space-y-0.5 overflow-y-auto">

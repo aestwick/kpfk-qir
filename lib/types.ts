@@ -1,5 +1,35 @@
+export type StationRole = 'viewer' | 'editor' | 'admin'
+
+export interface Station {
+  id: string
+  slug: string
+  name: string
+  timezone: string | null
+  rss_base_url: string | null
+  mp3_filename_prefix: string | null
+  station_id_patterns: string[] | null
+  created_at: string
+}
+
+export interface StationUser {
+  id: number
+  station_id: string
+  user_id: string
+  role: StationRole
+  created_at: string
+}
+
+export interface StationSetting {
+  id: number
+  station_id: string
+  key: string
+  value: unknown
+  updated_at: string
+}
+
 export interface EpisodeLog {
   id: number
+  station_id: string
   show_key: string
   show_name: string | null
   category: string | null
@@ -29,6 +59,7 @@ export interface EpisodeLog {
 
 export interface ShowKey {
   id: number
+  station_id: string
   key: string
   show_name: string
   category: string | null
@@ -56,6 +87,7 @@ export interface Transcript {
 
 export interface UsageLog {
   id: number
+  station_id: string
   episode_id: number | null
   service: 'groq' | 'openai'
   model: string
@@ -77,6 +109,7 @@ export interface QirSetting {
 
 export interface QirDraft {
   id: number
+  station_id: string
   year: number
   quarter: number
   status: 'draft' | 'final'
@@ -105,6 +138,7 @@ export interface ComplianceFlag {
 
 export interface ComplianceWord {
   id: number
+  station_id: string
   word: string
   severity: 'warning' | 'critical'
   active: boolean
@@ -113,6 +147,7 @@ export interface ComplianceWord {
 
 export interface TranscriptCorrection {
   id: number
+  station_id: string
   wrong: string
   correct: string
   case_sensitive: boolean

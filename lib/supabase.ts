@@ -23,3 +23,17 @@ export function createBrowserClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 }
+
+// Request-scoped server client bound to a caller's access token, so Postgres
+// RLS applies to its queries. Used by API routes that serve a user action
+// (workers keep using supabaseAdmin, which bypasses RLS by design).
+export function createServerClient(accessToken: string) {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    }
+  )
+}
