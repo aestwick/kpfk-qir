@@ -192,7 +192,11 @@ export async function processTranscribe(job: Job) {
   for (let i = 0; i < filteredEpisodes.length; i++) {
     const episode = filteredEpisodes[i]
     await job.updateProgress({ current: i + 1, total: filteredEpisodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
-    const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}`)
+    // Unique temp dir per run — a deterministic per-episode path lets overlapping
+    // jobs (manual retry, continue-chain, BullMQ attempts, cron) delete each other's
+    // chunks mid-transcription, surfacing as ENOENT on a later chunk.
+    const runId = `${job.id ?? 'job'}-${Math.random().toString(36).slice(2, 10)}`
+    const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}-${runId}`)
     try {
       await fs.mkdir(tmpDir, { recursive: true })
 
