@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import dynamic from 'next/dynamic'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
@@ -316,7 +317,7 @@ export default function GenerateQirPage() {
   const fetchShows = useCallback(async () => {
     setShowsLoading(true)
     try {
-      const res = await fetch(
+      const res = await authedFetch(
         `/api/qir/shows?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`
       )
       if (res.ok) {
@@ -335,9 +336,9 @@ export default function GenerateQirPage() {
     setLoading(true)
     try {
       const [draftsRes, dashRes, settingsRes] = await Promise.all([
-        fetch(`/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
-        fetch('/api/dashboard'),
-        fetch('/api/settings'),
+        authedFetch(`/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
+        authedFetch('/api/dashboard'),
+        authedFetch('/api/settings'),
       ])
       if (draftsRes.ok) {
         const data = await draftsRes.json()
@@ -382,7 +383,7 @@ export default function GenerateQirPage() {
     setGenerating(true)
     try {
       const allSelected = selectedShows.size === availableShows.length
-      const res = await fetch('/api/qir', {
+      const res = await authedFetch('/api/qir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -422,7 +423,7 @@ export default function GenerateQirPage() {
     setConfirmFinalize(null)
     setActionLoading(action)
     try {
-      const res = await fetch('/api/qir', {
+      const res = await authedFetch('/api/qir', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: draftId, action }),
@@ -462,7 +463,7 @@ export default function GenerateQirPage() {
 
   async function saveEntries(entries: QirEntry[]) {
     if (!activeDraft) return
-    const res = await fetch('/api/qir', {
+    const res = await authedFetch('/api/qir', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

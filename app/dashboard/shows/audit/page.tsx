@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { authedFetch } from '@/lib/api-client'
 
 interface Show {
   key: string
@@ -114,7 +115,7 @@ export default function ShowAuditPage() {
 
   // Load shows list
   useEffect(() => {
-    fetch('/api/settings?resource=shows')
+    authedFetch('/api/settings?resource=shows')
       .then((r) => r.json())
       .then((data) => {
         setShows(data.shows ?? [])
@@ -141,7 +142,7 @@ export default function ShowAuditPage() {
         from: dateFrom,
         to: dateTo,
       })
-      const res = await fetch(`/api/shows/audit?${params}`)
+      const res = await authedFetch(`/api/shows/audit?${params}`)
       if (res.ok) {
         const data = await res.json()
         setAuditData(data)
@@ -173,7 +174,7 @@ export default function ShowAuditPage() {
 
     // Pre-flight: check if pipeline is paused or workers are responsive
     try {
-      const jobsCheck = await fetch('/api/jobs').then((r) => r.ok ? r.json() : null).catch(() => null)
+      const jobsCheck = await authedFetch('/api/jobs').then((r) => r.ok ? r.json() : null).catch(() => null)
       if (jobsCheck?.pipeline_paused) {
         setPipelinePaused(true)
         setProcessMessage('Cannot process — pipeline is paused. Unpause from the Jobs page first.')
@@ -195,7 +196,7 @@ export default function ShowAuditPage() {
     }
 
     try {
-      const res = await fetch('/api/shows/audit/process', {
+      const res = await authedFetch('/api/shows/audit/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -216,7 +217,7 @@ export default function ShowAuditPage() {
           // Fetch audit data and job status in parallel
           const [, jobsRes] = await Promise.all([
             fetchAudit(),
-            fetch('/api/jobs').then((r) => r.ok ? r.json() : null).catch(() => null),
+            authedFetch('/api/jobs').then((r) => r.ok ? r.json() : null).catch(() => null),
           ])
           setPollCount(count)
 

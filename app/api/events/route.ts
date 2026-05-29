@@ -1,5 +1,7 @@
+import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
+import { resolveStationIdBySlug, stationSlugFromCookie } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,11 +33,13 @@ function getCurrentQuarterBounds() {
   return { start, end }
 }
 
-async function getEpisodeBacklog() {
+async function getEpisodeBacklog(stationId: string) {
   const { start, end } = getCurrentQuarterBounds()
 
-  // Use count queries to avoid Supabase's default 1000-row limit
-  const baseQuery = () => supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).gte('air_date', start).lte('air_date', end)
+  // Use count queries to avoid Supabase's default 1000-row limit.
+  // EventSource can't carry a bearer token, so the SSE path uses the service
+  // role client scoped explicitly by the station resolved from the cookie.
+  const baseQuery = () => supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).gte('air_date', start).lte('air_date', end)
 
   const [pending, transcribed, summarized, complianceChecked, failed, total] = await Promise.all([
     baseQuery().eq('status', 'pending'),
@@ -68,7 +72,17 @@ async function getEpisodeBacklog() {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // SSE can't send an Authorization header, so resolve the active station from
+  // the qir_station cookie. Never default — return 400 if it's missing/unknown.
+  const slug = stationSlugFromCookie(request)
+  const resolved = await resolveStationIdBySlug(slug)
+  if (!resolved) {
+    return NextResponse.json({ error: 'No active station selected' }, { status: 400 })
+  }
+  // Capture as a non-null const so the type narrows inside the SSE closure below.
+  const stationId: string = resolved
+
   const encoder = new TextEncoder()
 
   // Shared cleanup state — accessible from both start() and cancel()
@@ -86,7 +100,7 @@ export async function GET() {
             getQueueCounts(transcribeQueue),
             getQueueCounts(summarizeQueue),
             getQueueCounts(complianceQueue),
-            getEpisodeBacklog(),
+            getEpisodeBacklog(stationId),
           ])
 
           const data = { ingest, transcribe, summarize, compliance, backlog }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic'
 // Query params: flag_type, severity, quarter (e.g. "2026-1"), unresolved=true
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const flagType = searchParams.get('flag_type')
     const severity = searchParams.get('severity')
@@ -14,10 +18,11 @@ export async function GET(request: NextRequest) {
     const unresolvedOnly = searchParams.get('unresolved') === 'true'
     const show = searchParams.get('show')
 
-    // Build query
-    let query = supabaseAdmin
+    // Build query (scoped to station via the inner episode_log join)
+    let query = supabase
       .from('compliance_flags')
-      .select('*, episode_log!inner(show_name, show_key, air_date, air_time, duration, headline, host, status)')
+      .select('*, episode_log!inner(show_name, show_key, air_date, air_time, duration, headline, host, status, station_id)')
+      .eq('episode_log.station_id', stationId)
       .order('created_at', { ascending: false })
 
     if (flagType) query = query.eq('flag_type', flagType)

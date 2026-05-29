@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
@@ -106,7 +107,7 @@ export default function EpisodesPage() {
   useEffect(() => {
     async function fetchCategories() {
       try {
-        const res = await fetch('/api/settings')
+        const res = await authedFetch('/api/settings')
         if (res.ok) {
           const data = await res.json()
           const cats = data.settings?.issue_categories
@@ -141,7 +142,7 @@ export default function EpisodesPage() {
     if (showFilter) params.set('show', showFilter)
     if (categoryFilter) params.set('category', categoryFilter)
 
-    const res = await fetch(`/api/episodes?${params}`)
+    const res = await authedFetch(`/api/episodes?${params}`)
     if (res.ok) {
       const data = await res.json()
       setEpisodes(data.episodes ?? [])
@@ -162,7 +163,7 @@ export default function EpisodesPage() {
 
   async function handleBulkRetry() {
     try {
-      const res = await fetch('/api/episodes', {
+      const res = await authedFetch('/api/episodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'bulk-retry' }),
@@ -192,7 +193,7 @@ export default function EpisodesPage() {
   async function handleCategorySave(episodeId: number, newCategory: string) {
     setSavingCategoryId(episodeId)
     try {
-      const res = await fetch(`/api/episodes/${episodeId}`, {
+      const res = await authedFetch(`/api/episodes/${episodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ issue_category: newCategory }),

@@ -1,23 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const resource = searchParams.get('resource')
 
     // GET /api/settings?resource=shows — return show_keys
     if (resource === 'shows') {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('show_keys')
         .select('*')
+        .eq('station_id', stationId)
         .order('show_name')
 
       if (error) throw error
 
-      // Get episode counts per show using RPC or grouped query
+      // TODO(phase-E): get_episode_counts_by_show RPC is not station-scoped —
+      // it aggregates episode_log across ALL stations and groups by show_key,
+      // which is no longer globally unique. Needs a new migration that adds a
+      // station_id arg (or filters by it). Until then the per-show
+      // episode_count below can over-count episodes from other stations that
+      // happen to share a show_key. Auth/show_keys are correctly scoped.
       const { data: counts } = await supabaseAdmin
         .rpc('get_episode_counts_by_show')
         .select('*')
@@ -35,7 +46,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ shows })
     }
 
-    // Default: return qir_settings
+    // Default: return qir_settings (global config — left unscoped this phase)
     const { data, error } = await supabaseAdmin
       .from('qir_settings')
       .select('*')
@@ -59,6 +70,9 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+
     const body = await request.json()
     const { key, value } = body
 
@@ -66,6 +80,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'key is required' }, { status: 400 })
     }
 
+    // qir_settings is global config this phase — written with service role.
     const { error } = await supabaseAdmin
       .from('qir_settings')
       .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
@@ -84,6 +99,10 @@ export async function PUT(request: NextRequest) {
 // PATCH /api/settings — update show_keys
 export async function PATCH(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { resource, id, ...updates } = body
 
@@ -104,10 +123,11 @@ export async function PATCH(request: NextRequest) {
 
       safeUpdates.updated_at = new Date().toISOString()
 
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('show_keys')
         .update(safeUpdates)
         .eq('id', id)
+        .eq('station_id', stationId)
 
       if (error) throw error
       return NextResponse.json({ ok: true })

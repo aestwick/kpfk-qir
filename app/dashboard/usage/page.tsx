@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 
 interface UsageEntry {
@@ -77,7 +78,7 @@ export default function UsagePage() {
     const params = new URLSearchParams()
     if (from) params.set('from', from)
     if (to) params.set('to', `${to}T23:59:59`)
-    const res = await fetch(`/api/usage?${params}`)
+    const res = await authedFetch(`/api/usage?${params}`)
     if (res.ok) {
       const data = await res.json()
       setEntries(data.entries ?? [])

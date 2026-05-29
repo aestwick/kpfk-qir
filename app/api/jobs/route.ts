@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
+    const ctx = await getStationContext(request)
+    if (ctx.error) return stationErrorResponse(ctx.error)
+    const { supabase, stationId } = ctx.context
+
     const body = await request.json()
     const { action } = body
 
-    // Pipeline pause/resume
+    // Pipeline pause/resume (qir_settings is global config — left unscoped)
     if (action === 'pause_pipeline' || action === 'resume_pipeline') {
       const paused = action === 'pause_pipeline'
       const { error } = await supabaseAdmin
@@ -68,27 +73,27 @@ export async function POST(request: NextRequest) {
       const dateFilter = `and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`
 
       const [pendingRes, transcribedRes, summarizedRes] = await Promise.all([
-        supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('status', 'pending').or(dateFilter),
-        supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('status', 'transcribed').or(dateFilter),
-        supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).eq('status', 'summarized').or(dateFilter),
+        supabase.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).eq('status', 'pending').or(dateFilter),
+        supabase.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).eq('status', 'transcribed').or(dateFilter),
+        supabase.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).eq('status', 'summarized').or(dateFilter),
       ])
 
       const triggered: string[] = []
 
       // Always run ingest to pull any new episodes
-      await ingestQueue.add('pipeline-ingest', {})
+      await ingestQueue.add('pipeline-ingest', { stationId })
       triggered.push('ingest')
 
       if ((pendingRes.count ?? 0) > 0) {
-        await transcribeQueue.add('pipeline-transcribe', {})
+        await transcribeQueue.add('pipeline-transcribe', { stationId })
         triggered.push(`transcribe (${pendingRes.count} pending)`)
       }
       if ((transcribedRes.count ?? 0) > 0) {
-        await summarizeQueue.add('pipeline-summarize', {})
+        await summarizeQueue.add('pipeline-summarize', { stationId })
         triggered.push(`summarize (${transcribedRes.count} transcribed)`)
       }
       if ((summarizedRes.count ?? 0) > 0) {
-        await complianceQueue.add('pipeline-compliance', {})
+        await complianceQueue.add('pipeline-compliance', { stationId })
         triggered.push(`compliance (${summarizedRes.count} summarized)`)
       }
 
@@ -102,30 +107,31 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'ingest': {
-        await ingestQueue.add('manual-ingest', {})
+        await ingestQueue.add('manual-ingest', { stationId })
         return NextResponse.json({ ok: true, message: 'Ingest job queued' })
       }
       case 'transcribe': {
-        await transcribeQueue.add('manual-transcribe', {})
+        await transcribeQueue.add('manual-transcribe', { stationId })
         return NextResponse.json({ ok: true, message: 'Transcribe job queued' })
       }
       case 'summarize': {
-        await summarizeQueue.add('manual-summarize', {})
+        await summarizeQueue.add('manual-summarize', { stationId })
         return NextResponse.json({ ok: true, message: 'Summarize job queued' })
       }
       case 'compliance': {
         const showKey = body.show_key as string | undefined
         if (showKey) {
           // Count eligible episodes for this show
-          const { count } = await supabaseAdmin
+          const { count } = await supabase
             .from('episode_log')
             .select('id', { count: 'exact', head: true })
+            .eq('station_id', stationId)
             .eq('show_key', showKey)
             .eq('status', 'summarized')
-          await complianceQueue.add(`manual-compliance-${showKey}`, { show_key: showKey })
+          await complianceQueue.add(`manual-compliance-${showKey}`, { show_key: showKey, stationId })
           return NextResponse.json({ ok: true, message: `Compliance check queued for show "${showKey}" (${count ?? 0} episodes eligible)` })
         }
-        await complianceQueue.add('manual-compliance', {})
+        await complianceQueue.add('manual-compliance', { stationId })
         return NextResponse.json({ ok: true, message: 'Compliance check job queued' })
       }
       default:
@@ -137,8 +143,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const ctx = await getStationContext(request)
+    if (ctx.error) return stationErrorResponse(ctx.error)
+    const { supabase, stationId } = ctx.context
+
     const queues = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
     const queueNames = Object.keys(queues) as (keyof typeof queues)[]
 
@@ -198,7 +208,7 @@ export async function GET() {
         const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
 
         // Use count queries to avoid Supabase's default 1000-row limit
-        const baseQuery = () => supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).gte('air_date', start).lte('air_date', end)
+        const baseQuery = () => supabase.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).gte('air_date', start).lte('air_date', end)
 
         const [pending, transcribed, summarized, complianceChecked, failed, total] = await Promise.all([
           baseQuery().eq('status', 'pending'),

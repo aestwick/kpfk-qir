@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { SkeletonCard } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
@@ -109,7 +110,7 @@ export default function JobsPage() {
 
   // Fetch show list for compliance show picker
   useEffect(() => {
-    fetch('/api/settings?resource=shows')
+    authedFetch('/api/settings?resource=shows')
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data?.shows) {
@@ -123,8 +124,8 @@ export default function JobsPage() {
   const fetchDetails = useCallback(async () => {
     try {
       const [jobsRes, settingsRes] = await Promise.all([
-        fetch('/api/jobs'),
-        fetch('/api/settings'),
+        authedFetch('/api/jobs'),
+        authedFetch('/api/settings'),
       ])
       if (jobsRes.ok) {
         const data = await jobsRes.json()
@@ -180,7 +181,7 @@ export default function JobsPage() {
       if (action === 'compliance' && complianceShowKey) {
         payload.show_key = complianceShowKey
       }
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -205,7 +206,7 @@ export default function JobsPage() {
     const newMode: PipelineMode = pipelineMode === 'steady' ? 'catch-up' : 'steady'
     setActionLoading('pipeline-mode')
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'set_pipeline_mode', mode: newMode }),
@@ -226,7 +227,7 @@ export default function JobsPage() {
   async function clearFailed(queueName: string) {
     setActionLoading(`clear-${queueName}`)
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'clear_failed', queue: queueName }),
@@ -247,7 +248,7 @@ export default function JobsPage() {
   async function retryFailed(queueName: string) {
     setActionLoading(`retry-${queueName}`)
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'retry_failed', queue: queueName }),
@@ -269,7 +270,7 @@ export default function JobsPage() {
   async function advancePipeline() {
     setActionLoading('advance-pipeline')
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'advance-pipeline' }),
@@ -399,7 +400,7 @@ export default function JobsPage() {
     const action = pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
     setActionLoading('pause')
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),

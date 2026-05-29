@@ -1,10 +1,14 @@
 import { NextResponse, NextRequest } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const health = searchParams.get('health') === 'true'
 
@@ -13,9 +17,10 @@ export async function GET(request: NextRequest) {
 
     await Promise.all(
       statuses.map(async (status) => {
-        const { count } = await supabaseAdmin
+        const { count } = await supabase
           .from('episode_log')
           .select('*', { count: 'exact', head: true })
+          .eq('station_id', stationId)
           .eq('status', status)
         counts[status] = count ?? 0
       })
@@ -27,18 +32,20 @@ export async function GET(request: NextRequest) {
 
     // Pipeline health mode: also return stuck/error episodes
     const errorStatuses = ['failed', 'transcript_missing', 'dead']
-    const { data: errorEpisodes } = await supabaseAdmin
+    const { data: errorEpisodes } = await supabase
       .from('episode_log')
       .select('id, show_key, show_name, air_date, status, error_message, created_at, updated_at, retry_count')
+      .eq('station_id', stationId)
       .in('status', errorStatuses)
       .order('updated_at', { ascending: false })
       .limit(100)
 
     // Also find episodes that have been stuck in a non-terminal status for > 2 hours
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
-    const { data: stuckEpisodes } = await supabaseAdmin
+    const { data: stuckEpisodes } = await supabase
       .from('episode_log')
       .select('id, show_key, show_name, air_date, status, error_message, created_at, updated_at, retry_count')
+      .eq('station_id', stationId)
       .in('status', ['pending', 'transcribed'])
       .lt('updated_at', twoHoursAgo)
       .order('updated_at', { ascending: true })

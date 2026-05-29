@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '../../../../lib/supabase'
+import { resolveStationIdBySlug } from '../../../../lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,10 +19,20 @@ export async function GET(
 ) {
   const { showKey } = await params
 
+  // A show key is only unique within a station now, so require an explicit
+  // ?station=<slug> and resolve it. Never default.
+  const { searchParams } = new URL(request.url)
+  const slug = searchParams.get('station')
+  const stationId = await resolveStationIdBySlug(slug)
+  if (!stationId) {
+    return NextResponse.json({ error: 'Unknown or missing station' }, { status: 400 })
+  }
+
   // Look up show metadata
   const { data: show, error: showErr } = await supabaseAdmin
     .from('show_keys')
     .select('key, show_name, category')
+    .eq('station_id', stationId)
     .eq('key', showKey)
     .single()
 
@@ -33,6 +44,7 @@ export async function GET(
   const { data: episodes, error: epErr } = await supabaseAdmin
     .from('episode_log')
     .select('title, mp3_url, date, air_date, start_time, duration, summary, headline, status')
+    .eq('station_id', stationId)
     .eq('show_key', showKey)
     .not('mp3_url', 'is', null)
     .order('air_date', { ascending: false, nullsFirst: false })
@@ -44,7 +56,7 @@ export async function GET(
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://qir.kpfk.org'
   const showName = escapeXml(show.show_name)
-  const feedUrl = `${baseUrl}/api/feeds/${showKey}`
+  const feedUrl = `${baseUrl}/api/feeds/${showKey}?station=${slug}`
 
   const items = (episodes || []).map((ep) => {
     const title = escapeXml(ep.title || ep.headline || `${show.show_name} — ${ep.date || 'Unknown date'}`)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 
@@ -154,7 +155,7 @@ export default function DashboardOverview() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/dashboard')
+      const res = await authedFetch('/api/dashboard')
       if (res.ok) setData(await res.json())
     } finally {
       setLoading(false)
@@ -176,7 +177,7 @@ export default function DashboardOverview() {
     const action = data?.pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
     setActionLoading('pause')
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
@@ -197,7 +198,7 @@ export default function DashboardOverview() {
   async function triggerAction(action: string) {
     setActionLoading(action)
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
@@ -219,7 +220,7 @@ export default function DashboardOverview() {
   async function retryEpisode(id: number) {
     setActionLoading(`retry-${id}`)
     try {
-      const res = await fetch(`/api/episodes/${id}`, {
+      const res = await authedFetch(`/api/episodes/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'retry' }),
@@ -240,7 +241,7 @@ export default function DashboardOverview() {
   async function markUnavailable(id: number) {
     setActionLoading(`unavail-${id}`)
     try {
-      const res = await fetch(`/api/episodes/${id}`, {
+      const res = await authedFetch(`/api/episodes/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'unavailable' }),
