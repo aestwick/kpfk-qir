@@ -69,7 +69,7 @@ These were chosen by the product owner. 🔒 **HARD — implement exactly these;
 
 ### Client strategy (how isolation is actually wired)
 
-- **Server-side reads/writes that represent a user action** (API routes serving the dashboard) use a **request-scoped Supabase client bound to the caller's access token**, so RLS applies. Add this as a new helper (Phase 2). Also add the explicit `.eq('station_id', stationId)` filter — belt and suspenders.
+- **Server-side reads/writes that represent a user action** (API routes serving the dashboard) use a **request-scoped Supabase client bound to the caller's access token**, so RLS applies. Add this as a new helper (Phase D). Also add the explicit `.eq('station_id', stationId)` filter — belt and suspenders.
 - **Background workers** have no user JWT. They keep using the **service-role client** (`supabaseAdmin`, which bypasses RLS) but **must** carry `station_id` in their job payload and filter every query by it. For workers, the app-layer filter *is* the only guard, so it is mandatory and must be reviewed carefully.
 - **Public finalized-report pages** read with the service-role or anon client but filter by the station resolved from the URL slug, and only ever read `status = 'final'` drafts.
 
@@ -78,7 +78,7 @@ These were chosen by the product owner. 🔒 **HARD — implement exactly these;
 ## 2. Out of scope (DO NOT BUILD)
 
 🔒 **HARD — Do not do any of the following as part of this work:**
-- A station self-signup / onboarding flow, billing, or org management UI beyond what Phase 2 specifies. Stations are provisioned by SQL/admin for now.
+- A station self-signup / onboarding flow, billing, or org management UI beyond what Phase D specifies. Stations are provisioned by SQL/admin for now.
 - Per-station theming/branding assets (logos, colors) beyond substituting the station **name/slug** into existing text.
 - Subdomain routing or DNS/Traefik changes (decision was path-based).
 - Migrating to a different auth provider, queue, or DB.
