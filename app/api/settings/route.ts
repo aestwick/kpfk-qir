@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { invalidateSetting } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,6 +74,8 @@ export async function PUT(request: NextRequest) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
+
+    invalidateSetting(key) // reflect change immediately, don't wait for cache TTL
 
     return NextResponse.json({ ok: true })
   } catch (err) {

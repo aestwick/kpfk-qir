@@ -31,6 +31,16 @@ export async function getSetting<T = unknown>(key: string): Promise<T | null> {
   return null
 }
 
+/**
+ * Drop a cached setting (or the whole cache) so the next read hits the DB.
+ * Call after writing to qir_settings so changes like pause/resume take effect
+ * immediately instead of lagging up to CACHE_TTL_MS.
+ */
+export function invalidateSetting(key?: string): void {
+  if (key) settingsCache.delete(key)
+  else settingsCache.clear()
+}
+
 export async function getExcludedCategories(): Promise<string[]> {
   return (await getSetting<string[]>('excluded_categories')) ?? ['Music', 'Español']
 }
@@ -63,7 +73,27 @@ export async function isComplianceBlocking(): Promise<boolean> {
 }
 
 export async function isPipelinePaused(): Promise<boolean> {
-  return (await getSetting<boolean>('pipeline_paused')) ?? false
+  // Read fresh every time — never cache. This is a control signal toggled from
+  // the dashboard and polled by both the UI and workers; a stale cached value
+  // makes Pause/Resume appear not to take effect (and shows a "PAUSED" badge
+  // over an actively-running pipeline). A single cheap boolean read is worth it.
+  const { data } = await supabaseAdmin
+    .from('qir_settings')
+    .select('value')
+    .eq('key', 'pipeline_paused')
+    .single()
+
+  let value: unknown = data?.value
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      // keep as-is
+    }
+  }
+  // Refresh the shared cache too, so getSetting('pipeline_paused') callers stay consistent
+  settingsCache.set('pipeline_paused', { value: value ?? false, fetchedAt: Date.now() })
+  return value === true
 }
 
 export const DEFAULT_SUMMARIZATION_PROMPT = `You are an expert public radio producer for KPFK.
