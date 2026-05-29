@@ -96,6 +96,14 @@ export async function getExcludedCategories(stationId: string): Promise<string[]
   return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
 }
 
+// Program names to skip at ingest, matched against show_keys.show_name. This is
+// distinct from excluded_categories (matched on category) and from a show's
+// `active` flag (per-key): a name here drops EVERY feed sharing that show_name.
+// Defaults to none.
+export async function getExcludedShows(stationId: string): Promise<string[]> {
+  return (await getSetting<string[]>('excluded_shows', stationId)) ?? []
+}
+
 export async function getTranscribeBatchSize(stationId: string): Promise<number> {
   return (await getSetting<number>('transcribe_batch_size', stationId)) ?? 5
 }

@@ -58,6 +58,7 @@ const settingFields: SettingField[] = [
   { key: 'max_entries_per_category', label: 'Max Entries Per Category', type: 'number', autoSave: true },
   { key: 'issue_categories', label: 'Issue Categories (JSON array)', type: 'json' },
   { key: 'excluded_categories', label: 'Excluded Categories (JSON array)', type: 'json' },
+  { key: 'excluded_shows', label: 'Excluded Shows by Name (JSON array)', type: 'json' },
   { key: 'summarization_model', label: 'Summarization Model', type: 'text', autoSave: true },
   { key: 'transcription_model', label: 'Transcription Model', type: 'text', autoSave: true },
   { key: 'transcribe_batch_size', label: 'Transcribe Batch Size', type: 'number', autoSave: true },
@@ -156,6 +157,18 @@ export default function SettingsPage() {
     return DEFAULT_CATEGORIES
   })()
 
+  // Excluded show names from settings (drives the per-show "Exclude" checkboxes).
+  // Stored as a JSON array; tolerate either a parsed array or a JSON string.
+  const excludedShows: string[] = (() => {
+    const v = settings.excluded_shows
+    if (Array.isArray(v)) return v as string[]
+    if (typeof v === 'string') {
+      try { const p = JSON.parse(v); return Array.isArray(p) ? p : [] } catch { return [] }
+    }
+    return []
+  })()
+  const excludedShowSet = new Set(excludedShows.map((n) => n.trim().toLowerCase()))
+
   const fetchAll = useCallback(async () => {
     const [settingsRes, correctionsRes, wordlistRes, showsRes] = await Promise.all([
       authedFetch('/api/settings'),
@@ -170,7 +183,9 @@ export default function SettingsPage() {
       for (const field of settingFields) {
         const v = data.settings?.[field.key]
         if (field.type === 'json') {
-          vals[field.key] = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+          // These JSON settings are all arrays; default a missing one to [] so a
+          // not-yet-saved setting (e.g. excluded_shows) renders/saves cleanly.
+          vals[field.key] = typeof v === 'string' ? v : JSON.stringify(v ?? [], null, 2)
         } else {
           vals[field.key] = v != null ? String(v) : ''
         }
@@ -558,6 +573,40 @@ export default function SettingsPage() {
       toast('error', 'Network error')
     }
     setSavingShow(null)
+  }
+
+  // Add/remove a program from the excluded_shows blocklist (by show_name).
+  // Exclusion is by name, so this affects every feed sharing that name.
+  async function toggleShowExcluded(show: Show) {
+    const norm = show.show_name.trim().toLowerCase()
+    const excluded = excludedShowSet.has(norm)
+    const next = excluded
+      ? excludedShows.filter((n) => n.trim().toLowerCase() !== norm)
+      : [...excludedShows, show.show_name]
+    const nextJson = JSON.stringify(next, null, 2)
+
+    // Optimistic update of both the derived list and the Pipeline-tab textarea.
+    const prevSettings = settings
+    const prevEdit = editValues.excluded_shows
+    const prevSaved = savedValues.excluded_shows
+    setSettings((prev) => ({ ...prev, excluded_shows: next }))
+    setEditValues((prev) => ({ ...prev, excluded_shows: nextJson }))
+    setSavedValues((prev) => ({ ...prev, excluded_shows: nextJson }))
+
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'excluded_shows', value: next }),
+      })
+      if (!res.ok) throw new Error('save failed')
+    } catch {
+      // Revert on failure.
+      setSettings(prevSettings)
+      setEditValues((prev) => ({ ...prev, excluded_shows: prevEdit }))
+      setSavedValues((prev) => ({ ...prev, excluded_shows: prevSaved }))
+      toast('error', 'Failed to update exclusion')
+    }
   }
 
   // ── CSV import handler ──
@@ -1060,12 +1109,13 @@ export default function SettingsPage() {
                   <th className="text-left px-3 py-2 font-medium">Name</th>
                   <th className="text-left px-3 py-2 font-medium">Default Category</th>
                   <th className="text-center px-3 py-2 font-medium">Active</th>
+                  <th className="text-center px-3 py-2 font-medium" title="Exclude this program from ingest by name. Affects every feed sharing this name.">Exclude</th>
                   <th className="text-right px-3 py-2 font-medium">Episodes</th>
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
+                  <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
                 ) : filteredShows.map((show) => (
@@ -1152,6 +1202,15 @@ export default function SettingsPage() {
                       >
                         {show.active ? 'Active' : 'Inactive'}
                       </button>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={excludedShowSet.has(show.show_name.trim().toLowerCase())}
+                        onChange={() => toggleShowExcluded(show)}
+                        className="h-4 w-4 cursor-pointer accent-red-600"
+                        title="Exclude this program from ingest by name"
+                      />
                     </td>
                     <td className="px-3 py-2 text-right">
                       <a
