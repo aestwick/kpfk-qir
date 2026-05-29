@@ -43,6 +43,17 @@ The research is clear that prose rules in a plan are *advisory* (~followed most 
 
 These are suggested, not required by this plan. Mention them to the user; don't build them unless asked.
 
+### Execution guidance (for the operator/session running this plan)
+
+This guidance follows Anthropic's published Claude Code best practices. It's about *how to run* the plan, not new code rules.
+
+- **Run as a fresh session executing this spec.** This `PLAN.md` is the self-contained spec; implement against it and verify against it. Don't carry over unrelated context.
+- **One focused session per phase where practical; `/clear` between phases.** A finished phase's file reads and command output shouldn't pollute the next phase's context — context fills fast and performance degrades as it does.
+- **Use subagents for investigation** (e.g. "find every `getSetting` caller", "list all queries touching `episode_log`") so broad reads happen in a separate context and report back summaries, keeping the main session lean. The Phase I adversarial review **must** run in a fresh subagent that sees only the diff + this plan.
+- **Verification gates the stop — strongest available wins.** Ladder, weakest→strongest: an in-prompt "run the check" instruction < a `/goal` condition re-checked each turn < a **Stop hook** that blocks finishing until a script passes < a **verification subagent** grading the diff. This plan mandates the subagent review (Phase I) and per-phase evidence; if the operator wants a hard gate, add the Stop hook from the harness note above.
+- **Course-correct early; don't pile on corrections.** If the same issue is corrected more than twice, `/clear` and restart the phase with a sharper prompt rather than accumulating failed approaches in context.
+- 🔧 **FLEXIBLE — Keep the Phase I `CLAUDE.md` edits short.** A bloated `CLAUDE.md` gets ignored. For each line ask "would removing this cause a mistake?"; if not, cut it. Put must-always rules in hooks and sometimes-relevant workflows in skills rather than growing `CLAUDE.md`.
+
 ---
 
 ## 1. Architecture decisions (DECIDED — do not redesign)
