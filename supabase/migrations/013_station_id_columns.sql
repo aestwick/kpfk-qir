@@ -89,33 +89,15 @@ alter table public.usage_log
 -- Per-station uniqueness + access-pattern indexes.
 -- ---------------------------------------------------------------------------
 
--- show_keys: a show key is only unique WITHIN a station. Drop any pre-existing
--- global unique on (key) (the table predates these migrations), then add the
--- composite. The DO block finds the constraint by shape so it works regardless
--- of its name.
-do $$
-declare
-  c record;
-begin
-  for c in
-    select con.conname
-    from pg_constraint con
-    join pg_class rel on rel.oid = con.conrelid
-    join pg_namespace ns on ns.oid = rel.relnamespace
-    where ns.nspname = 'public'
-      and rel.relname = 'show_keys'
-      and con.contype = 'u'
-      and con.conkey = array[
-        (select attnum from pg_attribute
-         where attrelid = rel.oid and attname = 'key')
-      ]
-  loop
-    execute format('alter table public.show_keys drop constraint %I', c.conname);
-  end loop;
-end $$;
--- also drop a bare unique index on (key) if one exists under the default name
-drop index if exists public.show_keys_key_key;
-
+-- show_keys: a show key is only unique WITHIN a station, so add the composite
+-- UNIQUE(station_id, key).
+--
+-- We do NOT drop the pre-existing global UNIQUE(key) here: in this deployment a
+-- foreign key (show_contacts.show_key_fkey, owned by separate functionality in
+-- the same database) depends on it, and dropping it inline would fail. The
+-- global unique is removed in migration 018 once that dependency is handled.
+-- Until then both constraints coexist, which is harmless (the composite is
+-- strictly stronger while there is a single station).
 alter table public.show_keys
   add constraint show_keys_station_key_unique unique (station_id, key);
 
