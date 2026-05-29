@@ -47,7 +47,9 @@ interface DashData {
 
 const BADGE_COLORS: Record<string, string> = {
   pending:             'bg-amber-100/80 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  transcribing:        'bg-indigo-100/80 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
   transcribed:         'bg-blue-100/80 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  summarizing:         'bg-violet-100/80 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
   summarized:          'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
   compliance_checked:  'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
   failed:              'bg-red-100/80 text-red-800 dark:bg-red-900/30 dark:text-red-300',
@@ -56,7 +58,9 @@ const BADGE_COLORS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
+  transcribing: 'Transcribing',
   transcribed: 'Transcribed',
+  summarizing: 'Summarizing',
   summarized: 'Summarized',
   compliance_checked: 'Checked',
   failed: 'Failed',
@@ -130,7 +134,9 @@ function getNextIngestMinutes(): number {
 
 const STATUS_VERB: Record<string, string> = {
   pending: 'Ingested',
+  transcribing: 'Transcribing',
   transcribed: 'Transcribed',
+  summarizing: 'Summarizing',
   summarized: 'Summarized',
   compliance_checked: 'Compliance checked',
   failed: 'Failed',

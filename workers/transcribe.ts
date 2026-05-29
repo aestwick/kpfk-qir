@@ -165,34 +165,60 @@ export async function processTranscribe(job: Job) {
   const batchSize = await getTranscribeBatchSize()
   const { start, end } = getCurrentQuarterBounds()
 
-  // Get pending episodes from current quarter (including those with null air_date
-  // that were created during this quarter — older ingests didn't populate air_date)
-  const { data: episodes, error } = await supabaseAdmin
+  // Get candidate pending episodes from current quarter (including those with null
+  // air_date that were created during this quarter — older ingests didn't populate it)
+  const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
-    .select('*')
+    .select('id, category')
     .eq('status', 'pending')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
     .limit(batchSize)
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!episodes?.length) {
+  if (!candidates?.length) {
     console.log('[transcribe] no pending episodes')
     return { transcribed: 0 }
   }
 
-  // Filter out excluded categories
-  const filteredEpisodes = episodes.filter(
-    (ep) => !excludedCategories.some((exc) => ep.category?.includes(exc))
-  )
+  // Drop excluded categories before claiming so they stay pending (not stuck mid-stage)
+  const claimIds = candidates
+    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
+    .map((ep) => ep.id)
 
+  if (!claimIds.length) {
+    console.log('[transcribe] only excluded-category episodes pending')
+    return { transcribed: 0 }
+  }
+
+  // Atomically claim: the `.eq('status', 'pending')` guard means only rows still
+  // pending are flipped to 'transcribing', so overlapping runs (manual retry,
+  // continue-chain, BullMQ attempts, cron) can never grab the same episode.
+  const { data: episodes, error: claimError } = await supabaseAdmin
+    .from('episode_log')
+    .update({ status: 'transcribing', updated_at: new Date().toISOString() })
+    .in('id', claimIds)
+    .eq('status', 'pending')
+    .select('*')
+
+  if (claimError) throw new Error(`Failed to claim episodes: ${claimError.message}`)
+  if (!episodes?.length) {
+    console.log('[transcribe] no episodes claimed (already taken by another run)')
+    return { transcribed: 0 }
+  }
+
+  const filteredEpisodes = episodes
   const corrections = await loadCorrections()
   let transcribed = 0
 
   for (let i = 0; i < filteredEpisodes.length; i++) {
     const episode = filteredEpisodes[i]
     await job.updateProgress({ current: i + 1, total: filteredEpisodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
-    const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}`)
+    // Unique temp dir per run — a deterministic per-episode path lets overlapping
+    // jobs (manual retry, continue-chain, BullMQ attempts, cron) delete each other's
+    // chunks mid-transcription, surfacing as ENOENT on a later chunk.
+    const runId = `${job.id ?? 'job'}-${Math.random().toString(36).slice(2, 10)}`
+    const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}-${runId}`)
     try {
       await fs.mkdir(tmpDir, { recursive: true })
 

@@ -222,6 +222,12 @@ async function setupCron() {
 
 setupCron().catch(console.error)
 
+// Recover episodes orphaned mid-stage (transcribing/summarizing) by a prior crash
+// or restart. recoverAll resets them immediately since no worker is running yet.
+autoRetryQueue.add('auto-retry-startup', { recoverAll: true }).then(() => {
+  console.log('[workers] startup orphan recovery queued')
+}).catch(console.error)
+
 // Run ingest immediately on startup
 ingestQueue.add('ingest-startup', {}).then(() => {
   console.log('[workers] startup ingest queued')
