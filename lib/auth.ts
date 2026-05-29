@@ -135,10 +135,10 @@ export function stationErrorResponse(error: StationContextError): NextResponse {
 
 /**
  * Resolve a station id from a URL-safe slug using the service-role client (no
- * user JWT). For public/no-auth paths only — the SSE activity stream (scoped by
- * the qir_station cookie) and public RSS feeds (scoped by an explicit ?station
- * slug). Returns null when the slug is missing or unknown. Callers MUST handle
- * null explicitly rather than defaulting to a station.
+ * user JWT). For public/no-auth paths only — the public RSS feeds, which carry
+ * the station as an explicit ?station slug. Returns null when the slug is
+ * missing or unknown. Callers MUST handle null explicitly (return 4xx) rather
+ * than defaulting to a station.
  */
 export async function resolveStationIdBySlug(slug: string | null | undefined): Promise<string | null> {
   if (!slug) return null
@@ -152,9 +152,4 @@ export async function resolveStationIdBySlug(slug: string | null | undefined): P
     return null
   }
   return data?.id ?? null
-}
-
-/** Read the active-station slug from the qir_station cookie (SSE path). */
-export function stationSlugFromCookie(request: NextRequest): string | null {
-  return request.cookies.get(STATION_COOKIE)?.value ?? null
 }
