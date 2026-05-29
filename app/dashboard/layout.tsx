@@ -134,7 +134,7 @@ export default function DashboardLayout({
           <div className="h-7 w-7 rounded-lg bg-kpfk-red flex items-center justify-center">
             <span className="text-white text-xs font-bold">Q</span>
           </div>
-          <span className="text-sm font-semibold tracking-tight">QIR / KPFK</span>
+          <span className="text-sm font-semibold tracking-tight">QIR</span>
         </div>
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -173,7 +173,7 @@ export default function DashboardLayout({
             </div>
             <div>
               <p className="text-sm font-semibold text-white tracking-tight">QIR</p>
-              <p className="text-2xs text-warm-500">KPFK 90.7 FM</p>
+              <p className="text-2xs text-warm-500">Quarterly Issues Report</p>
             </div>
           </div>
         </div>

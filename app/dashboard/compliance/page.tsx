@@ -460,6 +460,10 @@ export default function CompliancePage() {
   // Build URL for the public compliance report page with current filters
   function buildReportUrl(): string {
     const params = new URLSearchParams()
+    // The public compliance-report page is station-scoped via this slug
+    // (read from the qir_station cookie set by the station switcher).
+    const stationSlug = document.cookie.match(/(?:^|; )qir_station=([^;]*)/)?.[1]
+    if (stationSlug) params.set('station', decodeURIComponent(stationSlug))
     if (filterType) params.set('type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
     if (filterResolution === 'unresolved') params.set('unresolved', 'true')

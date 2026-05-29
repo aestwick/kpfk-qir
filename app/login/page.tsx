@@ -35,7 +35,7 @@ export default function LoginPage() {
               <span className="text-white text-lg font-bold">Q</span>
             </div>
           </div>
-          <h1 className="text-xl font-bold text-center mb-1 text-warm-900 dark:text-warm-50">QIR / KPFK</h1>
+          <h1 className="text-xl font-bold text-center mb-1 text-warm-900 dark:text-warm-50">QIR</h1>
           <p className="text-sm text-warm-500 text-center mb-1 dark:text-warm-400">Quarterly Issues Report Dashboard</p>
           <p className="text-xs text-warm-400 text-center mb-6 dark:text-warm-500">Welcome back! Sign in to manage your FCC reports.</p>
 

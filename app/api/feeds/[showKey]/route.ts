@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '../../../../lib/supabase'
-import { resolveStationIdBySlug } from '../../../../lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,13 +19,16 @@ export async function GET(
   const { showKey } = await params
 
   // A show key is only unique within a station now, so require an explicit
-  // ?station=<slug> and resolve it. Never default.
+  // ?station=<slug> and resolve it (id + name for branding). Never default.
   const { searchParams } = new URL(request.url)
   const slug = searchParams.get('station')
-  const stationId = await resolveStationIdBySlug(slug)
-  if (!stationId) {
+  const { data: station } = slug
+    ? await supabaseAdmin.from('stations').select('id, name').eq('slug', slug).maybeSingle()
+    : { data: null }
+  if (!station) {
     return NextResponse.json({ error: 'Unknown or missing station' }, { status: 400 })
   }
+  const stationId = station.id
 
   // Look up show metadata
   const { data: show, error: showErr } = await supabaseAdmin
@@ -56,6 +58,7 @@ export async function GET(
 
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://qir.kpfk.org'
   const showName = escapeXml(show.show_name)
+  const stationLabel = escapeXml(station.name)
   const feedUrl = `${baseUrl}/api/feeds/${showKey}?station=${slug}`
 
   const items = (episodes || []).map((ep) => {
@@ -81,12 +84,12 @@ export async function GET(
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
   xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>${showName} — KPFK 90.7FM</title>
-    <link>https://www.kpfk.org</link>
-    <description>Episodes of ${showName} on KPFK 90.7FM, Pacifica Radio Los Angeles${show.category ? `. Category: ${escapeXml(show.category)}` : ''}</description>
+    <title>${showName} — ${stationLabel}</title>
+    <link>${escapeXml(baseUrl)}</link>
+    <description>Episodes of ${showName} on ${stationLabel}${show.category ? `. Category: ${escapeXml(show.category)}` : ''}</description>
     <language>en-us</language>
     <atom:link href="${escapeXml(feedUrl)}" rel="self" type="application/rss+xml" />
-    <itunes:author>KPFK 90.7FM</itunes:author>
+    <itunes:author>${stationLabel}</itunes:author>
     <itunes:category text="News" />
 ${items}
   </channel>

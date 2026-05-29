@@ -1,20 +1,31 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
-import PrintButton from './print-button'
+import PrintButton from '@/app/components/print-button'
 import type { Metadata } from 'next'
 
 // Revalidate finalized reports once per day — they rarely change
 export const revalidate = 86400
 
+async function resolveStation(slug: string): Promise<{ id: string; name: string } | null> {
+  const { data } = await supabaseAdmin
+    .from('stations')
+    .select('id, name')
+    .eq('slug', slug)
+    .maybeSingle()
+  return data ?? null
+}
+
 export async function generateMetadata({
   params,
 }: {
-  params: { year: string; quarter: string }
+  params: { station: string; year: string; quarter: string }
 }): Promise<Metadata> {
   const year = parseInt(params.year)
   const quarter = parseInt(params.quarter)
-  const title = `KPFK Quarterly Issues Report — Q${quarter} ${year}`
-  const description = `KPFK, Los Angeles — FCC Quarterly Issues Report for Q${quarter} ${year}`
+  const station = await resolveStation(params.station)
+  const name = station?.name ?? 'Quarterly Issues Report'
+  const title = `${name} — Quarterly Issues Report — Q${quarter} ${year}`
+  const description = `${name} — FCC Quarterly Issues Report for Q${quarter} ${year}`
   return { title, description }
 }
 
@@ -54,7 +65,7 @@ function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
 export default async function PublicQirPage({
   params,
 }: {
-  params: { year: string; quarter: string }
+  params: { station: string; year: string; quarter: string }
 }) {
   const year = parseInt(params.year)
   const quarter = parseInt(params.quarter)
@@ -63,9 +74,15 @@ export default async function PublicQirPage({
     notFound()
   }
 
+  const station = await resolveStation(params.station)
+  if (!station) {
+    notFound()
+  }
+
   const { data: draft } = await supabaseAdmin
     .from('qir_drafts')
     .select('*')
+    .eq('station_id', station.id)
     .eq('year', year)
     .eq('quarter', quarter)
     .eq('status', 'final')
@@ -100,7 +117,7 @@ export default async function PublicQirPage({
 
         <header className="text-center mb-8 border-b dark:border-warm-700 pb-6">
           <h1 className="text-2xl font-bold">
-            KPFK, Los Angeles
+            {station.name}
           </h1>
           <h2 className="text-lg text-gray-600 dark:text-warm-400 mt-1">
             Quarterly Issues Report
