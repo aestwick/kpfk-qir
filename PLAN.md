@@ -83,7 +83,7 @@ These were chosen by the product owner. 🔒 **HARD — implement exactly these;
 - Subdomain routing or DNS/Traefik changes (decision was path-based).
 - Migrating to a different auth provider, queue, or DB.
 - Rewriting the pipeline, the AI prompts' content (beyond parameterizing the station name), or the worker chaining logic.
-- Adding a test framework (the repo has none; do not introduce one unless the user asks). Verification is via `npm run build`, type-check, and targeted manual/SQL checks described per phase.
+- **Broad/blanket test coverage.** Targeted integration tests ARE in scope (see §3.5) — but only the three high-stakes cases named there. Do NOT write unit tests for every route's filter, every helper, or mechanical `.eq('station_id', …)` plumbing; those are covered by the TypeScript build and the Phase I review. Do not generate large volumes of shallow/overlapping tests.
 - Performance optimization, caching changes, or "while I'm here" refactors.
 
 If you believe something out-of-scope is genuinely required to make an in-scope item work, **stop and ask the user** before doing it.
@@ -112,6 +112,23 @@ If you believe something out-of-scope is genuinely required to make an in-scope 
 - **Types** in `lib/types.ts`: `EpisodeLog`, `ShowKey`, `ShowKeyWithCount`, `Transcript`, `UsageLog`, `QirSetting`, `QirDraft`, `ComplianceFlag`, `ComplianceWord`, `TranscriptCorrection`, `ComplianceFlagWithEpisode`, `QualityFlag`.
 
 🔧 **FLEXIBLE** — Line numbers above are from a prior scan and may have shifted; treat them as starting points, re-grep to confirm exact locations.
+
+---
+
+## 3.5 Testing approach (DECIDED: targeted integration tests)
+
+The repo has **zero tests today**. We are adding a small, focused integration test suite — **not** broad coverage. The goal is to prove the few properties that are both high-stakes and impossible to verify by eye, and to leave a runner in place that can be extended later.
+
+**Runner & infra:**
+- Use **Vitest** (modern default for this Next.js/TypeScript stack). Add a `test` script to `package.json`. 🔧 FLEXIBLE — if you find a strong reason to prefer another runner, note it and ask first.
+- Integration tests need a **real throwaway Postgres with the migrations applied and RLS enabled** — RLS cannot be unit-tested or mocked. 🔧 FLEXIBLE — use a Supabase branch DB or a local Postgres container; pick one, document the setup in a short `TESTING.md`, and read the test DB connection from an env var (never hardcode credentials, never point tests at production).
+
+**The only three tests in scope (🔒 HARD — these three, no blanket expansion):**
+1. **RLS isolation (the security boundary — non-negotiable).** With two stations and a user belonging to only one: assert that, using a request-scoped (user-JWT) client, the user can read/write their station's `episode_log`/`qir_drafts`/etc. and gets **zero** rows from the other station — for SELECT and for write attempts. Also assert the service-role client (worker path) still sees all rows, and that an anonymous client can read a `final` draft but not a `draft` one. (Belongs to Phase C.)
+2. **Per-station settings fallback.** Assert resolution order holds: a `station_settings` override wins; with no override, the global `qir_settings` value is returned; with neither, the hard-coded default; and one station's override never bleeds into another (cache keyed by `(stationId, key)`). (Belongs to Phase G.)
+3. **Worker claim is station-scoped.** Assert that the atomic claim (candidate-select + guarded `.update().eq('status', …)`) only ever claims episodes for the job's `station_id`, so one station's worker can never grab another's episodes. (Belongs to Phase F.)
+
+🔒 **HARD — Tests must be real, not theater.** Each test must actually exercise the behavior against the test DB and fail if the property is broken. Do not write tests that assert on mocks of your own code, tautological tests, or tests that pass without touching the thing they name. Do not add tests beyond the three above without asking. Never weaken a test or the code's correctness to make a test go green (see global rules).
 
 ---
 
@@ -198,10 +215,9 @@ If you believe something out-of-scope is genuinely required to make an in-scope 
 5. **Public read path**: finalized reports are public. Either add a policy allowing anonymous SELECT on `qir_drafts WHERE status='final'`, OR keep the public page on the service-role client and filter in code. 🔧 FLEXIBLE: pick one; if you allow anon SELECT of finals, scope it tightly to `status='final'` only.
 
 **Verification (this is the security-critical phase — test it for real):**
-- With a user JWT belonging to a **second, throwaway test station** (create it + a test user via SQL in the migration's verification, not in the migration itself), confirm a SELECT on `episode_log` returns **only** that station's rows and **zero** KPFK rows.
-- Confirm the service-role client still sees all rows (workers depend on this).
-- Confirm anonymous client can read a `final` draft but not a `draft` one.
-- Show the query outputs proving isolation.
+- **Set up the test harness here** (first use): add Vitest + the `test` script + the throwaway test Postgres described in §3.5, and write `TESTING.md`.
+- Implement **test #1 (RLS isolation)** from §3.5 as an automated Vitest integration test: a user JWT for a second throwaway test station sees **only** its rows and **zero** KPFK rows (SELECT and writes); the service-role client still sees all rows (workers depend on this); an anonymous client can read a `final` draft but not a `draft`.
+- Run `npm test` and **show the passing output**. This automated test — not a one-off manual query — is the Phase C gate.
 
 **Commit:** `Enable RLS with per-station membership policies`.
 
@@ -287,6 +303,7 @@ If you believe something out-of-scope is genuinely required to make an in-scope 
 
 **Verification:**
 - `npm run build` passes.
+- Implement **test #3 (worker claim is station-scoped)** from §3.5 and run `npm test` — show it passing.
 - Run the workers locally (`npm run workers`) against a dev DB with KPFK + a test station; confirm an ingest job for KPFK only touches KPFK shows, and the claim guard never crosses stations. Show logs.
 
 **Commit:** `Thread station_id through all workers; per-station RSS and compliance config`.
@@ -308,7 +325,7 @@ If you believe something out-of-scope is genuinely required to make an in-scope 
 
 **Verification:**
 - `npm run build` passes (a missed caller will surface as a type error — good).
-- Confirm a per-station override of e.g. `max_entries_per_category` is read for that station and the global default for another. Show output.
+- Implement **test #2 (per-station settings fallback)** from §3.5 and run `npm test` — show it passing (override wins → global default → hard default; no cross-station bleed).
 
 **Commit:** `Per-station settings resolution + station-name prompt parameterization`.
 
@@ -344,7 +361,7 @@ If you believe something out-of-scope is genuinely required to make an in-scope 
 2. Add a short "Provisioning a new station" runbook (insert `stations` row, add `station_users`, set `station_settings` overrides, point `rss_base_url`).
 3. 🔒 **HARD — Run an adversarial review in a fresh subagent**: "Review the full diff against PLAN.md. Verify every phase's requirements are implemented, every API route in the Phase E checklist is station-filtered, every worker query (including claim guards) is station-scoped, RLS isolation actually holds, and nothing outside this plan's scope was changed. Also flag: any new `any`/`as any`/`@ts-ignore`/`@ts-expect-error`/type escape hatches, duplicate or overlapping helpers that should have been a single shared function, oversized god-files or god-functions (deeply nested / many-hundred-line functions) that should have been split, empty `catch` blocks or swallowed errors, and any silent fallback or auto-defaulted `station_id` that isn't one of the two sanctioned, logged fallbacks. Report only correctness/requirement gaps, the listed code-quality violations, and out-of-scope changes — not style preferences." Fix real gaps it finds; do not chase style nits into over-engineering.
 
-**Verification:** `npm run build` passes; review report shows no outstanding correctness gaps.
+**Verification:** `npm run build` passes; `npm test` passes (all three targeted tests green); review report shows no outstanding correctness gaps.
 
 **Commit:** `Document multi-station model; final review fixes`.
 
@@ -353,7 +370,7 @@ If you believe something out-of-scope is genuinely required to make an in-scope 
 ## 5. Definition of done (🔒 HARD — all must be true)
 
 1. `npm run build` passes with no type errors.
-2. RLS demonstrably isolates two stations (proven with real queries in Phase C, still true at the end).
+2. `npm test` passes: the three targeted integration tests (RLS isolation, settings fallback, worker claim scoping) from §3.5 are present and green. RLS demonstrably isolates two stations, and that test still passes at the end.
 3. All API routes in the Phase E checklist filter by station — confirmed by the Phase I review.
 4. All workers (candidate selects **and** claim guards) filter by `station_id`.
 5. KPFK's existing data is fully intact and its public reports resolve (legacy URL redirects work).
