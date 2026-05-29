@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { data, error } = await supabaseAdmin
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
+    const { data, error } = await supabase
       .from('compliance_wordlist')
       .select('*')
+      .eq('station_id', stationId)
       .order('word', { ascending: true })
 
     if (error) throw error
@@ -20,14 +25,18 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { word, severity } = body
 
     if (!word?.trim()) return NextResponse.json({ error: 'word required' }, { status: 400 })
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('compliance_wordlist')
-      .insert({ word: word.trim().toLowerCase(), severity: severity || 'critical' })
+      .insert({ station_id: stationId, word: word.trim().toLowerCase(), severity: severity || 'critical' })
 
     if (error) throw error
     return NextResponse.json({ ok: true })
@@ -39,15 +48,20 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { id, ...updates } = body
 
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('compliance_wordlist')
       .update(updates)
       .eq('id', id)
+      .eq('station_id', stationId)
 
     if (error) throw error
     return NextResponse.json({ ok: true })
@@ -59,15 +73,20 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('compliance_wordlist')
       .delete()
       .eq('id', parseInt(id))
+      .eq('station_id', stationId)
 
     if (error) throw error
     return NextResponse.json({ ok: true })

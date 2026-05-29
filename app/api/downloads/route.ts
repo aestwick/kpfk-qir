@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const year = parseInt(searchParams.get('year') ?? '0')
     const quarter = parseInt(searchParams.get('quarter') ?? '0')
@@ -21,9 +25,10 @@ export async function GET(request: NextRequest) {
     const { start, end } = getQuarterDateRange(year, quarter)
 
     if (type === 'episodes') {
-      const { data: episodes, error } = await supabaseAdmin
+      const { data: episodes, error } = await supabase
         .from('episode_log')
         .select('*')
+        .eq('station_id', stationId)
         .gte('air_date', start)
         .lte('air_date', end)
         .order('air_date', { ascending: true })
@@ -62,9 +67,10 @@ export async function GET(request: NextRequest) {
 
     if (type === 'transcripts' || type === 'vtts') {
       // Get episodes with transcripts for this quarter
-      const { data: episodes, error } = await supabaseAdmin
+      const { data: episodes, error } = await supabase
         .from('episode_log')
         .select('id, show_name, air_date, show_key')
+        .eq('station_id', stationId)
         .gte('air_date', start)
         .lte('air_date', end)
         .in('status', ['transcribed', 'summarized'])
@@ -82,10 +88,12 @@ export async function GET(request: NextRequest) {
       }
 
       const epIds = episodes.map((e) => e.id)
-      const { data: transcripts } = await supabaseAdmin
+      // transcripts has no station_id; scope via the episode_log join.
+      const { data: transcripts } = await supabase
         .from('transcripts')
-        .select('episode_id, transcript, vtt')
+        .select('episode_id, transcript, vtt, episode_log!inner(station_id)')
         .in('episode_id', epIds)
+        .eq('episode_log.station_id', stationId)
 
       if (!transcripts?.length) {
         return NextResponse.json(

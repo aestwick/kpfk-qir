@@ -1,31 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const episodeId = parseInt(params.id)
 
-    // Fetch episode, transcript, and compliance flags in parallel
+    // Fetch episode, transcript, and compliance flags in parallel.
+    // transcripts/compliance_flags have no station_id, so scope them via the
+    // episode_log!inner join filtered by station.
     const [episodeResult, transcriptResult, flagsResult] = await Promise.all([
-      supabaseAdmin
+      supabase
         .from('episode_log')
         .select('*')
         .eq('id', episodeId)
+        .eq('station_id', stationId)
         .single(),
-      supabaseAdmin
+      supabase
         .from('transcripts')
-        .select('*')
+        .select('*, episode_log!inner(station_id)')
         .eq('episode_id', episodeId)
+        .eq('episode_log.station_id', stationId)
         .single(),
-      supabaseAdmin
+      supabase
         .from('compliance_flags')
-        .select('*')
+        .select('*, episode_log!inner(station_id)')
         .eq('episode_id', episodeId)
+        .eq('episode_log.station_id', stationId)
         .order('created_at', { ascending: false }),
     ])
 
@@ -49,50 +58,80 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { action, ...updates } = body
     const episodeId = parseInt(params.id)
 
+    // Confirm the episode belongs to the active station before any mutation or
+    // job enqueue, so one station can't act on another's episode.
+    const { data: owned, error: ownedError } = await supabase
+      .from('episode_log')
+      .select('id')
+      .eq('id', episodeId)
+      .eq('station_id', stationId)
+      .maybeSingle()
+    if (ownedError) {
+      return NextResponse.json({ error: ownedError.message }, { status: 500 })
+    }
+    if (!owned) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
     if (action === 're-transcribe') {
-      await supabaseAdmin
+      await supabase
         .from('episode_log')
         .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
-      await transcribeQueue.add('re-transcribe', { episodeId })
+        .eq('station_id', stationId)
+      await transcribeQueue.add('re-transcribe', { episodeId, stationId })
       return NextResponse.json({ ok: true, message: 'Re-transcription queued' })
     }
 
     if (action === 're-summarize') {
-      await supabaseAdmin
+      await supabase
         .from('episode_log')
         .update({ status: 'transcribed', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
-      await summarizeQueue.add('re-summarize', { episodeId })
+        .eq('station_id', stationId)
+      await summarizeQueue.add('re-summarize', { episodeId, stationId })
       return NextResponse.json({ ok: true, message: 'Re-summarization queued' })
     }
 
     if (action === 'fix-dates') {
-      const { data: ep } = await supabaseAdmin
+      const { data: ep } = await supabase
         .from('episode_log')
         .select('mp3_url, duration')
         .eq('id', episodeId)
+        .eq('station_id', stationId)
         .single()
       if (!ep) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      const parsed = parseMp3Url(ep.mp3_url)
+      // MP3 filename prefix is station-specific; default to 'kpfk' if unset.
+      const { data: station } = await supabase
+        .from('stations')
+        .select('mp3_filename_prefix')
+        .eq('id', stationId)
+        .maybeSingle()
+      const parsed = parseMp3Url(ep.mp3_url, station?.mp3_filename_prefix ?? 'kpfk')
       if (!parsed) return NextResponse.json({ error: 'Could not parse date from URL' }, { status: 400 })
       const fields = dateFieldsFromUrl(parsed, ep.duration)
-      await supabaseAdmin
+      await supabase
         .from('episode_log')
         .update(fields)
         .eq('id', episodeId)
+        .eq('station_id', stationId)
       return NextResponse.json({ ok: true, message: 'Dates updated from URL', ...fields })
     }
 
     if (action === 'retry') {
-      await supabaseAdmin
+      await supabase
         .from('episode_log')
         .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
+        .eq('station_id', stationId)
       return NextResponse.json({ ok: true, message: 'Episode reset to pending' })
     }
 
@@ -109,10 +148,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
     }
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('episode_log')
       .update(safeUpdates)
       .eq('id', episodeId)
+      .eq('station_id', stationId)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

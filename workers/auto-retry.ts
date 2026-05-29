@@ -1,5 +1,7 @@
 import { Job } from 'bullmq'
 import { supabaseAdmin } from '../lib/supabase'
+import { listStationIds } from '../lib/stations'
+import { autoRetryQueue } from '../lib/queue'
 
 const MAX_RETRY_COUNT = 3
 // How long an episode may sit in a transient processing status before it's
@@ -10,20 +12,34 @@ const MAX_RETRY_COUNT = 3
 const STUCK_MINUTES = 60
 
 export async function processAutoRetry(job: Job) {
-  console.log('[auto-retry] checking failed episodes...')
+  const stationId = job.data?.stationId as string | undefined
+  const recoverAll = job.data?.recoverAll === true
+
+  // Cron/startup tick (no stationId): fan out one auto-retry job per station,
+  // preserving the recoverAll flag.
+  if (!stationId) {
+    const ids = await listStationIds()
+    for (const id of ids) {
+      await autoRetryQueue.add('auto-retry-station', { stationId: id, recoverAll })
+    }
+    console.log(`[auto-retry] dispatched auto-retry for ${ids.length} station(s)`)
+    return { dispatched: ids.length }
+  }
+
+  console.log(`[auto-retry] checking failed episodes for station ${stationId}...`)
 
   // Recover episodes orphaned in a transient status by a crashed worker.
   // On startup (recoverAll) reset them immediately — no worker is running yet,
   // so any such row is definitely orphaned. Periodically, only reset stale rows
   // so we never steal episodes a live worker is actively processing.
-  const recoverAll = job.data?.recoverAll === true
+  // Service-role bypasses RLS, so the station_id filter is the only guard.
   const staleCutoff = new Date(Date.now() - STUCK_MINUTES * 60_000).toISOString()
   let recovered = 0
   for (const [stuckStatus, resetTo] of [
     ['transcribing', 'pending'],
     ['summarizing', 'transcribed'],
   ] as const) {
-    let q = supabaseAdmin.from('episode_log').select('id').eq('status', stuckStatus)
+    let q = supabaseAdmin.from('episode_log').select('id').eq('station_id', stationId).eq('status', stuckStatus)
     if (!recoverAll) q = q.lt('updated_at', staleCutoff)
     const { data: stuck, error: stuckErr } = await q
     if (stuckErr) {
@@ -34,6 +50,7 @@ export async function processAutoRetry(job: Job) {
       await supabaseAdmin
         .from('episode_log')
         .update({ status: resetTo, updated_at: new Date().toISOString() })
+        .eq('station_id', stationId)
         .in('id', stuck.map((e) => e.id))
       recovered += stuck.length
       console.log(`[auto-retry] recovered ${stuck.length} stuck '${stuckStatus}' → ${resetTo}`)
@@ -44,6 +61,7 @@ export async function processAutoRetry(job: Job) {
   const { data: deadEpisodes, error: deadError } = await supabaseAdmin
     .from('episode_log')
     .select('id')
+    .eq('station_id', stationId)
     .eq('status', 'failed')
     .gte('retry_count', MAX_RETRY_COUNT)
 
@@ -54,6 +72,7 @@ export async function processAutoRetry(job: Job) {
     await supabaseAdmin
       .from('episode_log')
       .update({ status: 'dead', updated_at: new Date().toISOString() })
+      .eq('station_id', stationId)
       .in('id', deadIds)
     console.log(`[auto-retry] moved ${deadIds.length} episodes to dead status`)
   }
@@ -62,6 +81,7 @@ export async function processAutoRetry(job: Job) {
   const { data: retryable, error: retryError } = await supabaseAdmin
     .from('episode_log')
     .select('id, retry_count')
+    .eq('station_id', stationId)
     .eq('status', 'failed')
     .lt('retry_count', MAX_RETRY_COUNT)
 
@@ -79,6 +99,7 @@ export async function processAutoRetry(job: Job) {
   await supabaseAdmin
     .from('episode_log')
     .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
+    .eq('station_id', stationId)
     .in('id', retryIds)
 
   console.log(`[auto-retry] reset ${retryIds.length} episodes to pending`)

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonCards, SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
@@ -183,7 +184,7 @@ export default function CompliancePage() {
   const fetchFlags = useCallback(async () => {
     try {
       const params = buildApiParams()
-      const res = await fetch(`/api/compliance?${params}`)
+      const res = await authedFetch(`/api/compliance?${params}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setFlags(data.flags ?? [])
@@ -197,7 +198,7 @@ export default function CompliancePage() {
   // Fetch stats (total unresolved counts across all pages)
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('/api/compliance?stats=true')
+      const res = await authedFetch('/api/compliance?stats=true')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
       setStats(data.stats ?? { byType: {}, bySeverity: {}, total: 0 })
@@ -215,9 +216,9 @@ export default function CompliancePage() {
     Promise.all([
       fetchFlags(),
       fetchStats(),
-      fetch('/api/compliance/wordlist').then((r) => r.ok ? r.json() : { words: [] }),
-      fetch('/api/settings').then((r) => r.ok ? r.json() : { settings: {} }),
-      fetch('/api/compliance?by_show=true').then((r) => r.ok ? r.json() : { shows: [] }),
+      authedFetch('/api/compliance/wordlist').then((r) => r.ok ? r.json() : { words: [] }),
+      authedFetch('/api/settings').then((r) => r.ok ? r.json() : { settings: {} }),
+      authedFetch('/api/compliance?by_show=true').then((r) => r.ok ? r.json() : { shows: [] }),
     ]).then(([, , wordData, settingsData, showData]) => {
       setShowHealth(showData.shows ?? [])
       setWords(wordData.words ?? [])
@@ -281,7 +282,7 @@ export default function CompliancePage() {
     if (actionLoading) return
     setActionLoading(true)
     try {
-      const res = await fetch('/api/compliance', {
+      const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, resolved: true, resolved_notes: resolveNotes, resolved_by: 'dashboard' }),
@@ -305,7 +306,7 @@ export default function CompliancePage() {
     setActionLoading(true)
     try {
       const ids = Array.from(selected)
-      const res = await fetch('/api/compliance', {
+      const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, resolved: true, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
@@ -329,14 +330,14 @@ export default function CompliancePage() {
     if (!newWord.trim() || addingWord) return
     setAddingWord(true)
     try {
-      const res = await fetch('/api/compliance/wordlist', {
+      const res = await authedFetch('/api/compliance/wordlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ word: newWord.trim(), severity: newWordSeverity }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setNewWord('')
-      const listRes = await fetch('/api/compliance/wordlist')
+      const listRes = await authedFetch('/api/compliance/wordlist')
       if (listRes.ok) {
         const data = await listRes.json()
         setWords(data.words ?? [])
@@ -353,7 +354,7 @@ export default function CompliancePage() {
   // Delete word
   async function deleteWord(id: number) {
     try {
-      const res = await fetch(`/api/compliance/wordlist?id=${id}`, { method: 'DELETE' })
+      const res = await authedFetch(`/api/compliance/wordlist?id=${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setWords((prev) => prev.filter((w) => w.id !== id))
       toast('success', 'Word removed')
@@ -366,7 +367,7 @@ export default function CompliancePage() {
   // Edit word severity
   async function saveWordEdit(id: number) {
     try {
-      const res = await fetch('/api/compliance/wordlist', {
+      const res = await authedFetch('/api/compliance/wordlist', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, severity: editWordSeverity }),
@@ -386,7 +387,7 @@ export default function CompliancePage() {
     if (savingPrompt) return
     setSavingPrompt(true)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'compliance_prompt', value: compliancePrompt }),
@@ -407,7 +408,7 @@ export default function CompliancePage() {
     const updated = { ...checkToggles, [type]: enabled }
     setCheckToggles(updated)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'compliance_checks_enabled', value: updated }),
@@ -423,7 +424,7 @@ export default function CompliancePage() {
   async function toggleBlocking(b: boolean) {
     setBlocking(b)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'compliance_blocking', value: String(b) }),
@@ -440,7 +441,7 @@ export default function CompliancePage() {
     if (processingShow) return
     setProcessingShow(showKey)
     try {
-      const res = await fetch('/api/jobs', {
+      const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'compliance', show_key: showKey }),
@@ -459,6 +460,10 @@ export default function CompliancePage() {
   // Build URL for the public compliance report page with current filters
   function buildReportUrl(): string {
     const params = new URLSearchParams()
+    // The public compliance-report page is station-scoped via this slug
+    // (read from the qir_station cookie set by the station switcher).
+    const stationSlug = document.cookie.match(/(?:^|; )qir_station=([^;]*)/)?.[1]
+    if (stationSlug) params.set('station', decodeURIComponent(stationSlug))
     if (filterType) params.set('type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
     if (filterResolution === 'unresolved') params.set('unresolved', 'true')

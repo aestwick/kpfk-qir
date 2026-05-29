@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { useParams, useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 
@@ -58,7 +59,7 @@ export default function ShowPage() {
     })
     if (statusFilter) params.set('status', statusFilter)
 
-    const res = await fetch(`/api/episodes?${params}`)
+    const res = await authedFetch(`/api/episodes?${params}`)
     if (res.ok) {
       const data = await res.json()
       const eps = data.episodes ?? []

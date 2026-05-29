@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 
 export const dynamic = 'force-dynamic'
@@ -18,6 +18,10 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { episode_ids } = body as { episode_ids: number[] }
 
@@ -25,10 +29,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'episode_ids array required' }, { status: 400 })
     }
 
-    // Fetch current status for all requested episodes
-    const { data: episodes, error } = await supabaseAdmin
+    // Fetch current status for all requested episodes (scoped to station)
+    const { data: episodes, error } = await supabase
       .from('episode_log')
       .select('id, status')
+      .eq('station_id', stationId)
       .in('id', episode_ids)
 
     if (error) throw error
@@ -53,9 +58,10 @@ export async function POST(request: NextRequest) {
     // Reset failed episodes to pending so workers will pick them up
     const failedIds = (episodes ?? []).filter((ep) => ep.status === 'failed').map((ep) => ep.id)
     if (failedIds.length > 0) {
-      await supabaseAdmin
+      await supabase
         .from('episode_log')
         .update({ status: 'pending', error_message: null })
+        .eq('station_id', stationId)
         .in('id', failedIds)
     }
 
@@ -66,17 +72,17 @@ export async function POST(request: NextRequest) {
 
     const needsTranscription = statuses.pending + statuses.failed
     if (needsTranscription > 0) {
-      await transcribeQueue.add('audit-transcribe', { source: 'audit', chain: true })
+      await transcribeQueue.add('audit-transcribe', { source: 'audit', chain: true, stationId })
       triggered.push(`transcribe (${needsTranscription} episodes)`)
     }
 
     if (statuses.transcribed > 0) {
-      await summarizeQueue.add('audit-summarize', { source: 'audit', chain: true })
+      await summarizeQueue.add('audit-summarize', { source: 'audit', chain: true, stationId })
       triggered.push(`summarize (${statuses.transcribed} episodes)`)
     }
 
     if (statuses.summarized > 0) {
-      await complianceQueue.add('audit-compliance', { source: 'audit' })
+      await complianceQueue.add('audit-compliance', { source: 'audit', stationId })
       triggered.push(`compliance (${statuses.summarized} episodes)`)
     }
 

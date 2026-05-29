@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { getIssueCategories, isPipelinePaused } from '@/lib/settings'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,7 +25,11 @@ async function getQueueCounts(queue: typeof ingestQueue) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const result = await getStationContext(request)
+  if (result.error) return stationErrorResponse(result.error)
+  const { supabase, stationId } = result.context
+
   const qtr = getQuarterBounds()
 
   const [
@@ -54,9 +58,10 @@ export async function GET() {
     // 1. Overall status counts
     Promise.all(
       (['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable'] as const).map(async (s) => {
-        const { count } = await supabaseAdmin
+        const { count } = await supabase
           .from('episode_log')
           .select('*', { count: 'exact', head: true })
+          .eq('station_id', stationId)
           .eq('status', s)
         return [s, count ?? 0] as const
       })
@@ -65,9 +70,10 @@ export async function GET() {
     // 2. Quarter-specific status counts (include null air_date episodes by created_at)
     Promise.all(
       (['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable'] as const).map(async (s) => {
-        const { count } = await supabaseAdmin
+        const { count } = await supabase
           .from('episode_log')
           .select('*', { count: 'exact', head: true })
+          .eq('station_id', stationId)
           .eq('status', s)
           .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`)
         return [s, count ?? 0] as const
@@ -75,51 +81,58 @@ export async function GET() {
     ),
 
     // 3. Recently updated episodes
-    supabaseAdmin
+    supabase
       .from('episode_log')
       .select('id, show_name, headline, status, updated_at, air_date, issue_category')
+      .eq('station_id', stationId)
       .order('updated_at', { ascending: false })
       .limit(15),
 
     // 4. Recently processed (48h for day grouping)
-    supabaseAdmin
+    supabase
       .from('episode_log')
       .select('id, show_name, status, updated_at, headline, show_key')
+      .eq('station_id', stationId)
       .gte('updated_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
       .order('updated_at', { ascending: false })
       .limit(50),
 
     // 4b. Usage log for recent activity (duration/cost per episode)
-    supabaseAdmin
+    supabase
       .from('usage_log')
       .select('episode_id, operation, duration_seconds, estimated_cost')
+      .eq('station_id', stationId)
       .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()),
 
     // 5. Usage/cost for this quarter
-    supabaseAdmin
+    supabase
       .from('usage_log')
       .select('*')
+      .eq('station_id', stationId)
       .gte('created_at', qtr.start)
       .lte('created_at', qtr.end + 'T23:59:59'),
 
     // 6. Daily costs for last 30 days
-    supabaseAdmin
+    supabase
       .from('usage_log')
       .select('created_at, estimated_cost, service, operation')
+      .eq('station_id', stationId)
       .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
       .order('created_at', { ascending: true }),
 
     // 7. Issue category distribution (completed episodes this quarter)
-    supabaseAdmin
+    supabase
       .from('episode_log')
       .select('issue_category')
+      .eq('station_id', stationId)
       .in('status', ['summarized', 'compliance_checked'])
       .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 
     // 8. Show distribution (this quarter)
-    supabaseAdmin
+    supabase
       .from('episode_log')
       .select('show_name, show_key, status')
+      .eq('station_id', stationId)
       .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 
     // 9-12. Queue status
@@ -129,61 +142,69 @@ export async function GET() {
     getQueueCounts(complianceQueue),
 
     // 13. Processing times (last 7 days)
-    supabaseAdmin
+    supabase
       .from('usage_log')
       .select('operation, duration_seconds, estimated_cost, created_at')
+      .eq('station_id', stationId)
       .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
       .not('duration_seconds', 'is', null)
       .order('created_at', { ascending: false })
       .limit(200),
 
     // 14. Active shows (for coverage gaps)
-    supabaseAdmin
+    supabase
       .from('show_keys')
       .select('key, show_name, category, active')
+      .eq('station_id', stationId)
       .eq('active', true),
 
-    // 15. Unresolved compliance flags
-    supabaseAdmin
+    // 15. Unresolved compliance flags (scoped to station via episode_log join)
+    supabase
       .from('compliance_flags')
-      .select('flag_type, severity')
-      .eq('resolved', false),
+      .select('flag_type, severity, episode_log!inner(station_id)')
+      .eq('resolved', false)
+      .eq('episode_log.station_id', stationId),
 
     // 16. QIR drafts for current quarter
-    supabaseAdmin
+    supabase
       .from('qir_drafts')
       .select('id, status, version, curated_entries')
+      .eq('station_id', stationId)
       .eq('year', qtr.year)
       .eq('quarter', qtr.quarter)
       .order('version', { ascending: false })
       .limit(1),
 
     // 17. Current month usage
-    supabaseAdmin
+    supabase
       .from('usage_log')
       .select('estimated_cost, service')
+      .eq('station_id', stationId)
       .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
 
     // 18. Quality flags: episodes with very short transcripts but long duration
-    supabaseAdmin
+    supabase
       .from('episode_log')
       .select('id, show_name, headline, air_date, duration, status')
+      .eq('station_id', stationId)
       .in('status', ['transcribed', 'summarized', 'compliance_checked'])
       .gt('duration', 1800)
       .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 
     // 19. Last filed (finalized) QIR
-    supabaseAdmin
+    supabase
       .from('qir_drafts')
       .select('id, year, quarter, version, updated_at')
+      .eq('station_id', stationId)
       .eq('status', 'final')
       .order('updated_at', { ascending: false })
       .limit(1),
 
     // 20. Last completed job timestamp per queue type
-    supabaseAdmin
+    supabase
       .from('usage_log')
       .select('operation, created_at')
+      .eq('station_id', stationId)
       .in('operation', ['transcribe', 'summarize', 'compliance', 'ingest'])
       .order('created_at', { ascending: false })
       .limit(20),
@@ -301,7 +322,7 @@ export async function GET() {
       .map((r) => r.issue_category)
       .filter(Boolean)
   )
-  const allIssueCategories = await getIssueCategories()
+  const allIssueCategories = await getIssueCategories(stationId)
 
   // Compliance summary
   const complianceFlagCounts: Record<string, { count: number; critical: number }> = {}
@@ -333,9 +354,10 @@ export async function GET() {
   let qualityFlags: Array<{ id: number; show_name: string | null; headline: string | null; air_date: string | null; reason: string }> = []
   if (qualityCandidates.length > 0) {
     const candidateIds = qualityCandidates.map((e) => e.id)
-    const { data: transcripts } = await supabaseAdmin
+    const { data: transcripts } = await supabase
       .from('transcripts')
-      .select('episode_id, transcript')
+      .select('episode_id, transcript, episode_log!inner(station_id)')
+      .eq('episode_log.station_id', stationId)
       .in('episode_id', candidateIds)
     const transcriptLengths = new Map<number, number>()
     for (const t of transcripts ?? []) {

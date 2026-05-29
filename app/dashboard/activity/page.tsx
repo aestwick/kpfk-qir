@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonBlock } from '@/app/components/skeleton'
 
@@ -92,8 +93,8 @@ export default function ActivityPage() {
 
     // Fetch episodes and usage data in parallel
     const [episodesRes, usageRes] = await Promise.all([
-      fetch(`/api/episodes?sort=updated_at&order=desc&limit=500&page=1&since=${since}`),
-      fetch(`/api/usage?from=${since}`),
+      authedFetch(`/api/episodes?sort=updated_at&order=desc&limit=500&page=1&since=${since}`),
+      authedFetch(`/api/usage?from=${since}`),
     ])
 
     if (episodesRes.ok) {

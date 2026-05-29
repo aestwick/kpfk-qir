@@ -1,30 +1,74 @@
 import { supabaseAdmin } from './supabase'
+import { getStation } from './stations'
 
 const settingsCache = new Map<string, { value: unknown; fetchedAt: number }>()
 const CACHE_TTL_MS = 60_000 // 1 minute
 
-export async function getSetting<T = unknown>(key: string): Promise<T | null> {
-  const cached = settingsCache.get(key)
+function parseJsonValue(raw: unknown): unknown {
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw)
+    } catch {
+      // keep as string if not valid JSON
+    }
+  }
+  return raw
+}
+
+// The cache is keyed by station so stations never read each other's values.
+// One canonical key builder, used by every read/write/invalidate path.
+function cacheKeyFor(key: string, stationId?: string): string {
+  return `${stationId ?? 'global'}:${key}`
+}
+
+/**
+ * Resolve a setting. When stationId is given, resolution order is:
+ *   1. station_settings(station_id, key)   — this station's override
+ *   2. qir_settings(key)                    — global default layer
+ *   3. null                                 — caller supplies a hard-coded default
+ * When stationId is omitted, only the global qir_settings layer is consulted
+ * (for truly global operational flags like pipeline_paused/pipeline_mode).
+ *
+ * The 60s cache is keyed by (stationId|'global', key) so stations never read
+ * each other's values.
+ */
+export async function getSetting<T = unknown>(key: string, stationId?: string): Promise<T | null> {
+  const cacheKey = cacheKeyFor(key, stationId)
+  const cached = settingsCache.get(cacheKey)
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.value as T
   }
 
+  // 1. Per-station override.
+  if (stationId) {
+    const { data: override } = await supabaseAdmin
+      .from('station_settings')
+      .select('value')
+      .eq('station_id', stationId)
+      .eq('key', key)
+      .maybeSingle()
+    if (override) {
+      const parsed = parseJsonValue(override.value)
+      settingsCache.set(cacheKey, { value: parsed, fetchedAt: Date.now() })
+      return parsed as T
+    }
+  }
+
+  // 2. Global default layer. Log when a station falls back to it (sanctioned
+  // fallback per the plan — kept visible, not silent). Cached, so this logs at
+  // most once per 60s per (station, key).
+  if (stationId) {
+    console.log(`[settings] station ${stationId} has no override for '${key}' — using global qir_settings`)
+  }
   const { data } = await supabaseAdmin
     .from('qir_settings')
     .select('value')
     .eq('key', key)
-    .single()
+    .maybeSingle()
 
   if (data) {
-    let parsed: unknown = data.value
-    if (typeof data.value === 'string') {
-      try {
-        parsed = JSON.parse(data.value)
-      } catch {
-        // keep as string if not valid JSON
-      }
-    }
-    settingsCache.set(key, { value: parsed, fetchedAt: Date.now() })
+    const parsed = parseJsonValue(data.value)
+    settingsCache.set(cacheKey, { value: parsed, fetchedAt: Date.now() })
     return parsed as T
   }
 
@@ -33,28 +77,35 @@ export async function getSetting<T = unknown>(key: string): Promise<T | null> {
 
 /**
  * Drop a cached setting (or the whole cache) so the next read hits the DB.
- * Call after writing to qir_settings so changes like pause/resume take effect
- * immediately instead of lagging up to CACHE_TTL_MS.
+ * Call after writing a setting so changes like pause/resume take effect
+ * immediately instead of lagging up to CACHE_TTL_MS. Cache keys are
+ * station-prefixed, so clear this key for every station.
  */
 export function invalidateSetting(key?: string): void {
-  if (key) settingsCache.delete(key)
-  else settingsCache.clear()
+  if (!key) {
+    settingsCache.clear()
+    return
+  }
+  const suffix = `:${key}`
+  for (const k of Array.from(settingsCache.keys())) {
+    if (k.endsWith(suffix)) settingsCache.delete(k)
+  }
 }
 
-export async function getExcludedCategories(): Promise<string[]> {
-  return (await getSetting<string[]>('excluded_categories')) ?? ['Music', 'Español']
+export async function getExcludedCategories(stationId: string): Promise<string[]> {
+  return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
 }
 
-export async function getTranscribeBatchSize(): Promise<number> {
-  return (await getSetting<number>('transcribe_batch_size')) ?? 5
+export async function getTranscribeBatchSize(stationId: string): Promise<number> {
+  return (await getSetting<number>('transcribe_batch_size', stationId)) ?? 5
 }
 
-export async function getSummarizeBatchSize(): Promise<number> {
-  return (await getSetting<number>('summarize_batch_size')) ?? 10
+export async function getSummarizeBatchSize(stationId: string): Promise<number> {
+  return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
 }
 
-export async function getComplianceChecksEnabled(): Promise<Record<string, boolean>> {
-  return (await getSetting<Record<string, boolean>>('compliance_checks_enabled')) ?? {
+export async function getComplianceChecksEnabled(stationId: string): Promise<Record<string, boolean>> {
+  return (await getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId)) ?? {
     profanity: true,
     station_id_missing: true,
     technical: true,
@@ -64,14 +115,17 @@ export async function getComplianceChecksEnabled(): Promise<Record<string, boole
   }
 }
 
-export async function getCompliancePrompt(): Promise<string> {
-  return (await getSetting<string>('compliance_prompt')) ?? ''
+export async function getCompliancePrompt(stationId: string): Promise<string> {
+  const raw = (await getSetting<string>('compliance_prompt', stationId)) ?? DEFAULT_COMPLIANCE_PROMPT
+  return fillStationName(raw, await stationName(stationId))
 }
 
-export async function isComplianceBlocking(): Promise<boolean> {
-  return (await getSetting<boolean>('compliance_blocking')) ?? false
+export async function isComplianceBlocking(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('compliance_blocking', stationId)) ?? false
 }
 
+// Pipeline pause is a GLOBAL operational flag — the worker pool is shared across
+// stations, so pausing pauses everything. Kept global (no stationId) by design.
 export async function isPipelinePaused(): Promise<boolean> {
   // Read fresh every time — never cache. This is a control signal toggled from
   // the dashboard and polled by both the UI and workers; a stale cached value
@@ -91,12 +145,23 @@ export async function isPipelinePaused(): Promise<boolean> {
       // keep as-is
     }
   }
-  // Refresh the shared cache too, so getSetting('pipeline_paused') callers stay consistent
-  settingsCache.set('pipeline_paused', { value: value ?? false, fetchedAt: Date.now() })
+  // Refresh the shared cache too, so getSetting('pipeline_paused') callers stay
+  // consistent — using the same station-prefixed key getSetting reads (global).
+  settingsCache.set(cacheKeyFor('pipeline_paused'), { value: value ?? false, fetchedAt: Date.now() })
   return value === true
 }
 
-export const DEFAULT_SUMMARIZATION_PROMPT = `You are an expert public radio producer for KPFK.
+/** Replace the {{STATION_NAME}} placeholder used in parameterized prompts. */
+export function fillStationName(text: string, name: string): string {
+  return text.split('{{STATION_NAME}}').join(name)
+}
+
+async function stationName(stationId: string): Promise<string> {
+  const station = await getStation(stationId)
+  return station?.name ?? ''
+}
+
+export const DEFAULT_SUMMARIZATION_PROMPT = `You are an expert public radio producer for {{STATION_NAME}}.
 Your task is to produce an internal archival log of a radio broadcast based on a transcript, and to flag any clear conflicts with provided metadata.
 This is NOT a program description or promotional summary.
 INPUTS:
@@ -147,16 +212,44 @@ OUTPUT: Return ONLY valid JSON. No markdown, no extra text.
 Return an object where keys are category names and values are arrays of episode IDs that should be included.
 Example: {"Civil Rights / Social Justice": [123, 456, 789], "Health": [101, 202]}`
 
-export async function getSummarizationPrompt(): Promise<string> {
-  return (await getSetting<string>('summarization_prompt')) ?? DEFAULT_SUMMARIZATION_PROMPT
+// Default compliance prompt with the station-name placeholder. The KPFK-seeded
+// value in qir_settings (migration 004) still references KPFK literally; that is
+// a documented global default — other stations should set a station_settings
+// override (or use {{STATION_NAME}}) for their own compliance prompt.
+export const DEFAULT_COMPLIANCE_PROMPT = `You are an FCC compliance reviewer for {{STATION_NAME}}, a noncommercial community radio station.
+
+Review the following transcript for potential compliance issues. Look for:
+
+1. PAYOLA/PLUGOLA: Undisclosed commercial promotion. Flag if a host promotes a product, service, or business without disclosure. Do NOT flag: pledge drive fundraising, promoting station events, journalistic discussion of books/films/music, or interviews where guests mention their own work in context.
+
+2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure.
+
+3. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references that could violate FCC indecency standards during safe harbor restricted hours (6am-10pm). Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault, or academic/documentary context.
+
+Return ONLY valid JSON. If no issues found, return empty flags array.
+{
+  "flags": [
+    {
+      "type": "payola_plugola" | "sponsor_id" | "indecency",
+      "excerpt": "relevant quote from transcript (under 200 chars)",
+      "details": "brief explanation of the concern",
+      "severity": "warning" | "critical"
+    }
+  ]
+}`
+
+export async function getSummarizationPrompt(stationId: string): Promise<string> {
+  const raw = (await getSetting<string>('summarization_prompt', stationId)) ?? DEFAULT_SUMMARIZATION_PROMPT
+  return fillStationName(raw, await stationName(stationId))
 }
 
-export async function getCurationPrompt(): Promise<string> {
-  return (await getSetting<string>('curation_prompt')) ?? DEFAULT_CURATION_PROMPT
+export async function getCurationPrompt(stationId: string): Promise<string> {
+  const raw = (await getSetting<string>('curation_prompt', stationId)) ?? DEFAULT_CURATION_PROMPT
+  return fillStationName(raw, await stationName(stationId))
 }
 
-export async function getIssueCategories(): Promise<string[]> {
-  return (await getSetting<string[]>('issue_categories')) ?? [
+export async function getIssueCategories(stationId: string): Promise<string[]> {
+  return (await getSetting<string[]>('issue_categories', stationId)) ?? [
     'Civil Rights / Social Justice',
     'Immigration',
     'Economy / Labor',

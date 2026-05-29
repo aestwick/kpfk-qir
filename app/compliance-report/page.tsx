@@ -1,8 +1,19 @@
 import { supabaseAdmin } from '@/lib/supabase'
+import { notFound } from 'next/navigation'
 import PrintButton from './print-button'
 import type { Metadata } from 'next'
 
 export const dynamic = 'force-dynamic'
+
+async function resolveStation(slug: string): Promise<{ id: string; name: string } | null> {
+  if (!slug) return null
+  const { data } = await supabaseAdmin
+    .from('stations')
+    .select('id, name')
+    .eq('slug', slug)
+    .maybeSingle()
+  return data ?? null
+}
 
 interface ComplianceFlag {
   id: number
@@ -84,7 +95,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const quarter = (searchParams.quarter as string) ?? ''
   const flagType = (searchParams.type as string) ?? ''
-  const title = `KPFK Compliance Report${quarter ? ` — Q${quarter.split('-')[1]} ${quarter.split('-')[0]}` : ''}${flagType ? ` — ${typeLabels[flagType] ?? flagType}` : ''}`
+  const station = await resolveStation((searchParams.station as string) ?? '')
+  const name = station?.name ?? 'Compliance Report'
+  const title = `${name} Compliance Report${quarter ? ` — Q${quarter.split('-')[1]} ${quarter.split('-')[0]}` : ''}${flagType ? ` — ${typeLabels[flagType] ?? flagType}` : ''}`
   return { title, description: title }
 }
 
@@ -99,10 +112,19 @@ export default async function ComplianceReportPage({
   const unresolvedOnly = (searchParams.unresolved as string) !== 'false' // default true
   const showFilter = (searchParams.show as string) ?? ''
 
-  // Build query
+  // Resolve the station this report is for (passed by the dashboard link).
+  // No default — an unknown/missing station 404s rather than leaking cross-station.
+  const station = await resolveStation((searchParams.station as string) ?? '')
+  if (!station) {
+    notFound()
+  }
+
+  // Build query — scoped to the station via the inner episode_log join
+  // (compliance_flags has no station_id column of its own).
   let query = supabaseAdmin
     .from('compliance_flags')
     .select('*, episode_log!inner(show_name, show_key, air_date, air_time, duration, headline, host)')
+    .eq('episode_log.station_id', station.id)
     .order('created_at', { ascending: false })
 
   if (flagType) query = query.eq('flag_type', flagType)
@@ -241,7 +263,7 @@ export default async function ComplianceReportPage({
 
         {/* Header */}
         <header className="text-center mb-8 border-b dark:border-warm-700 pb-6">
-          <h1 className="text-2xl font-bold">KPFK 90.7 FM — Compliance Report</h1>
+          <h1 className="text-2xl font-bold">{station.name} — Compliance Report</h1>
           {quarter && (
             <p className="text-gray-600 dark:text-warm-400 mt-1">{getQuarterLabel(quarter)}</p>
           )}
@@ -371,7 +393,7 @@ export default async function ComplianceReportPage({
 
         {/* Footer */}
         <footer className="text-center text-sm text-gray-500 dark:text-warm-400 border-t dark:border-warm-700 pt-4 mt-8">
-          <p>KPFK 90.7 FM Compliance Report — Automated analysis, subject to review.</p>
+          <p>{station.name} Compliance Report — Automated analysis, subject to review.</p>
         </footer>
       </div>
     </>

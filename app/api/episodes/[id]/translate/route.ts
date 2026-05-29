@@ -1,26 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const episodeId = parseInt(params.id)
     const openaiKey = process.env.OPENAI_API_KEY
     if (!openaiKey) {
       return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 })
     }
 
-    // Fetch transcript
-    const { data: transcript, error } = await supabaseAdmin
+    // Fetch transcript, scoped to this station via the episode_log join
+    // (transcripts has no station_id of its own).
+    const { data: transcript, error } = await supabase
       .from('transcripts')
-      .select('*')
+      .select('*, episode_log!inner(station_id)')
       .eq('episode_id', episodeId)
+      .eq('episode_log.station_id', stationId)
       .single()
 
     if (error || !transcript) {
@@ -114,7 +120,7 @@ export async function POST(
     }
 
     // Store translations
-    await supabaseAdmin
+    await supabase
       .from('transcripts')
       .update({
         english_transcript: englishTranscript,
@@ -132,7 +138,8 @@ export async function POST(
         totalInput * OPENAI_INPUT_COST_PER_TOKEN +
         totalOutput * OPENAI_OUTPUT_COST_PER_TOKEN
 
-      await supabaseAdmin.from('usage_log').insert({
+      await supabase.from('usage_log').insert({
+        station_id: stationId,
         episode_id: episodeId,
         service: 'openai',
         model: 'gpt-4o-mini',

@@ -1,5 +1,7 @@
+import { NextRequest } from 'next/server'
+import { SupabaseClient } from '@supabase/supabase-js'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,11 +33,12 @@ function getCurrentQuarterBounds() {
   return { start, end }
 }
 
-async function getEpisodeBacklog() {
+async function getEpisodeBacklog(supabase: SupabaseClient, stationId: string) {
   const { start, end } = getCurrentQuarterBounds()
 
-  // Use count queries to avoid Supabase's default 1000-row limit
-  const baseQuery = () => supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }).gte('air_date', start).lte('air_date', end)
+  // Per-station backlog. Uses the request-scoped (RLS) client plus an explicit
+  // station filter; head:true count queries avoid Supabase's default 1000-row cap.
+  const baseQuery = () => supabase.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).gte('air_date', start).lte('air_date', end)
 
   const [pending, transcribed, summarized, complianceChecked, failed, total] = await Promise.all([
     baseQuery().eq('status', 'pending'),
@@ -68,7 +71,13 @@ async function getEpisodeBacklog() {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Authenticated like every other Phase E route: the client consumes this
+  // stream via fetch() (not EventSource), so it can send a Bearer token.
+  const result = await getStationContext(request)
+  if (result.error) return stationErrorResponse(result.error)
+  const { supabase, stationId } = result.context
+
   const encoder = new TextEncoder()
 
   // Shared cleanup state — accessible from both start() and cancel()
@@ -81,18 +90,24 @@ export async function GET() {
       async function push() {
         if (closed) return
         try {
+          // NOTE: queue counts are a GLOBAL pipeline-health metric. BullMQ runs
+          // one shared queue per stage (the plan forbids per-station queues), so
+          // these depths are network-wide, not per-station. Only `backlog` is
+          // station-scoped. Acceptable for a single-operator Pacifica network.
           const [ingest, transcribe, summarize, compliance, backlog] = await Promise.all([
             getQueueCounts(ingestQueue),
             getQueueCounts(transcribeQueue),
             getQueueCounts(summarizeQueue),
             getQueueCounts(complianceQueue),
-            getEpisodeBacklog(),
+            getEpisodeBacklog(supabase, stationId),
           ])
 
           const data = { ingest, transcribe, summarize, compliance, backlog }
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
-        } catch {
-          // Silently skip on error — client will reconnect
+        } catch (err) {
+          // Skip this tick but surface the error (no silent swallow); the client
+          // keeps the previous snapshot and the next tick/reconnect retries.
+          console.error('[events] failed to push update:', err)
         }
       }
 

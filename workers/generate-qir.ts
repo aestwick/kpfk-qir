@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
 import { getSetting, getCurationPrompt } from '../lib/settings'
+import { getStation } from '../lib/stations'
 import {
   episodeToQirEntry,
   formatFullReport,
@@ -14,6 +15,8 @@ import {
 export interface GenerateQirOptions {
   year: number
   quarter: number
+  /** Station this draft belongs to — scopes episodes and the stored draft. */
+  stationId: string
   /** If provided, only include episodes from these show_keys */
   includedShows?: string[]
   /** Custom guidance text appended to the AI curation prompt */
@@ -21,8 +24,11 @@ export interface GenerateQirOptions {
 }
 
 export async function processGenerateQir(job: Job) {
-  const { year, quarter, includedShows, guidance } = job.data as GenerateQirOptions
-  console.log(`[generate-qir] starting Q${quarter} ${year}...`)
+  const { year, quarter, stationId, includedShows, guidance } = job.data as GenerateQirOptions
+  if (!stationId) throw new Error('stationId is required to generate a QIR draft')
+  const station = await getStation(stationId)
+  if (!station) throw new Error(`[generate-qir] station ${stationId} not found`)
+  console.log(`[generate-qir] starting Q${quarter} ${year} for ${station.slug}...`)
   if (includedShows?.length) console.log(`[generate-qir] filtering to ${includedShows.length} shows`)
   if (guidance) console.log(`[generate-qir] custom guidance provided`)
 
@@ -32,11 +38,11 @@ export async function processGenerateQir(job: Job) {
   const openai = new OpenAI({ apiKey: openaiKey })
   const { start, end } = getQuarterDateRange(year, quarter)
 
-  const curationSystemPrompt = await getCurationPrompt()
+  const curationSystemPrompt = await getCurationPrompt(stationId)
   const maxPerCategory =
-    (await getSetting<number>('max_entries_per_category')) ?? 12
+    (await getSetting<number>('max_entries_per_category', stationId)) ?? 12
   const issueCategories =
-    (await getSetting<string[]>('issue_categories')) ?? [
+    (await getSetting<string[]>('issue_categories', stationId)) ?? [
       'Civil Rights / Social Justice',
       'Immigration',
       'Economy / Labor',
@@ -52,6 +58,7 @@ export async function processGenerateQir(job: Job) {
   const { data: episodes, error } = await supabaseAdmin
     .from('episode_log')
     .select('*')
+    .eq('station_id', stationId)
     .in('status', ['summarized', 'compliance_checked'])
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('air_date', { ascending: true })
@@ -84,7 +91,7 @@ export async function processGenerateQir(job: Job) {
   }
 
   // Build the full report text
-  const fullText = formatFullReport(allEntries, year, quarter)
+  const fullText = formatFullReport(allEntries, year, quarter, station.name)
 
   // Build prompt for AI curation
   const categorySummaries: string[] = []
@@ -141,12 +148,13 @@ ${categorySummaries.join('\n')}`
 
   // Build curated entries list
   const curatedEntries = allEntries.filter((e) => curatedIds.has(e.episode_id))
-  const curatedText = formatCuratedReport(curatedEntries, year, quarter)
+  const curatedText = formatCuratedReport(curatedEntries, year, quarter, station.name)
 
   // Get the next version number for this quarter
   const { data: existingDrafts } = await supabaseAdmin
     .from('qir_drafts')
     .select('version')
+    .eq('station_id', stationId)
     .eq('year', year)
     .eq('quarter', quarter)
     .order('version', { ascending: false })

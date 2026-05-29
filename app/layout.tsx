@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'QIR — KPFK 90.7FM',
-  description: 'Quarterly Issues Report automation for KPFK',
+  title: 'QIR — Quarterly Issues Report',
+  description: 'Quarterly Issues Report automation for community radio stations',
 }
 
 export default function RootLayout({

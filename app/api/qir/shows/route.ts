@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
 
 export const dynamic = 'force-dynamic'
@@ -11,6 +11,10 @@ export const dynamic = 'force-dynamic'
  */
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const year = parseInt(searchParams.get('year') ?? '')
     const quarter = parseInt(searchParams.get('quarter') ?? '')
@@ -22,9 +26,10 @@ export async function GET(request: NextRequest) {
     const { start, end } = getQuarterDateRange(year, quarter)
 
     // Get all completed episodes in this quarter
-    const { data: episodes, error } = await supabaseAdmin
+    const { data: episodes, error } = await supabase
       .from('episode_log')
       .select('show_key, show_name')
+      .eq('station_id', stationId)
       .in('status', ['summarized', 'compliance_checked'])
       .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 

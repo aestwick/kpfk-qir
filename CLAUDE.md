@@ -120,16 +120,25 @@ app/components/
 supabase/migrations/
   001_usage_settings_drafts.sql — Creates usage_log, qir_settings, qir_drafts,
                                   transcript_corrections tables + default settings
+  ...
+  012_stations.sql              — Tenant tables (stations, station_users,
+                                  super_admins, station_settings) + KPFK seed
+  013_station_id_columns.sql    — Adds station_id to tenant tables, backfills
+                                  KPFK, per-station uniqueness + indexes
+  014_rls.sql                   — user_station_ids() + RLS policies on all
+                                  tenant tables
+  015_seed_pacifica_stations.sql — Seeds KPFA, WPFW, KPFT, WBAI
 ```
 
 **Key tables:**
-- `episode_log` — Core episode data + processing status + AI outputs
-- `transcripts` — Full transcript text + VTT captions (1:1 with episode)
-- `show_keys` — Show metadata (key, name, category, active)
-- `usage_log` — Every API call logged with cost
-- `qir_settings` — Key-value config (categories, models, batch sizes, prompts)
-- `qir_drafts` — Versioned QIR reports (draft/final status)
-- `transcript_corrections` — Find-and-replace rules applied post-transcription
+- `episode_log` — Core episode data + processing status + AI outputs (`station_id`-scoped)
+- `transcripts` — Full transcript text + VTT captions (1:1 with episode; scoped via episode)
+- `show_keys` — Show metadata (key, name, category, active; `station_id`-scoped, unique per `(station_id, key)`)
+- `usage_log` — Every API call logged with cost (`station_id`-scoped)
+- `qir_settings` — **Global** key-value config (default layer under `station_settings`)
+- `qir_drafts` — Versioned QIR reports (draft/final; `station_id`-scoped)
+- `transcript_corrections` — Find-and-replace rules applied post-transcription (`station_id`-scoped)
+- `stations` / `station_users` / `super_admins` / `station_settings` — multi-tenant tables (see Multi-Station Model)
 
 ### Config & Deploy
 
@@ -150,11 +159,30 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 
 **Settings are in the database**, not env vars. Categories, batch sizes, models, prompts — all editable from the dashboard without redeploying.
 
-**Auth is currently bypassed** for testing (`dashboard/layout.tsx` lines 34–38). Remove the early return to re-enable Supabase auth.
+**Auth is active** — `dashboard/layout.tsx` requires a Supabase session and redirects to `/login` otherwise. (An older note about an "auth bypass" is obsolete.)
 
 **Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.
 
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
+
+## Multi-Station (Multi-Tenant) Model
+
+The app is multi-tenant: **one codebase, one database, one deployment** serving multiple radio stations (KPFK + the other Pacifica stations). Isolation is **defense in depth** — Postgres RLS is the hard backstop, and app code *also* filters every query by `station_id`.
+
+- **Tenant tables** (migrations 012–015): `stations` (slug, name, timezone, `rss_base_url`, `mp3_filename_prefix`, `station_id_patterns`), `station_users` (user↔station with role viewer/editor/admin), `super_admins`, `station_settings` (per-station overrides). Every tenant-scoped table (`episode_log`, `show_keys`, `qir_drafts`, `transcript_corrections`, `compliance_wordlist`, `usage_log`) carries `station_id`; `transcripts`/`compliance_flags` inherit scope via their `episode_id` join. `qir_settings` stays **global** (the default layer under `station_settings`).
+- **RLS** (014): `user_station_ids()` returns the caller's stations (memberships, or all for super_admins); policies gate every tenant table by it. Finalized `qir_drafts` are additionally public-readable (`status='final'`).
+- **Request path**: `lib/auth.ts#getStationContext(request)` resolves the caller (Bearer token), their allowed stations, and the active station (from the `qir_station` cookie / `x-station-slug` header), returning a **request-scoped RLS client**. API routes use it + an explicit `.eq('station_id', …)`. Client pages call `lib/api-client.ts#authedFetch`. The active station is chosen client-side by the station switcher — the server never defaults one (a wrong default would leak cross-tenant).
+- **Workers** run with the service-role client (RLS bypassed), so their `station_id` filter is the *only* guard. Jobs carry `stationId`; the ingest/auto-retry cron acts as a per-station **dispatcher** (fans out one job per station); transcribe/summarize/compliance filter both the candidate-select and the atomic claim guard by `station_id`.
+- **Settings** resolve per station: `station_settings(station_id,key)` → global `qir_settings(key)` → hard-coded default (`lib/settings.ts`, 60s cache keyed by `(stationId,key)`). Prompts interpolate `{{STATION_NAME}}`.
+- **Public reports** live at `/[station]/[year]/q[quarter]`; legacy `/[year]/q[quarter]` 308-redirects to `/kpfk/...` (next.config.js) so filed FCC links keep resolving.
+
+### Provisioning a new station (SQL/admin, no UI yet)
+
+1. **Create the station:** `insert into stations (slug, name, timezone, rss_base_url, mp3_filename_prefix, station_id_patterns) values ('wxyz', 'WXYZ, City', 'America/New_York', 'https://archive.example.org/getrss.php?id=', 'wxyz', array['wxyz','101.5']);` — `rss_base_url` is the full prefix up to `?id=` (the show key is appended); leave it null until known (ingest skips the station, visibly, until set).
+2. **Add shows:** insert `show_keys` rows with that `station_id`.
+3. **Grant access:** `insert into station_users (station_id, user_id, role) values (<station>, <auth.users.id>, 'admin');` (or add to `super_admins` for all-station access).
+4. **Optional overrides:** insert `station_settings` rows (e.g. a station-specific `summarization_prompt`/`compliance_prompt`) — otherwise the global `qir_settings` defaults apply.
+5. Workers pick the station up automatically on the next ingest cron tick.
 
 ## Commands
 
@@ -170,9 +198,9 @@ npm run build        # Next.js production build
 See `IMPROVEMENTS.md` for the prioritized improvement plan. Key items:
 
 - **P0 (before going live):** Missing DB indexes, no OpenAI retry logic, no BullMQ job timeouts
-- **P1 (next sprint):** Separate workers from web server, Docker resource limits, enable auth, fix N+1 queries
-- **Auth is bypassed** — re-enable before production use
-- **No tests** — the project has no test suite yet
+- **P1 (next sprint):** Separate workers from web server, Docker resource limits, fix N+1 queries
+- **Multi-station follow-ups:** the `get_episode_counts_by_show` RPC is not station-aware (can over-count episodes for show keys shared across stations) — needs a migration adding a `station_id` arg. The 4 non-KPFK stations need `rss_base_url`/`mp3_filename_prefix` set before their ingest works.
+- **No tests** — the three targeted integration tests (RLS isolation, settings fallback, worker claim scoping) require a throwaway Postgres and are still pending.
 
 ## Environment
 

@@ -1,18 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/compliance — list flags with pagination and filters, or stats summary
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
 
     // GET /api/compliance?stats=true — return unresolved counts by type and severity
     if (searchParams.get('stats') === 'true') {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('compliance_flags')
-        .select('flag_type, severity')
+        .select('flag_type, severity, episode_log!inner(station_id)')
+        .eq('episode_log.station_id', stationId)
         .eq('resolved', false)
 
       if (error) throw error
@@ -30,17 +35,19 @@ export async function GET(request: NextRequest) {
     // GET /api/compliance?by_show=true — per-show compliance summary
     if (searchParams.get('by_show') === 'true') {
       // Get all compliance-checked episodes
-      const { data: episodes, error: epError } = await supabaseAdmin
+      const { data: episodes, error: epError } = await supabase
         .from('episode_log')
         .select('id, show_name, show_key')
+        .eq('station_id', stationId)
         .in('status', ['compliance_checked', 'summarized'])
 
       if (epError) throw epError
 
-      // Get all unresolved flags
-      const { data: flagRows, error: flagError } = await supabaseAdmin
+      // Get all unresolved flags (scoped to this station via episode_log join)
+      const { data: flagRows, error: flagError } = await supabase
         .from('compliance_flags')
-        .select('episode_id, flag_type, severity')
+        .select('episode_id, flag_type, severity, episode_log!inner(station_id)')
+        .eq('episode_log.station_id', stationId)
         .eq('resolved', false)
 
       if (flagError) throw flagError
@@ -130,10 +137,11 @@ export async function GET(request: NextRequest) {
     const sortBy = allowedSortColumns.includes(sortByRaw) ? sortByRaw : 'created_at'
     const sortDir = searchParams.get('dir') === 'asc'
 
-    // Build query with count for pagination
-    let query = supabaseAdmin
+    // Build query with count for pagination (scoped to station via the join)
+    let query = supabase
       .from('compliance_flags')
-      .select('*, episode_log!inner(show_name, show_key, air_date, headline)', { count: 'exact' })
+      .select('*, episode_log!inner(show_name, show_key, air_date, headline, station_id)', { count: 'exact' })
+      .eq('episode_log.station_id', stationId)
       .order(sortBy, { ascending: sortDir })
       .range(offset, offset + limit - 1)
 
@@ -177,6 +185,10 @@ export async function GET(request: NextRequest) {
 // PATCH /api/compliance — resolve/unresolve flags (single or bulk)
 export async function PATCH(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
 
     // Bulk resolve: { ids: number[], resolved_by, resolved_notes }
@@ -188,13 +200,27 @@ export async function PATCH(request: NextRequest) {
       if (resolved_by) update.resolved_by = resolved_by
       if (resolved_notes !== undefined) update.resolved_notes = resolved_notes
 
-      const { error } = await supabaseAdmin
+      // compliance_flags has no station_id; restrict the update to ids whose
+      // episode belongs to this station (resolved via the episode_log join).
+      const { data: ownedFlags, error: ownedError } = await supabase
+        .from('compliance_flags')
+        .select('id, episode_log!inner(station_id)')
+        .in('id', ids)
+        .eq('episode_log.station_id', stationId)
+      if (ownedError) throw ownedError
+      const ownedIds = (ownedFlags ?? []).map((f) => f.id)
+
+      if (ownedIds.length === 0) {
+        return NextResponse.json({ ok: true, count: 0 })
+      }
+
+      const { error } = await supabase
         .from('compliance_flags')
         .update(update)
-        .in('id', ids)
+        .in('id', ownedIds)
 
       if (error) throw error
-      return NextResponse.json({ ok: true, count: ids.length })
+      return NextResponse.json({ ok: true, count: ownedIds.length })
     }
 
     // Single resolve: { id, resolved, resolved_by, resolved_notes }
@@ -205,7 +231,17 @@ export async function PATCH(request: NextRequest) {
     if (resolved_by) update.resolved_by = resolved_by
     if (resolved_notes !== undefined) update.resolved_notes = resolved_notes
 
-    const { error } = await supabaseAdmin
+    // Confirm the flag's episode belongs to this station before updating.
+    const { data: ownedFlag, error: ownedError } = await supabase
+      .from('compliance_flags')
+      .select('id, episode_log!inner(station_id)')
+      .eq('id', id)
+      .eq('episode_log.station_id', stationId)
+      .maybeSingle()
+    if (ownedError) throw ownedError
+    if (!ownedFlag) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    const { error } = await supabase
       .from('compliance_flags')
       .update(update)
       .eq('id', id)

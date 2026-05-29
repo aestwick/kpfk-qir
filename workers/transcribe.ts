@@ -38,12 +38,13 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
   return { start, end }
 }
 
-async function loadCorrections(): Promise<
+async function loadCorrections(stationId: string): Promise<
   Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
 > {
   const { data } = await supabaseAdmin
     .from('transcript_corrections')
     .select('wrong, correct, case_sensitive, is_regex')
+    .eq('station_id', stationId)
     .eq('active', true)
 
   return (data ?? []).map((c) => ({
@@ -159,10 +160,14 @@ export async function processTranscribe(job: Job) {
     console.log('[transcribe] pipeline paused — skipping')
     return { transcribed: 0, remaining: false, skipped: true }
   }
-  console.log('[transcribe] starting batch...')
+  // Workers run with the service-role client (RLS bypassed), so the station_id
+  // filter below is the ONLY guard against processing another station's episodes.
+  const stationId = job.data?.stationId as string | undefined
+  if (!stationId) throw new Error('[transcribe] stationId is required in job data')
+  console.log(`[transcribe] starting batch for station ${stationId}...`)
 
-  const excludedCategories = await getExcludedCategories()
-  const batchSize = await getTranscribeBatchSize()
+  const excludedCategories = await getExcludedCategories(stationId)
+  const batchSize = await getTranscribeBatchSize(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
   // Get candidate pending episodes from current quarter (including those with null
@@ -170,6 +175,7 @@ export async function processTranscribe(job: Job) {
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
+    .eq('station_id', stationId)
     .eq('status', 'pending')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
@@ -197,6 +203,7 @@ export async function processTranscribe(job: Job) {
   const { data: episodes, error: claimError } = await supabaseAdmin
     .from('episode_log')
     .update({ status: 'transcribing', updated_at: new Date().toISOString() })
+    .eq('station_id', stationId)
     .in('id', claimIds)
     .eq('status', 'pending')
     .select('*')
@@ -208,7 +215,7 @@ export async function processTranscribe(job: Job) {
   }
 
   const filteredEpisodes = episodes
-  const corrections = await loadCorrections()
+  const corrections = await loadCorrections(stationId)
   let transcribed = 0
 
   for (let i = 0; i < filteredEpisodes.length; i++) {
@@ -363,10 +370,12 @@ export async function processTranscribe(job: Job) {
     }
   }
 
-  // Check if more pending episodes remain after this batch
+  // Check if more pending episodes remain after this batch (this station only —
+  // the continue-chain job carries this station's id)
   const { count: remainingCount } = await supabaseAdmin
     .from('episode_log')
     .select('id', { count: 'exact', head: true })
+    .eq('station_id', stationId)
     .eq('status', 'pending')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 

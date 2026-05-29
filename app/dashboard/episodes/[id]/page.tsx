@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
@@ -143,7 +144,7 @@ function InlineEditField({
     }
     savingRef.current = true
     setSaving(true)
-    const res = await fetch(`/api/episodes/${episodeId}`, {
+    const res = await authedFetch(`/api/episodes/${episodeId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [field]: editValue || null }),
@@ -234,7 +235,7 @@ function CorrectionToolbar({
       active: true,
     }
     if (scope === 'episode') body.episode_id = Number(episodeId)
-    const res = await fetch('/api/corrections', {
+    const res = await authedFetch('/api/corrections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -358,8 +359,8 @@ export default function EpisodeDetailPage() {
 
   const fetchEpisode = useCallback(async () => {
     const [epRes, flagsRes] = await Promise.all([
-      fetch(`/api/episodes/${id}`),
-      fetch(`/api/compliance?episode_id=${id}`),
+      authedFetch(`/api/episodes/${id}`),
+      authedFetch(`/api/compliance?episode_id=${id}`),
     ])
     if (epRes.ok) {
       const data = await epRes.json()
@@ -379,7 +380,7 @@ export default function EpisodeDetailPage() {
 
   async function handleSave() {
     setSaving(true)
-    await fetch(`/api/episodes/${id}`, {
+    await authedFetch(`/api/episodes/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ summary: editSummary, issue_category: editCategory }),
@@ -411,7 +412,7 @@ export default function EpisodeDetailPage() {
     setConfirmAction(null)
     setActionLoading(action)
 
-    const res = await fetch(`/api/episodes/${id}`, {
+    const res = await authedFetch(`/api/episodes/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
@@ -438,7 +439,7 @@ export default function EpisodeDetailPage() {
       pollRef.current = setInterval(async () => {
         polls++
         try {
-          const epRes = await fetch(`/api/episodes/${id}`)
+          const epRes = await authedFetch(`/api/episodes/${id}`)
           if (epRes.ok) {
             const epData = await epRes.json()
             const currentStatus = epData.episode?.status
@@ -471,7 +472,7 @@ export default function EpisodeDetailPage() {
   }
 
   async function resolveFlag(flagId: number) {
-    await fetch('/api/compliance', {
+    await authedFetch('/api/compliance', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: flagId, resolved: true, resolved_notes: resolveNotes }),
@@ -482,7 +483,7 @@ export default function EpisodeDetailPage() {
   }
 
   async function unresolveFlag(flagId: number) {
-    await fetch('/api/compliance', {
+    await authedFetch('/api/compliance', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: flagId, resolved: false, resolved_notes: null }),
@@ -566,7 +567,7 @@ export default function EpisodeDetailPage() {
     }
     setTranslating(true)
     try {
-      const res = await fetch(`/api/episodes/${id}/translate`, { method: 'POST' })
+      const res = await authedFetch(`/api/episodes/${id}/translate`, { method: 'POST' })
       if (res.ok) {
         const data = await res.json()
         setTranscript((prev) =>
@@ -650,7 +651,7 @@ export default function EpisodeDetailPage() {
           <span><strong>Discrepancy:</strong> {episode.compliance_report}</span>
           <button
             onClick={async () => {
-              await fetch(`/api/episodes/${id}`, {
+              await authedFetch(`/api/episodes/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ compliance_report: null }),

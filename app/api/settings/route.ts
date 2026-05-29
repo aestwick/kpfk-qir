@@ -1,26 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { invalidateSetting } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const resource = searchParams.get('resource')
 
     // GET /api/settings?resource=shows — return show_keys
     if (resource === 'shows') {
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('show_keys')
         .select('*')
+        .eq('station_id', stationId)
         .order('show_name')
 
       if (error) throw error
 
-      // Get episode counts per show using RPC or grouped query
+      // Station-scoped episode counts per show (migration 016 overload).
       const { data: counts } = await supabaseAdmin
-        .rpc('get_episode_counts_by_show')
+        .rpc('get_episode_counts_by_show', { p_station_id: stationId })
         .select('*')
 
       const countMap = new Map<string, number>()
@@ -36,22 +42,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ shows })
     }
 
-    // Default: return qir_settings
-    const { data, error } = await supabaseAdmin
-      .from('qir_settings')
-      .select('*')
-      .order('key')
+    // Default: return the EFFECTIVE settings for the active station — global
+    // qir_settings overlaid with this station's station_settings overrides.
+    const [globalRes, overrideRes] = await Promise.all([
+      supabaseAdmin.from('qir_settings').select('*').order('key'),
+      supabase.from('station_settings').select('key, value').eq('station_id', stationId),
+    ])
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    if (globalRes.error) {
+      return NextResponse.json({ error: globalRes.error.message }, { status: 500 })
+    }
+    if (overrideRes.error) {
+      return NextResponse.json({ error: overrideRes.error.message }, { status: 500 })
     }
 
     const settings: Record<string, unknown> = {}
-    for (const row of data ?? []) {
+    for (const row of globalRes.data ?? []) {
+      settings[row.key] = row.value
+    }
+    // Per-station override wins.
+    for (const row of overrideRes.data ?? []) {
       settings[row.key] = row.value
     }
 
-    return NextResponse.json({ settings, rows: data })
+    return NextResponse.json({ settings, rows: globalRes.data })
   } catch (err) {
     console.error('GET /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 })
@@ -60,6 +74,10 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { key, value } = body
 
@@ -67,9 +85,11 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'key is required' }, { status: 400 })
     }
 
-    const { error } = await supabaseAdmin
-      .from('qir_settings')
-      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    // Settings edits are saved as per-station overrides in station_settings;
+    // global qir_settings remains the fallback layer (resolved in lib/settings).
+    const { error } = await supabase
+      .from('station_settings')
+      .upsert({ station_id: stationId, key, value, updated_at: new Date().toISOString() }, { onConflict: 'station_id,key' })
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -87,6 +107,10 @@ export async function PUT(request: NextRequest) {
 // PATCH /api/settings — update show_keys
 export async function PATCH(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { resource, id, ...updates } = body
 
@@ -107,10 +131,11 @@ export async function PATCH(request: NextRequest) {
 
       safeUpdates.updated_at = new Date().toISOString()
 
-      const { error } = await supabaseAdmin
+      const { error } = await supabase
         .from('show_keys')
         .update(safeUpdates)
         .eq('id', id)
+        .eq('station_id', stationId)
 
       if (error) throw error
       return NextResponse.json({ ok: true })

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { authedFetch } from '@/lib/api-client'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
@@ -157,10 +158,10 @@ export default function SettingsPage() {
 
   const fetchAll = useCallback(async () => {
     const [settingsRes, correctionsRes, wordlistRes, showsRes] = await Promise.all([
-      fetch('/api/settings'),
-      fetch('/api/corrections'),
-      fetch('/api/compliance/wordlist'),
-      fetch('/api/settings?resource=shows'),
+      authedFetch('/api/settings'),
+      authedFetch('/api/corrections'),
+      authedFetch('/api/compliance/wordlist'),
+      authedFetch('/api/settings?resource=shows'),
     ])
     if (settingsRes.ok) {
       const data = await settingsRes.json()
@@ -214,7 +215,7 @@ export default function SettingsPage() {
   const fetchHealth = useCallback(async () => {
     setHealthLoading(true)
     try {
-      const res = await fetch('/api/episodes/counts?health=true')
+      const res = await authedFetch('/api/episodes/counts?health=true')
       if (res.ok) {
         const data = await res.json()
         setHealthCounts(data.counts ?? {})
@@ -270,7 +271,7 @@ export default function SettingsPage() {
       value = num
     }
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
@@ -294,7 +295,7 @@ export default function SettingsPage() {
       try { value = JSON.parse(value as string) } catch { setSaving(null); toast('error', `Invalid JSON for ${key}`); return }
     }
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
@@ -319,7 +320,7 @@ export default function SettingsPage() {
   async function savePipelineMode(mode: string) {
     setSavingMode(true)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'pipeline_mode', value: mode }),
@@ -344,8 +345,8 @@ export default function SettingsPage() {
   ) {
     try {
       const res = editingId
-        ? await fetch('/api/corrections', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editingId, ...form }) })
-        : await fetch('/api/corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
+        ? await authedFetch('/api/corrections', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editingId, ...form }) })
+        : await authedFetch('/api/corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
       if (!res.ok) { toast('error', 'Failed to save correction'); return }
     } catch { toast('error', 'Network error'); return }
     fetchAll()
@@ -353,7 +354,7 @@ export default function SettingsPage() {
 
   async function handleToggleCorrection(id: number, active: boolean) {
     try {
-      await fetch('/api/corrections', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, active: !active }) })
+      await authedFetch('/api/corrections', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, active: !active }) })
     } catch { toast('error', 'Network error'); return }
     fetchAll()
   }
@@ -365,9 +366,9 @@ export default function SettingsPage() {
   async function executeDelete() {
     if (!deleteConfirm) return
     if (deleteConfirm.type === 'correction') {
-      await fetch(`/api/corrections?id=${deleteConfirm.id}`, { method: 'DELETE' })
+      await authedFetch(`/api/corrections?id=${deleteConfirm.id}`, { method: 'DELETE' })
     } else {
-      await fetch(`/api/compliance/wordlist?id=${deleteConfirm.id}`, { method: 'DELETE' })
+      await authedFetch(`/api/compliance/wordlist?id=${deleteConfirm.id}`, { method: 'DELETE' })
     }
     setDeleteConfirm(null)
     fetchAll()
@@ -376,7 +377,7 @@ export default function SettingsPage() {
   // Compliance wordlist handlers
   async function addWord() {
     if (!newWord.trim()) return
-    await fetch('/api/compliance/wordlist', {
+    await authedFetch('/api/compliance/wordlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ word: newWord.trim(), severity: newWordSeverity }),
@@ -386,7 +387,7 @@ export default function SettingsPage() {
   }
 
   async function toggleWord(id: number, active: boolean) {
-    await fetch('/api/compliance/wordlist', {
+    await authedFetch('/api/compliance/wordlist', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, active: !active }),
@@ -397,7 +398,7 @@ export default function SettingsPage() {
   async function toggleComplianceCheck(checkType: string) {
     const updated = { ...complianceChecks, [checkType]: !complianceChecks[checkType] }
     setComplianceChecks(updated)
-    await fetch('/api/settings', {
+    await authedFetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ key: 'compliance_checks_enabled', value: updated }),
@@ -411,7 +412,7 @@ export default function SettingsPage() {
     }
     setSaving('compliance_prompt')
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'compliance_prompt', value: compliancePrompt }),
@@ -431,7 +432,7 @@ export default function SettingsPage() {
   async function savePrompt(key: string, value: string, label: string, setSaved: (v: string) => void) {
     setSaving(key)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
@@ -452,7 +453,7 @@ export default function SettingsPage() {
     setSaving(key)
     try {
       // Delete the setting so the code falls back to the hardcoded default
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value: null }),
@@ -480,7 +481,7 @@ export default function SettingsPage() {
     setFixDatesLoading(true)
     setFixDatesResult(null)
     try {
-      const res = await fetch('/api/episodes', {
+      const res = await authedFetch('/api/episodes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'bulk-fix-dates', from: fixDatesFrom, to: fixDatesTo }),
@@ -523,7 +524,7 @@ export default function SettingsPage() {
     setSavingShow(showId)
     const value = field === 'show_name' ? editingShowValue.trim() : (editingShowValue || null)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resource: 'show', id: showId, [field]: value }),
@@ -543,7 +544,7 @@ export default function SettingsPage() {
   async function toggleShowActive(show: Show) {
     setSavingShow(show.id)
     try {
-      const res = await fetch('/api/settings', {
+      const res = await authedFetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resource: 'show', id: show.id, active: !show.active }),
@@ -567,7 +568,7 @@ export default function SettingsPage() {
     setCsvImporting(true)
     try {
       const text = await file.text()
-      const res = await fetch('/api/corrections', {
+      const res = await authedFetch('/api/corrections', {
         method: 'POST',
         headers: { 'Content-Type': 'text/csv' },
         body: text,
@@ -1108,7 +1109,7 @@ export default function SettingsPage() {
                             const val = e.target.value
                             setEditingShow(null)
                             setSavingShow(show.id)
-                            fetch('/api/settings', {
+                            authedFetch('/api/settings', {
                               method: 'PATCH',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ resource: 'show', id: show.id, default_category: val || null }),

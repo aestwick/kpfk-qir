@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logComplianceUsage } from '../lib/usage'
 import { getComplianceChecksEnabled, getCompliancePrompt, getSummarizeBatchSize, isPipelinePaused } from '../lib/settings'
+import { getStation } from '../lib/stations'
 
 interface ComplianceFlagInsert {
   episode_id: number
@@ -107,7 +108,9 @@ function runProfanityCheck(
 function runStationIdCheck(
   episodeId: number,
   vttCues: VttCue[],
-  duration: number | null
+  duration: number | null,
+  stationName: string,
+  idPatterns: string[]
 ): ComplianceFlagInsert[] {
   if (!vttCues.length || !duration) return []
 
@@ -121,7 +124,15 @@ function runStationIdCheck(
   hourMarks.unshift(0)
 
   const flags: ComplianceFlagInsert[] = []
-  const stationPattern = /kpfk|90\.7|ninety point seven/i
+  // Build the station-ID detection regex from the station's configured patterns
+  // (e.g. ['kpfk','90.7']). Escape each so frequencies like '90.7' match literally.
+  const escaped = idPatterns
+    .filter((p) => p && p.trim())
+    .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const stationPattern = escaped.length ? new RegExp(escaped.join('|'), 'i') : null
+  // No patterns configured for this station — we don't know what to look for,
+  // so skip the check rather than emit meaningless flags.
+  if (!stationPattern) return []
 
   for (const mark of hourMarks) {
     const windowStart = Math.max(0, mark - 300) // 5 min before
@@ -140,7 +151,7 @@ function runStationIdCheck(
         severity: 'warning',
         excerpt: null,
         timestamp_seconds: mark,
-        details: `No station ID ("KPFK" or "90.7") detected near ${Math.floor(mark / 3600)}:00:00 mark`,
+        details: `No ${stationName} station ID detected near ${Math.floor(mark / 3600)}:00:00 mark`,
       })
     }
   }
@@ -304,12 +315,18 @@ export async function processCompliance(job: Job) {
     console.log('[compliance] pipeline paused — skipping')
     return { checked: 0, remaining: false, skipped: true }
   }
-  const showKey = job.data?.show_key as string | undefined
-  console.log(`[compliance] starting batch...${showKey ? ` (show: ${showKey})` : ''}`)
+  // Service-role client bypasses RLS, so the station_id filter is the only guard.
+  const stationId = job.data?.stationId as string | undefined
+  if (!stationId) throw new Error('[compliance] stationId is required in job data')
+  const station = await getStation(stationId)
+  if (!station) throw new Error(`[compliance] station ${stationId} not found`)
 
-  const checksEnabled = await getComplianceChecksEnabled()
-  const compliancePrompt = await getCompliancePrompt()
-  const batchSize = await getSummarizeBatchSize()
+  const showKey = job.data?.show_key as string | undefined
+  console.log(`[compliance] starting batch for ${station.slug}...${showKey ? ` (show: ${showKey})` : ''}`)
+
+  const checksEnabled = await getComplianceChecksEnabled(stationId)
+  const compliancePrompt = await getCompliancePrompt(stationId)
+  const batchSize = await getSummarizeBatchSize(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
   // Build query — when processing a specific show, include already-checked episodes
@@ -317,6 +334,7 @@ export async function processCompliance(job: Job) {
   let query = supabaseAdmin
     .from('episode_log')
     .select('*')
+    .eq('station_id', stationId)
 
   if (showKey) {
     query = query
@@ -353,6 +371,7 @@ export async function processCompliance(job: Job) {
   const { data: wordlistData } = await supabaseAdmin
     .from('compliance_wordlist')
     .select('word, severity')
+    .eq('station_id', stationId)
     .eq('active', true)
 
   const wordlist = (wordlistData ?? []).map((w) => ({ word: w.word, severity: w.severity }))
@@ -400,7 +419,7 @@ export async function processCompliance(job: Job) {
 
       // 2. Station ID check
       if (checksEnabled.station_id_missing && vttCues.length > 0) {
-        allFlags.push(...runStationIdCheck(episode.id, vttCues, episode.duration))
+        allFlags.push(...runStationIdCheck(episode.id, vttCues, episode.duration, station.name, station.station_id_patterns ?? []))
       }
 
       // 3. Technical check
@@ -452,10 +471,11 @@ export async function processCompliance(job: Job) {
     }
   }
 
-  // Check if more episodes remain after this batch
+  // Check if more episodes remain after this batch (this station only)
   let remainQuery = supabaseAdmin
     .from('episode_log')
     .select('id', { count: 'exact', head: true })
+    .eq('station_id', stationId)
 
   if (showKey) {
     remainQuery = remainQuery

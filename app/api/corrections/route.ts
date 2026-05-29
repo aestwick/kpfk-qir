@@ -1,17 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const scope = searchParams.get('scope')
     const episodeId = searchParams.get('episode_id')
 
-    let query = supabaseAdmin
+    let query = supabase
       .from('transcript_corrections')
       .select('*')
+      .eq('station_id', stationId)
       .order('created_at', { ascending: false })
 
     // Filter by scope: 'global' for non-episode-specific, 'episode' for episode-specific
@@ -35,6 +40,10 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const contentType = request.headers.get('content-type') ?? ''
 
     // Bulk CSV import
@@ -50,6 +59,7 @@ export async function POST(request: NextRequest) {
         const parts = lines[i].split(',').map((p) => p.trim().replace(/^"|"$/g, ''))
         if (parts.length >= 2) {
           corrections.push({
+            station_id: stationId,
             wrong: parts[0],
             correct: parts[1],
             case_sensitive: parts[2]?.toLowerCase() === 'true',
@@ -65,7 +75,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'No valid corrections found in CSV' }, { status: 400 })
       }
 
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('transcript_corrections')
         .insert(corrections)
         .select()
@@ -80,6 +90,7 @@ export async function POST(request: NextRequest) {
     // Bulk JSON import
     if (Array.isArray(body)) {
       const corrections = body.map((item) => ({
+        station_id: stationId,
         wrong: item.wrong,
         correct: item.correct,
         case_sensitive: item.case_sensitive ?? false,
@@ -89,7 +100,7 @@ export async function POST(request: NextRequest) {
         episode_id: item.episode_id ?? null,
       }))
 
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from('transcript_corrections')
         .insert(corrections)
         .select()
@@ -107,9 +118,10 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await supabase
       .from('transcript_corrections')
       .insert({
+        station_id: stationId,
         wrong,
         correct,
         case_sensitive: case_sensitive ?? false,
@@ -134,6 +146,10 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -141,10 +157,11 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 })
     }
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('transcript_corrections')
       .update(updates)
       .eq('id', id)
+      .eq('station_id', stationId)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -159,6 +176,10 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -166,10 +187,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 })
     }
 
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from('transcript_corrections')
       .delete()
       .eq('id', parseInt(id))
+      .eq('station_id', stationId)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

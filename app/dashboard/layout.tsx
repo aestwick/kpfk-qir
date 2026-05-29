@@ -5,6 +5,7 @@ import { createBrowserClient } from '@/lib/supabase'
 import { usePathname } from 'next/navigation'
 import { ErrorBoundary } from '@/app/components/error-boundary'
 import { ToastProvider } from '@/app/components/toast'
+import { StationSwitcher } from '@/app/components/station-switcher'
 
 /* ─── Nav Icons (inline SVGs, 20x20) ─── */
 const icons = {
@@ -133,7 +134,7 @@ export default function DashboardLayout({
           <div className="h-7 w-7 rounded-lg bg-kpfk-red flex items-center justify-center">
             <span className="text-white text-xs font-bold">Q</span>
           </div>
-          <span className="text-sm font-semibold tracking-tight">QIR / KPFK</span>
+          <span className="text-sm font-semibold tracking-tight">QIR</span>
         </div>
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -172,10 +173,13 @@ export default function DashboardLayout({
             </div>
             <div>
               <p className="text-sm font-semibold text-white tracking-tight">QIR</p>
-              <p className="text-2xs text-warm-500">KPFK 90.7 FM</p>
+              <p className="text-2xs text-warm-500">Quarterly Issues Report</p>
             </div>
           </div>
         </div>
+
+        {/* Station switcher (only shown when the user has more than one station) */}
+        <StationSwitcher />
 
         {/* Navigation */}
         <div className="flex-1 px-3 space-y-0.5 overflow-y-auto">

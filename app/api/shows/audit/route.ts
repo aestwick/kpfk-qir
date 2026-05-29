@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
+import { SupabaseClient } from '@supabase/supabase-js'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,7 @@ const IN_BATCH_SIZE = 200
 
 /** Helper to batch Supabase .in() queries for large ID arrays */
 async function batchInQuery<T>(
+  client: SupabaseClient,
   table: string,
   column: string,
   ids: number[],
@@ -23,7 +25,7 @@ async function batchInQuery<T>(
   const results: T[] = []
   for (let i = 0; i < ids.length; i += IN_BATCH_SIZE) {
     const batch = ids.slice(i, i + IN_BATCH_SIZE)
-    const { data } = await supabaseAdmin
+    const { data } = await client
       .from(table)
       .select(selectCols)
       .in(column, batch)
@@ -50,6 +52,10 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
  */
 export async function GET(request: NextRequest) {
   try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
     const { searchParams } = new URL(request.url)
     const showKeysParam = searchParams.get('show_keys')
     const from = searchParams.get('from')
@@ -73,9 +79,10 @@ export async function GET(request: NextRequest) {
     const isCurrentQuarter = from >= qBounds.start && to <= qBounds.end
 
     // Fetch episodes for these shows in the date range
-    const { data: episodes, error: epError } = await supabaseAdmin
+    const { data: episodes, error: epError } = await supabase
       .from('episode_log')
       .select('id, show_key, show_name, status, air_date, start_time, duration, headline, host, guest, summary, issue_category, error_message, compliance_status, mp3_url')
+      .eq('station_id', stationId)
       .in('show_key', showKeys)
       .gte('air_date', from)
       .lte('air_date', to)
@@ -87,13 +94,15 @@ export async function GET(request: NextRequest) {
     const episodeIds = eps.map((e) => e.id)
 
     // Fetch compliance flags and usage costs in parallel, with batched .in() queries
+    // episodeIds are already scoped to this station (from the query above), so
+    // these by-id batch lookups cannot cross stations.
     const [complianceFlags, usageRows] = await Promise.all([
       batchInQuery<{ episode_id: number; flag_type: string; severity: string; excerpt: string | null; details: string | null; resolved: boolean }>(
-        'compliance_flags', 'episode_id', episodeIds,
+        supabase, 'compliance_flags', 'episode_id', episodeIds,
         'episode_id, flag_type, severity, excerpt, details, resolved'
       ),
       batchInQuery<{ episode_id: number; estimated_cost: number }>(
-        'usage_log', 'episode_id', episodeIds,
+        supabase, 'usage_log', 'episode_id', episodeIds,
         'episode_id, estimated_cost'
       ),
     ])
