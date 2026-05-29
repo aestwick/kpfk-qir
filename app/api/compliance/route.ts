@@ -189,6 +189,9 @@ export async function PATCH(request: NextRequest) {
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
 
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
+
     const body = await request.json()
 
     // Bulk resolve: { ids: number[], resolved_by, resolved_notes }

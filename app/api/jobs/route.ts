@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
@@ -11,6 +11,9 @@ export async function POST(request: NextRequest) {
     const ctx = await getStationContext(request)
     if (ctx.error) return stationErrorResponse(ctx.error)
     const { supabase, stationId } = ctx.context
+
+    const denied = requireRole(ctx.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
     const { action } = body

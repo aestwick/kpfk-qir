@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { invalidateSetting } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
@@ -78,6 +78,9 @@ export async function PUT(request: NextRequest) {
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
 
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
+
     const body = await request.json()
     const { key, value } = body
 
@@ -110,6 +113,9 @@ export async function PATCH(request: NextRequest) {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
     const { resource, id, ...updates } = body

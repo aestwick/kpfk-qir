@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 
@@ -61,6 +61,9 @@ export async function PATCH(
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
     const { action, ...updates } = body
