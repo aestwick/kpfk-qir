@@ -11,6 +11,9 @@ git pull origin main
 echo "→ Pulling latest image..."
 docker compose pull
 
+echo "→ Applying database migrations..."
+bash scripts/migrate.sh
+
 echo "→ Restarting containers..."
 docker compose up -d
 
