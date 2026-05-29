@@ -60,8 +60,14 @@ export function useQueueSSE() {
             headers: { Accept: 'text/event-stream' },
             signal: controller.signal,
           })
+          if (res.status === 401 || res.status === 403) {
+            // Terminal auth failure (logged out / no station access). Stop
+            // looping instead of hammering every 5s; the dashboard layout's
+            // own session check handles bouncing to /login.
+            return
+          }
           if (!res.ok || !res.body) {
-            // e.g. 400 (no active station) / 401 — back off, then retry.
+            // Transient (e.g. 5xx or a closed body) — back off, then retry.
             await delay(5000)
             continue
           }
@@ -85,7 +91,8 @@ export function useQueueSSE() {
               try {
                 setQueues(JSON.parse(payload))
               } catch {
-                // ignore a malformed frame; the next tick replaces it
+                // Drop a malformed frame (the next tick replaces it) but surface it.
+                console.warn('[events] dropped a malformed SSE frame')
               }
             }
           }
