@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
-import { isPipelinePaused } from '@/lib/settings'
+import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
         .from('qir_settings')
         .upsert({ key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() }, { onConflict: 'key' })
       if (error) throw error
+      invalidateSetting('pipeline_paused') // reflect immediately, don't wait for cache TTL
       return NextResponse.json({ ok: true, message: paused ? 'Pipeline paused' : 'Pipeline resumed', paused })
     }
 
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
         .from('qir_settings')
         .upsert({ key: 'pipeline_mode', value: JSON.stringify(mode), updated_at: new Date().toISOString() }, { onConflict: 'key' })
       if (error) throw error
+      invalidateSetting('pipeline_mode')
       return NextResponse.json({ ok: true, message: `Pipeline mode set to ${mode}` })
     }
 

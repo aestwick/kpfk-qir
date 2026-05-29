@@ -31,6 +31,16 @@ export async function getSetting<T = unknown>(key: string): Promise<T | null> {
   return null
 }
 
+/**
+ * Drop a cached setting (or the whole cache) so the next read hits the DB.
+ * Call after writing to qir_settings so changes like pause/resume take effect
+ * immediately instead of lagging up to CACHE_TTL_MS.
+ */
+export function invalidateSetting(key?: string): void {
+  if (key) settingsCache.delete(key)
+  else settingsCache.clear()
+}
+
 export async function getExcludedCategories(): Promise<string[]> {
   return (await getSetting<string[]>('excluded_categories')) ?? ['Music', 'Español']
 }
