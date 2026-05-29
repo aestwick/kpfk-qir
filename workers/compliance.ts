@@ -471,10 +471,11 @@ export async function processCompliance(job: Job) {
     }
   }
 
-  // Check if more episodes remain after this batch
+  // Check if more episodes remain after this batch (this station only)
   let remainQuery = supabaseAdmin
     .from('episode_log')
     .select('id', { count: 'exact', head: true })
+    .eq('station_id', stationId)
 
   if (showKey) {
     remainQuery = remainQuery

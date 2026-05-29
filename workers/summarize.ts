@@ -215,10 +215,12 @@ ${transcriptText}`
     }
   }
 
-  // Check if more transcribed episodes remain after this batch
+  // Check if more transcribed episodes remain after this batch (this station only —
+  // the continue-chain job carries this station's id)
   const { count: remainingCount } = await supabaseAdmin
     .from('episode_log')
     .select('id', { count: 'exact', head: true })
+    .eq('station_id', stationId)
     .eq('status', 'transcribed')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 

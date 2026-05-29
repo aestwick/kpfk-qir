@@ -38,12 +38,13 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
   return { start, end }
 }
 
-async function loadCorrections(): Promise<
+async function loadCorrections(stationId: string): Promise<
   Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
 > {
   const { data } = await supabaseAdmin
     .from('transcript_corrections')
     .select('wrong, correct, case_sensitive, is_regex')
+    .eq('station_id', stationId)
     .eq('active', true)
 
   return (data ?? []).map((c) => ({
@@ -214,7 +215,7 @@ export async function processTranscribe(job: Job) {
   }
 
   const filteredEpisodes = episodes
-  const corrections = await loadCorrections()
+  const corrections = await loadCorrections(stationId)
   let transcribed = 0
 
   for (let i = 0; i < filteredEpisodes.length; i++) {
@@ -369,10 +370,12 @@ export async function processTranscribe(job: Job) {
     }
   }
 
-  // Check if more pending episodes remain after this batch
+  // Check if more pending episodes remain after this batch (this station only —
+  // the continue-chain job carries this station's id)
   const { count: remainingCount } = await supabaseAdmin
     .from('episode_log')
     .select('id', { count: 'exact', head: true })
+    .eq('station_id', stationId)
     .eq('status', 'pending')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 

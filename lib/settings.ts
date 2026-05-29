@@ -48,7 +48,12 @@ export async function getSetting<T = unknown>(key: string, stationId?: string): 
     }
   }
 
-  // 2. Global default layer.
+  // 2. Global default layer. Log when a station falls back to it (sanctioned
+  // fallback per the plan — kept visible, not silent). Cached, so this logs at
+  // most once per 60s per (station, key).
+  if (stationId) {
+    console.log(`[settings] station ${stationId} has no override for '${key}' — using global qir_settings`)
+  }
   const { data } = await supabaseAdmin
     .from('qir_settings')
     .select('value')

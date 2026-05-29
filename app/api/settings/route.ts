@@ -23,14 +23,9 @@ export async function GET(request: NextRequest) {
 
       if (error) throw error
 
-      // TODO(phase-E): get_episode_counts_by_show RPC is not station-scoped —
-      // it aggregates episode_log across ALL stations and groups by show_key,
-      // which is no longer globally unique. Needs a new migration that adds a
-      // station_id arg (or filters by it). Until then the per-show
-      // episode_count below can over-count episodes from other stations that
-      // happen to share a show_key. Auth/show_keys are correctly scoped.
+      // Station-scoped episode counts per show (migration 016 overload).
       const { data: counts } = await supabaseAdmin
-        .rpc('get_episode_counts_by_show')
+        .rpc('get_episode_counts_by_show', { p_station_id: stationId })
         .select('*')
 
       const countMap = new Map<string, number>()
