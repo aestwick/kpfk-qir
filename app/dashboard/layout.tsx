@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation'
 import { ErrorBoundary } from '@/app/components/error-boundary'
 import { ToastProvider } from '@/app/components/toast'
 import { StationSwitcher } from '@/app/components/station-switcher'
+import { useIsSuperAdmin } from '@/lib/use-super-admin'
 
 /* ─── Nav Icons (inline SVGs, 20x20) ─── */
 const icons = {
@@ -68,7 +69,7 @@ const navItems = [
   { href: '/dashboard/compliance', label: 'Compliance', icon: icons.compliance },
   { href: '/dashboard/jobs', label: 'Jobs', icon: icons.jobs },
   { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
-  { href: '/dashboard/usage', label: 'Usage', icon: icons.usage },
+  { href: '/dashboard/usage', label: 'Usage', icon: icons.usage, superAdminOnly: true },
   { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.audit },
   { href: '/dashboard/generate', label: 'Generate QIR', icon: icons.generate },
   { href: '/dashboard/downloads', label: 'Downloads', icon: icons.downloads },
@@ -84,6 +85,11 @@ export default function DashboardLayout({
   const [userEmail, setUserEmail] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
+  const isSuperAdmin = useIsSuperAdmin()
+
+  // Super-admin-only items (e.g. cost/usage) stay hidden until we confirm the
+  // user is a super admin. The route itself is also server-gated.
+  const visibleNavItems = navItems.filter((item) => !item.superAdminOnly || isSuperAdmin === true)
 
   useEffect(() => {
     setSidebarOpen(false)
@@ -183,7 +189,7 @@ export default function DashboardLayout({
 
         {/* Navigation */}
         <div className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             return (
               <a

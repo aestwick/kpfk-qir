@@ -18,6 +18,7 @@ interface DashData {
   quarter: { year: number; quarter: number; start: string; end: string; label: string }
   counts: { all: Record<string, number>; quarter: Record<string, number> }
   queues: { ingest: JobCounts; transcribe: JobCounts; summarize: JobCounts; compliance: JobCounts }
+  costVisible: boolean
   cost: {
     quarter: { groq: number; openai: number; total: number; episodeCount: number; apiCalls: number }
     daily: DailyPoint[]
@@ -271,7 +272,7 @@ export default function DashboardOverview() {
 
   if (!data) return <div className="text-red-600 card p-6">Failed to load dashboard data.</div>
 
-  const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
+  const { counts, queues, cost, costVisible, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -675,28 +676,30 @@ export default function DashboardOverview() {
         </div>
       )}
 
-      {/* ═══ 8. COST THIS MONTH ═══ */}
-      <div className="card px-5 py-3.5 flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-4 text-sm text-warm-500 flex-wrap">
-          <span className="font-semibold text-warm-800 dark:text-warm-200">
-            {new Date().toLocaleString('en-US', { month: 'long' })} spend: {fmtCost(cost.month.total)}
-          </span>
-          <span className="text-xs text-warm-400 tabular-nums">
-            Groq {fmtCost(cost.month.groq)} / OpenAI {fmtCost(cost.month.openai)}
-          </span>
-          {cost.quarter.episodeCount > 0 && (
-            <span className="text-xs text-warm-400 tabular-nums">
-              avg ${(cost.quarter.total / cost.quarter.episodeCount).toFixed(3)}/episode
+      {/* ═══ 8. COST THIS MONTH (super-admin-only) ═══ */}
+      {costVisible && (
+        <div className="card px-5 py-3.5 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-4 text-sm text-warm-500 flex-wrap">
+            <span className="font-semibold text-warm-800 dark:text-warm-200">
+              {new Date().toLocaleString('en-US', { month: 'long' })} spend: {fmtCost(cost.month.total)}
             </span>
-          )}
-          {dayOfMonth > 1 && (
             <span className="text-xs text-warm-400 tabular-nums">
-              projected: {fmtCost(monthlyProjection)}/mo
+              Groq {fmtCost(cost.month.groq)} / OpenAI {fmtCost(cost.month.openai)}
             </span>
-          )}
+            {cost.quarter.episodeCount > 0 && (
+              <span className="text-xs text-warm-400 tabular-nums">
+                avg ${(cost.quarter.total / cost.quarter.episodeCount).toFixed(3)}/episode
+              </span>
+            )}
+            {dayOfMonth > 1 && (
+              <span className="text-xs text-warm-400 tabular-nums">
+                projected: {fmtCost(monthlyProjection)}/mo
+              </span>
+            )}
+          </div>
+          <a href="/dashboard/usage" className="text-xs text-warm-400 hover:text-warm-600 transition-colors">Details →</a>
         </div>
-        <a href="/dashboard/usage" className="text-xs text-warm-400 hover:text-warm-600 transition-colors">Details →</a>
-      </div>
+      )}
 
       {/* ═══ BOTTOM ROW: Categories + Recent Episodes ═══ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

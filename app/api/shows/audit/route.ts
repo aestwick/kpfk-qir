@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId, isSuperAdmin } = result.context
 
     const { searchParams } = new URL(request.url)
     const showKeysParam = searchParams.get('show_keys')
@@ -152,11 +152,11 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Enrich episodes with compliance flags and cost
+    // Enrich episodes with compliance flags and cost. Cost is super-admin-only.
     const enrichedEpisodes = eps.map((ep) => ({
       ...ep,
       compliance_flags: flagsByEpisode[ep.id] ?? [],
-      actual_cost: usageByEpisode[ep.id] ?? 0,
+      actual_cost: isSuperAdmin ? (usageByEpisode[ep.id] ?? 0) : null,
     }))
 
     // Issue categories covered
@@ -173,16 +173,22 @@ export async function GET(request: NextRequest) {
       statusCounts,
       issueCategories,
       isCurrentQuarter,
+      // Cost figures are super-admin-only; ordinary members get null.
+      costVisible: isSuperAdmin,
       processing: {
         episodesNeedingWork,
-        estimatedCost: {
-          transcription: Math.round(estimatedTranscribeCost * 1000) / 1000,
-          summarization: Math.round(estimatedSummarizeCost * 1000) / 1000,
-          compliance: Math.round(estimatedComplianceCost * 1000) / 1000,
-          total: Math.round((estimatedTranscribeCost + estimatedSummarizeCost + estimatedComplianceCost) * 1000) / 1000,
-        },
+        estimatedCost: isSuperAdmin
+          ? {
+              transcription: Math.round(estimatedTranscribeCost * 1000) / 1000,
+              summarization: Math.round(estimatedSummarizeCost * 1000) / 1000,
+              compliance: Math.round(estimatedComplianceCost * 1000) / 1000,
+              total: Math.round((estimatedTranscribeCost + estimatedSummarizeCost + estimatedComplianceCost) * 1000) / 1000,
+            }
+          : null,
       },
-      actualCostTotal: Math.round(Object.values(usageByEpisode).reduce((a, b) => a + b, 0) * 1000) / 1000,
+      actualCostTotal: isSuperAdmin
+        ? Math.round(Object.values(usageByEpisode).reduce((a, b) => a + b, 0) * 1000) / 1000
+        : null,
     })
   } catch (err) {
     console.error('GET /api/shows/audit failed:', err)
