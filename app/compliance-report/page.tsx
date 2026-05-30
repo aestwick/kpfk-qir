@@ -31,7 +31,7 @@ interface EpisodeGroup {
   episode_id: number
   show_name: string
   air_date: string | null
-  air_time: string | null
+  air_start: string | null
   duration: number | null
   headline: string | null
   host: string | null
@@ -123,7 +123,7 @@ export default async function ComplianceReportPage({
   // (compliance_flags has no station_id column of its own).
   let query = supabaseAdmin
     .from('compliance_flags')
-    .select('*, episode_log!inner(show_name, show_key, air_date, air_time, duration, headline, host)')
+    .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host)')
     .eq('episode_log.station_id', station.id)
     .order('created_at', { ascending: false })
 
@@ -185,7 +185,7 @@ export default async function ComplianceReportPage({
         episode_id: flag.episode_id,
         show_name: ep.show_name ?? key,
         air_date: ep.air_date,
-        air_time: ep.air_time,
+        air_start: ep.air_start,
         duration: ep.duration,
         headline: ep.headline,
         host: ep.host,
@@ -335,7 +335,7 @@ export default async function ComplianceReportPage({
                 <div className="mb-2">
                   <p className="font-semibold text-sm">
                     {ep.air_date ?? 'Unknown date'}
-                    {ep.air_time && <span className="text-gray-500 dark:text-warm-400"> at {ep.air_time}</span>}
+                    {ep.air_start && <span className="text-gray-500 dark:text-warm-400"> at {ep.air_start}</span>}
                     {ep.duration && <span className="text-gray-500 dark:text-warm-400"> ({ep.duration} min)</span>}
                   </p>
                   {ep.headline && (
