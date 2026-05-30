@@ -74,6 +74,7 @@ export interface ShowKey {
   show_name: string
   category: string | null
   default_category: string | null
+  primary_language: string | null
   active: boolean
   email: string | null
   created_at: string

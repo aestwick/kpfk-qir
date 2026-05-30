@@ -15,6 +15,10 @@ const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-
   ssr: false,
 })
 
+const BulkShowEntry = dynamic(() => import('@/app/components/bulk-show-entry').then(m => ({ default: m.BulkShowEntry })), {
+  ssr: false,
+})
+
 interface Correction {
   id: number
   wrong: string
@@ -40,6 +44,7 @@ interface Show {
   show_name: string
   category: string | null
   default_category: string | null
+  primary_language: string | null
   active: boolean
   email: string | null
   created_at: string
@@ -233,6 +238,15 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // Re-pull just the shows list (used after bulk-adding show keys).
+  const refreshShows = useCallback(async () => {
+    const res = await authedFetch('/api/settings?resource=shows')
+    if (res.ok) {
+      const data = await res.json()
+      setShows(data.shows ?? [])
+    }
+  }, [])
 
   // Fetch pipeline health data when pipeline tab is active
   const fetchHealth = useCallback(async () => {
@@ -584,6 +598,7 @@ export default function SettingsPage() {
     setEditingShow({ id: show.id, field })
     if (field === 'show_name') setEditingShowValue(show.show_name)
     else if (field === 'default_category') setEditingShowValue(show.default_category ?? '')
+    else if (field === 'primary_language') setEditingShowValue(show.primary_language ?? '')
     setTimeout(() => showEditRef.current?.focus(), 0)
   }
 
@@ -601,7 +616,11 @@ export default function SettingsPage() {
       return
     }
     setSavingShow(showId)
-    const value = field === 'show_name' ? editingShowValue.trim() : (editingShowValue || null)
+    const value = field === 'show_name'
+      ? editingShowValue.trim()
+      : field === 'primary_language'
+        ? (editingShowValue.trim().toLowerCase() || null)
+        : (editingShowValue || null)
     try {
       const res = await authedFetch('/api/settings', {
         method: 'PATCH',
@@ -1183,6 +1202,13 @@ export default function SettingsPage() {
             />
           </div>
 
+          <BulkShowEntry
+            categories={categories}
+            existingKeys={shows.map((s) => s.key)}
+            onAdded={refreshShows}
+            toast={toast}
+          />
+
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b dark:bg-warm-700 dark:border-warm-600">
@@ -1190,6 +1216,7 @@ export default function SettingsPage() {
                   <th className="text-left px-3 py-2 font-medium">Key</th>
                   <th className="text-left px-3 py-2 font-medium">Name</th>
                   <th className="text-left px-3 py-2 font-medium">Default Category</th>
+                  <th className="text-left px-3 py-2 font-medium">Language</th>
                   <th className="text-center px-3 py-2 font-medium">Active</th>
                   <th className="text-center px-3 py-2 font-medium" title="Exclude this feed (show key) from ingest. Only this key is dropped — other airings of the same show keep running.">Exclude</th>
                   <th className="text-right px-3 py-2 font-medium">Episodes</th>
@@ -1197,7 +1224,7 @@ export default function SettingsPage() {
               </thead>
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
+                  <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
                 ) : groupedShows.map((group) => (
@@ -1276,6 +1303,34 @@ export default function SettingsPage() {
                           title="Click to edit"
                         >
                           {show.default_category || <span className="text-gray-300 italic dark:text-warm-500">None</span>}
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {editingShow?.id === show.id && editingShow.field === 'primary_language' ? (
+                        <input
+                          ref={showEditRef as React.RefObject<HTMLInputElement>}
+                          type="text"
+                          value={editingShowValue}
+                          onChange={(e) => setEditingShowValue(e.target.value)}
+                          onBlur={() => saveShowEdit(show.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveShowEdit(show.id)
+                            if (e.key === 'Escape') {
+                              showEditCancelled.current = true
+                              ;(e.target as HTMLInputElement).blur()
+                            }
+                          }}
+                          placeholder="e.g. en"
+                          className="border rounded px-2 py-0.5 text-sm w-20 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                        />
+                      ) : (
+                        <button
+                          onClick={() => startShowEdit(show, 'primary_language')}
+                          className="text-left hover:text-blue-600 cursor-pointer text-gray-600 dark:text-warm-400"
+                          title="Click to edit"
+                        >
+                          {show.primary_language || <span className="text-gray-300 italic dark:text-warm-500">—</span>}
                         </button>
                       )}
                     </td>
