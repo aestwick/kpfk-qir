@@ -36,7 +36,7 @@ differently-named hours).
 
 ## 3. Data Model
 
-### 3.1 New table `show_groups` (migration `020_show_groups.sql`)
+### 3.1 New table `show_groups` (migration `021_show_groups.sql`)
 
 Station-scoped, mirrors the conventions in `012`–`014`.
 
@@ -340,7 +340,7 @@ Replace the auto name-matching `groupedShows` (rowSpan-by-name) added in
 
 ## 14. Implementation Plan (phased, each phase independently verifiable)
 
-1. **Schema** — `supabase/migrations/020_show_groups.sql`: `show_groups` table,
+1. **Schema** — `supabase/migrations/021_show_groups.sql`: `show_groups` table,
    `show_keys.group_id`, indexes, RLS policies.
 2. **Types & helpers** — `lib/types.ts` (`ShowGroup`, `ShowGroupWithMembers`,
    `ShowKey.group_id`); new `lib/show-groups.ts` (fetch + resolution helpers).
