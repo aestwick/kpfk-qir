@@ -99,26 +99,62 @@ free-generate, so every AI answer is independently verifiable.
 > Note: Show Groups already targets `021`. Use the next available number
 > (e.g. `022_transcript_fts.sql`).
 
+**Document-level FTS** — discovery + ranking ("which episodes, best first"):
+
 ```sql
 -- Generated tsvector + GIN index on the primary transcript text.
+-- 'simple' config: NO stemming, NO stopword removal — exact-form matching
+-- across English, Spanish, anything. (See P2 below: 'english' would silently
+-- corrupt the Spanish-language transcripts this corpus already contains.)
 alter table public.transcripts
   add column if not exists transcript_fts tsvector
-    generated always as (to_tsvector('english', coalesce(transcript, ''))) stored;
+    generated always as (to_tsvector('simple', coalesce(transcript, ''))) stored;
 
 create index if not exists idx_transcripts_fts
   on public.transcripts using gin (transcript_fts);
 ```
 
-Notes:
-- `transcripts` is scoped to a station **via its `episode_id` join** to
-  `episode_log` (no `station_id` column of its own — see CLAUDE.md). Search
-  queries MUST join and filter on `episode_log.station_id`.
-- Consider a second `tsvector` over `english_transcript` if cross-language
-  search of the translated text is wanted (defer until needed).
-- RLS on `transcripts` is inherited via the episode join; the new column does
-  not change the policy surface.
+**Cue-level FTS** — evidence + location ("which moment, with a timestamp"). The
+document tsvector and `ts_headline` carry NO audio position, so the `▶ 00:12:03`
+deep-link needs a separate, timed surface parsed from the VTT cues:
 
-### 6.2 Phase 2 — embeddings (deferred; only if §10 decision = yes)
+```sql
+create table if not exists public.transcript_cues (
+  id          bigint generated always as identity primary key,
+  episode_id  uuid not null references public.episode_log(id) on delete cascade,
+  cue_idx     int  not null,
+  start_ms    int  not null,
+  end_ms      int  not null,
+  text        text not null,
+  text_fts    tsvector generated always as
+                (to_tsvector('simple', coalesce(text, ''))) stored
+);
+create index if not exists idx_transcript_cues_episode on public.transcript_cues(episode_id);
+create index if not exists idx_transcript_cues_fts on public.transcript_cues using gin(text_fts);
+```
+
+Notes:
+- **Why two indexes, one per job:** `ts_rank` over the whole transcript is the
+  right *ranking* signal ("which episodes"); the cue table is the right
+  *location* signal ("which second"). Search ranks episodes via the document
+  index, then pulls matching cues **for those episodes** to attach `start_ms`.
+- **Populate cues** in the summarize worker right after the transcript/VTT is
+  written (parse VTT → cue rows via `lib/vtt.ts`). **Backfill** the existing
+  corpus once (separate, re-runnable step).
+- **Stemming trade-off (stated as a choice):** `'simple'` means `immigrant`
+  won't match `immigrants`/`immigration`. Stemmed/conceptual discovery already
+  lives in the **summary layer (§3)**, so this is an acceptable loss for the
+  transcript tier — staff search the exact word and want the exact moment. If
+  stemmed in-transcript search is later wanted for English shows, add a second
+  `english`-config tsvector over `english_transcript` and route by `language`.
+  **Defer until asked.**
+- `transcripts` (and `transcript_cues`) are scoped to a station **via the
+  `episode_id → episode_log.station_id` join** (no `station_id` column of their
+  own — see CLAUDE.md). Search queries MUST join and filter on
+  `episode_log.station_id`. RLS is inherited via that join; the new column /
+  table do not change the policy surface.
+
+### 6.2 Phase 2 — embeddings (deferred per §10; optional recall upgrade)
 
 - Enable `pgvector`; add `transcript_chunks(episode_id, chunk_idx, content,
   embedding vector(1536), start_ms, end_ms)` (chunked so retrieval can cite a
@@ -140,17 +176,37 @@ Query params:
 - `page`, `limit` — pagination.
 
 Behavior:
-- Query joins `transcripts` → `episode_log`, filters by **`station_id`** (via
-  the request-scoped RLS client from `lib/auth.ts#getStationContext`, plus an
-  explicit `.eq('station_id', …)` — defense in depth, same as every route).
-- Rank by `ts_rank(transcript_fts, query)`, recency tiebreaker.
+- **Start FROM `transcripts`, INNER JOIN `episode_log`** (stated explicitly so
+  it is never widened to a left join). Episodes stuck at `status='transcribed'`
+  with **no `transcripts` row** (the ghost-episode pattern, P4) simply can't
+  match transcript text and correctly never appear — no null-snippet rows, no
+  special-casing.
+- Filter by **`station_id`** via the request-scoped RLS client from
+  `lib/auth.ts#getStationContext`, plus an explicit `.eq('station_id', …)` —
+  defense in depth, same as every route.
+- Rank episodes by `ts_rank(transcript_fts, query)`, recency tiebreaker.
+- For the ranked page, pull matching rows from **`transcript_cues`** (§6.1) for
+  those episodes to attach `start_ms` for the deep-link.
 - Return per result: episode id, show name, air date, **`ts_headline`
-  snippet** with the match highlighted, and (where derivable from VTT) the
-  **timestamp** of the match for audio deep-linking.
+  snippet** with the match highlighted, and the cue **`start_ms`** for audio
+  deep-linking.
+- **Hard rule — never fabricate a timestamp.** If no cue matches, return
+  `start_ms = null` and the UI shows the snippet with no deep-link. A wrong time
+  in an FCC proof is worse than no time. (Same rule for the lean runtime-aligner
+  fallback, below.)
 - **Cap `ts_headline` to the current page of results**, never the whole match
   set (it is the one expensive FTS op on large docs).
 - Apply a **statement timeout** (e.g. 5s) so a pathological query can't pin a
   connection.
+
+**Lean fallback (no migration, if the cue table is deferred):** parse the
+matched episode's VTT into `{start_ms, end_ms, text}` in `lib/vtt.ts`, normalize
+whitespace/case, find the first cue containing the term, return its `start_ms` —
+current page only, cache parsed cues per episode within a request. Fragile where
+the reflowed plain transcript and cue text diverge (punctuation, Whisper
+reflow), and common words mis-hit. **Recommendation: ship the cue table** — the
+aligner is the fragile thing you'd unit-test to death anyway, and the table
+makes the timestamp a first-class, indexed fact that scales.
 
 ### 7.2 Summary/discovery search
 
@@ -212,13 +268,20 @@ Grouped by episode; each snippet clickable → seeks audio at the timestamp.
 Show is a (multi-)select; time frame is a quarter dropdown (reuse existing
 logic) or explicit From/To.
 
-## 10. Open question (blocks Phase 2 schema)
+## 10. Decision — keep the schema lean
 
-**Is semantic / LLM search actually wanted, or is fast keyword + summary search
-enough for how staff really work?** This decides whether to provision
-`pgvector` now or keep the schema lean. Phase 1 is unaffected either way.
+**Default to no `pgvector`** until real staff queries show the "we discussed it
+without saying the words" gap actually bites. Proof is lexical; conceptual
+discovery is the summary layer (§3). Revisit on evidence, not on spec. Phase 1
+and Phase 3 are both unaffected by this decision.
 
 ## 11. Phasing
+
+> **Phase 3 does NOT depend on Phase 2.** The 1→2→3 numbering is not a
+> dependency chain. RAG retrieves top-k via Tier 1 FTS alone; embeddings only
+> improve recall and can slot in whenever. Build order is **Phase 1 → (Phase 3
+> may follow directly)**; Phase 2 is an optional recall upgrade on the same
+> plumbing.
 
 1. **Phase 1 — Lexical FTS** (migration §6.1 + `/api/transcript-search` §7.1 +
    both UIs §9). No rate limiting beyond pagination/timeout. **~80% of the
@@ -226,9 +289,10 @@ enough for how staff really work?** This decides whether to provision
    - Cheap companion: **summary/category search** across the grid by issue +
      date range (§7.2) — near-zero cost, directly on-mission.
 2. **Phase 2 — Semantic** (pgvector §6.2, embed in summarize worker, hybrid
-   rank). Light guardrails. *Gated on §10.*
-3. **Phase 3 — "Ask the archive" (RAG)** with the full §8 cost-cap / cache /
-   citation treatment. The capstone.
+   rank). Optional recall upgrade. Deferred per §10 — not a prerequisite for
+   anything else.
+3. **Phase 3 — "Ask the archive" (RAG)** retrieving via Tier 1 FTS, with the
+   full §8 cost-cap / cache / citation treatment. May follow Phase 1 directly.
 
 ## 12. Security / multi-tenant checklist
 
@@ -239,3 +303,38 @@ enough for how staff really work?** This decides whether to provision
 - Never let a `show_key` / date filter widen scope across stations.
 - Tier 3 prompts must not leak cross-station transcripts into context — the
   retrieval step is station-filtered before the LLM ever sees text.
+
+## 13. Engineering directives (for the build)
+
+**No god files — split by responsibility:**
+
+| Module | Responsibility |
+|---|---|
+| `app/api/transcript-search/route.ts` | **Thin:** auth, param validation, pagination, response shaping. No SQL beyond calling the lib. |
+| `lib/transcript-search.ts` | Query construction, ranking, scope filtering. |
+| `lib/vtt.ts` | VTT parse + cue model (and the runtime alignment fn, if the fallback is chosen). **Pure, no DB.** |
+| `lib/types.ts` | Result / row types. |
+| `workers/summarize.ts` | Untouched except the **cue-populate** step (and, if Phase 2, the embed step). |
+
+**Reuse, don't reinvent:**
+- Quarter → date-range from `lib/qir-format.ts`.
+- Station scope from `lib/auth.ts#getStationContext` + an explicit
+  `.eq('station_id', …)` on **every** query (defense in depth, house style).
+- The 350ms debounce pattern and the episode table component from
+  `app/dashboard/episodes/page.tsx`.
+
+**Standards:** small single-responsibility modules, named exports, no
+cross-layer leakage. **Parameterized queries only.** `websearch_to_tsquery` for
+all user input. Statement timeout (~5s), pagination, `ts_headline` capped to the
+current page. Migration = next free number (**021 is Show Groups → use 022+**),
+idempotent (`if not exists`), with the one-time **backfill as a separate,
+re-runnable step**.
+
+## 14. Tests
+
+The **cue-location path is the fragile, audit-critical piece** — unit-test
+`lib/vtt.ts` (and the cue parser) against real VTT fixtures including:
+
+- **(a)** a match spanning two cues,
+- **(b)** a common-word match (must not mis-hit), and
+- **(c)** a no-match that returns **`null`** — never a guessed time.
