@@ -96,12 +96,13 @@ export async function getExcludedCategories(stationId: string): Promise<string[]
   return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
 }
 
-// Program names to skip at ingest, matched against show_keys.show_name. This is
-// distinct from excluded_categories (matched on category) and from a show's
-// `active` flag (per-key): a name here drops EVERY feed sharing that show_name.
-// Defaults to none.
-export async function getExcludedShows(stationId: string): Promise<string[]> {
-  return (await getSetting<string[]>('excluded_shows', stationId)) ?? []
+// Show keys to skip at ingest, matched exactly against show_keys.key. Keyed by
+// the per-feed key (not the program name) so one airing of a show can be dropped
+// while sibling airings under the same name keep running (e.g. drop KPFA's 9am
+// Democracy Now! feed `dn9` while keeping the 6am `dn6`). Distinct from
+// excluded_categories (matched on category). Defaults to none.
+export async function getExcludedShowKeys(stationId: string): Promise<string[]> {
+  return (await getSetting<string[]>('excluded_show_keys', stationId)) ?? []
 }
 
 export async function getTranscribeBatchSize(stationId: string): Promise<number> {

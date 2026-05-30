@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
@@ -58,7 +58,7 @@ const settingFields: SettingField[] = [
   { key: 'max_entries_per_category', label: 'Max Entries Per Category', type: 'number', autoSave: true },
   { key: 'issue_categories', label: 'Issue Categories (JSON array)', type: 'json' },
   { key: 'excluded_categories', label: 'Excluded Categories (JSON array)', type: 'json' },
-  { key: 'excluded_shows', label: 'Excluded Shows by Name (JSON array)', type: 'json' },
+  { key: 'excluded_show_keys', label: 'Excluded Show Keys (JSON array)', type: 'json' },
   { key: 'summarization_model', label: 'Summarization Model', type: 'text', autoSave: true },
   { key: 'transcription_model', label: 'Transcription Model', type: 'text', autoSave: true },
   { key: 'transcribe_batch_size', label: 'Transcribe Batch Size', type: 'number', autoSave: true },
@@ -157,17 +157,18 @@ export default function SettingsPage() {
     return DEFAULT_CATEGORIES
   })()
 
-  // Excluded show names from settings (drives the per-show "Exclude" checkboxes).
-  // Stored as a JSON array; tolerate either a parsed array or a JSON string.
-  const excludedShows: string[] = (() => {
-    const v = settings.excluded_shows
+  // Excluded show KEYS from settings (drives the per-feed "Exclude" checkboxes).
+  // Per-key, not per-name: dropping dn9 must not touch dn6. Stored as a JSON
+  // array; tolerate either a parsed array or a JSON string.
+  const excludedShowKeys: string[] = (() => {
+    const v = settings.excluded_show_keys
     if (Array.isArray(v)) return v as string[]
     if (typeof v === 'string') {
       try { const p = JSON.parse(v); return Array.isArray(p) ? p : [] } catch { return [] }
     }
     return []
   })()
-  const excludedShowSet = new Set(excludedShows.map((n) => n.trim().toLowerCase()))
+  const excludedKeySet = new Set(excludedShowKeys.map((k) => k.trim()))
 
   const fetchAll = useCallback(async () => {
     const [settingsRes, correctionsRes, wordlistRes, showsRes] = await Promise.all([
@@ -575,36 +576,36 @@ export default function SettingsPage() {
     setSavingShow(null)
   }
 
-  // Add/remove a program from the excluded_shows blocklist (by show_name).
-  // Exclusion is by name, so this affects every feed sharing that name.
+  // Add/remove a single feed from the excluded_show_keys blocklist (by show key).
+  // Per-feed: excluding dn9 leaves the sibling dn6 untouched.
   async function toggleShowExcluded(show: Show) {
-    const norm = show.show_name.trim().toLowerCase()
-    const excluded = excludedShowSet.has(norm)
+    const key = show.key.trim()
+    const excluded = excludedKeySet.has(key)
     const next = excluded
-      ? excludedShows.filter((n) => n.trim().toLowerCase() !== norm)
-      : [...excludedShows, show.show_name]
+      ? excludedShowKeys.filter((k) => k.trim() !== key)
+      : [...excludedShowKeys, show.key]
     const nextJson = JSON.stringify(next, null, 2)
 
     // Optimistic update of both the derived list and the Pipeline-tab textarea.
     const prevSettings = settings
-    const prevEdit = editValues.excluded_shows
-    const prevSaved = savedValues.excluded_shows
-    setSettings((prev) => ({ ...prev, excluded_shows: next }))
-    setEditValues((prev) => ({ ...prev, excluded_shows: nextJson }))
-    setSavedValues((prev) => ({ ...prev, excluded_shows: nextJson }))
+    const prevEdit = editValues.excluded_show_keys
+    const prevSaved = savedValues.excluded_show_keys
+    setSettings((prev) => ({ ...prev, excluded_show_keys: next }))
+    setEditValues((prev) => ({ ...prev, excluded_show_keys: nextJson }))
+    setSavedValues((prev) => ({ ...prev, excluded_show_keys: nextJson }))
 
     try {
       const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'excluded_shows', value: next }),
+        body: JSON.stringify({ key: 'excluded_show_keys', value: next }),
       })
       if (!res.ok) throw new Error('save failed')
     } catch {
       // Revert on failure.
       setSettings(prevSettings)
-      setEditValues((prev) => ({ ...prev, excluded_shows: prevEdit }))
-      setSavedValues((prev) => ({ ...prev, excluded_shows: prevSaved }))
+      setEditValues((prev) => ({ ...prev, excluded_show_keys: prevEdit }))
+      setSavedValues((prev) => ({ ...prev, excluded_show_keys: prevSaved }))
       toast('error', 'Failed to update exclusion')
     }
   }
@@ -641,6 +642,23 @@ export default function SettingsPage() {
   const filteredShows = shows.filter(s =>
     !showSearch || s.show_name.toLowerCase().includes(showSearch.toLowerCase()) || s.key.toLowerCase().includes(showSearch.toLowerCase())
   )
+
+  // Group feeds that share a show_name into one logical show, so a multi-key
+  // program (e.g. a 6-hour show split across 6 keys) reads as a single show with
+  // its keys listed under it. Keys stay individually controllable (active,
+  // exclude, category) — only the Name is collapsed across the group.
+  const groupedShows = (() => {
+    const sorted = [...filteredShows].sort(
+      (a, b) => a.show_name.localeCompare(b.show_name) || a.key.localeCompare(b.key)
+    )
+    const groups: { name: string; shows: Show[] }[] = []
+    for (const s of sorted) {
+      const last = groups[groups.length - 1]
+      if (last && last.name === s.show_name) last.shows.push(s)
+      else groups.push({ name: s.show_name, shows: [s] })
+    }
+    return groups
+  })()
 
   if (loading) return (
     <div className="space-y-8">
@@ -1109,7 +1127,7 @@ export default function SettingsPage() {
                   <th className="text-left px-3 py-2 font-medium">Name</th>
                   <th className="text-left px-3 py-2 font-medium">Default Category</th>
                   <th className="text-center px-3 py-2 font-medium">Active</th>
-                  <th className="text-center px-3 py-2 font-medium" title="Exclude this program from ingest by name. Affects every feed sharing this name.">Exclude</th>
+                  <th className="text-center px-3 py-2 font-medium" title="Exclude this feed (show key) from ingest. Only this key is dropped — other airings of the same show keep running.">Exclude</th>
                   <th className="text-right px-3 py-2 font-medium">Episodes</th>
                 </tr>
               </thead>
@@ -1118,10 +1136,13 @@ export default function SettingsPage() {
                   <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
-                ) : filteredShows.map((show) => (
-                  <tr key={show.id} className={`${!show.active ? 'opacity-50' : ''} ${savingShow === show.id ? 'opacity-70' : ''}`}>
+                ) : groupedShows.map((group) => (
+                  <Fragment key={group.shows[0].id}>
+                    {group.shows.map((show, idx) => (
+                  <tr key={show.id} className={`${idx === 0 ? 'border-t-2 border-gray-200 dark:border-warm-600' : ''} ${!show.active ? 'opacity-50' : ''} ${savingShow === show.id ? 'opacity-70' : ''}`}>
                     <td className="px-3 py-2 font-mono text-xs text-gray-500 dark:text-warm-400">{show.key}</td>
-                    <td className="px-3 py-2">
+                    {idx === 0 && (
+                    <td className="px-3 py-2 align-top" rowSpan={group.shows.length}>
                       {editingShow?.id === show.id && editingShow.field === 'show_name' ? (
                         <input
                           ref={showEditRef as React.RefObject<HTMLInputElement>}
@@ -1145,9 +1166,13 @@ export default function SettingsPage() {
                           title="Click to edit"
                         >
                           {show.show_name}
+                          {group.shows.length > 1 && (
+                            <span className="ml-1 text-xs text-gray-400 dark:text-warm-500">({group.shows.length} keys)</span>
+                          )}
                         </button>
                       )}
                     </td>
+                    )}
                     <td className="px-3 py-2">
                       {editingShow?.id === show.id && editingShow.field === 'default_category' ? (
                         <select
@@ -1206,10 +1231,10 @@ export default function SettingsPage() {
                     <td className="px-3 py-2 text-center">
                       <input
                         type="checkbox"
-                        checked={excludedShowSet.has(show.show_name.trim().toLowerCase())}
+                        checked={excludedKeySet.has(show.key)}
                         onChange={() => toggleShowExcluded(show)}
                         className="h-4 w-4 cursor-pointer accent-red-600"
-                        title="Exclude this program from ingest by name"
+                        title="Exclude this feed (show key) from ingest"
                       />
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -1221,6 +1246,8 @@ export default function SettingsPage() {
                       </a>
                     </td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

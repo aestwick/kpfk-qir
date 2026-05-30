@@ -1,7 +1,7 @@
 import { Job } from 'bullmq'
 import { XMLParser } from 'fast-xml-parser'
 import { supabaseAdmin } from '../lib/supabase'
-import { getExcludedCategories, getExcludedShows, isPipelinePaused } from '../lib/settings'
+import { getExcludedCategories, getExcludedShowKeys, isPipelinePaused } from '../lib/settings'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
@@ -243,9 +243,10 @@ export async function processIngest(job: Job) {
   console.log(`[ingest] starting RSS fetch for ${station.slug}...`)
 
   const excludedCategories = await getExcludedCategories(stationId)
-  const excludedShows = await getExcludedShows(stationId)
-  // Normalize once: name exclusion is case/whitespace-insensitive.
-  const excludedShowNames = new Set(excludedShows.map((n) => n.trim().toLowerCase()))
+  const excludedShowKeys = await getExcludedShowKeys(stationId)
+  // Exclusion is per-feed (exact show key), so a single airing can be dropped
+  // without affecting sibling airings that share the same show name.
+  const excludedKeySet = new Set(excludedShowKeys.map((k) => k.trim()))
 
   // Get this station's active shows, excluding Music/Español
   const { data: shows, error: showsErr } = await supabaseAdmin
@@ -260,7 +261,7 @@ export async function processIngest(job: Job) {
   const activeShows = shows.filter(
     (s) =>
       !excludedCategories.some((exc) => s.category?.includes(exc)) &&
-      !excludedShowNames.has((s.show_name ?? '').trim().toLowerCase())
+      !excludedKeySet.has((s.key ?? '').trim())
   )
 
   // Process shows in parallel batches of 5
