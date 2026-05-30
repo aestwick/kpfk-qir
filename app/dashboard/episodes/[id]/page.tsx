@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { parseVtt, findCueForPhrase } from '@/lib/vtt'
 import { authedFetch } from '@/lib/api-client'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -493,24 +494,13 @@ export default function EpisodeDetailPage() {
 
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  /** Search VTT captions for excerpt text and return the cue start time, or null */
+  /** Locate a flag excerpt in the VTT captions and return its cue start time, or
+   *  null. Delegates to findCueForPhrase, which matches across cue boundaries —
+   *  flag excerpts routinely span several short cues, so single-cue containment
+   *  almost never resolves a timestamp. */
   function findTimestampFromVtt(excerpt: string): number | null {
-    if (!showVtt) return null
-    const needle = excerpt.toLowerCase().slice(0, 80)
-    const blocks = showVtt.split(/\n\n+/)
-    for (const block of blocks) {
-      const lines = block.trim().split('\n')
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(/(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->/)
-        if (match) {
-          const text = lines.slice(i + 1).join(' ').toLowerCase()
-          if (text.includes(needle)) {
-            return +match[1] * 3600 + +match[2] * 60 + +match[3] + +match[4] / 1000
-          }
-        }
-      }
-    }
-    return null
+    const cue = findCueForPhrase(vttCues, excerpt)
+    return cue ? cue.startMs / 1000 : null
   }
 
   function jumpToTimestamp(seconds: number, excerpt?: string | null) {
@@ -590,6 +580,10 @@ export default function EpisodeDetailPage() {
   const isNonEnglish = transcript?.language != null && transcript.language !== 'en'
   const showTranscript = viewLang === 'english' && transcript?.english_transcript ? transcript.english_transcript : transcript?.transcript
   const showVtt = viewLang === 'english' && transcript?.english_vtt ? transcript.english_vtt : transcript?.vtt
+
+  // Parse the active VTT once per transcript so the per-flag timestamp lookups
+  // (findTimestampFromVtt) don't re-parse the whole caption track on every render.
+  const vttCues = useMemo(() => parseVtt(showVtt), [showVtt])
 
   if (loading) return (
     <div className="space-y-6">
@@ -783,14 +777,15 @@ export default function EpisodeDetailPage() {
                     {flag.excerpt && (
                       <button
                         onClick={() => {
-                          if (flag.timestamp_seconds != null) {
-                            jumpToTimestamp(flag.timestamp_seconds, flag.excerpt)
+                          const ts = flag.timestamp_seconds ?? findTimestampFromVtt(flag.excerpt!)
+                          if (ts != null) {
+                            jumpToTimestamp(ts, flag.excerpt)
                           } else {
                             setHighlightText(flag.excerpt!.slice(0, 60))
                           }
                         }}
                         className="text-xs text-gray-500 dark:text-warm-400 mt-1 bg-gray-50 dark:bg-warm-700 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300 rounded px-2 py-1 font-mono text-left w-full transition-colors cursor-pointer"
-                        title={flag.timestamp_seconds != null ? `Play from ${formatTimestamp(flag.timestamp_seconds)}` : 'Find in transcript'}
+                        title={(flag.timestamp_seconds ?? findTimestampFromVtt(flag.excerpt!)) != null ? 'Play audio from this point' : 'Find in transcript'}
                       >
                         &ldquo;...{flag.excerpt}...&rdquo;
                       </button>
