@@ -4,8 +4,9 @@ A visual, schedule-style report that maps FCC compliance offenses onto KPFK's
 broadcast week. Borrows the grid geometry from the CMS schedule builder but
 renders **read-only** offense density, not editable slots.
 
-Status: **spec / not yet built.** All decisions below are locked unless marked
-**OPEN**.
+Status: **spec / not yet built — finalized.** All decisions below are locked.
+The `compliance_report` shape (formerly the one blocking unknown) is resolved
+in §6.1.
 
 ---
 
@@ -63,8 +64,10 @@ Both are toggleable in one page; both share one data fetch.
 - `air_start` — `HH:MM:SS` 24-hour Pacific, populated in `workers/ingest.ts`.
   **Confirmed clean at `:00` / `:30`** → maps directly onto 30-min rows.
 - `air_end`, `duration`, `status`.
-- `compliance_report` — `string | null`, holds summarizer-detected
-  discrepancies. **Shape is currently loose JSON (OPEN — see §9).**
+- `compliance_report` — `string | null`. **Resolved (see §6.1):** it is **plain
+  text, not JSON** — the summarizer's `discrepancy` field
+  (`workers/summarize.ts:186`), a single human-readable note about a *metadata*
+  conflict, or `null`/`""` when none. Read verbatim, never parsed.
 
 ### `show_keys` — `lib/types.ts`
 - `key`, `show_name`, `category`, `default_category`, `active`, `station_id`.
@@ -110,8 +113,7 @@ Three CMS files were reviewed. We take **geometry and pure helpers only.**
 ### 5.1 The unit
 One **airing** = one `episode_log` row with an `air_date` + `air_start`.
 Its **offense count** = (unresolved `compliance_flags` for that episode) +
-(summary discrepancies parsed from `compliance_report`), subject to the
-filters in §6.
+(0 or 1 for a `summary_discrepancy` — see §6.1), subject to the filters in §6.
 
 ### 5.2 Bucketing an airing into the heatmap
 ```
@@ -150,14 +152,37 @@ the CMS) — intensity encodes offense density, not genre.
 
 - **Default:** unresolved flags only (matches the existing compliance report).
 - **Toggle:** *Include resolved* → counts resolved flags too.
-- **Summary discrepancies:** parsed from `episode_log.compliance_report` and
-  counted as an additional offense type, labeled `summary_discrepancy`. **OPEN:**
-  exact parse depends on §9.
 - **Optional facets (multi-select, all default to "all"):**
   - by `flag_type` (the 6 types + `summary_discrepancy`)
-  - by `severity` (`info` / `warning` / `critical`)
+  - by `severity` (`info` / `warning` / `critical`) — applies to
+    `compliance_flags` only; `summary_discrepancy` has no severity.
 - A cell click drills through to `/dashboard/compliance` pre-filtered to that
   day/time (or show) and window — reuse the existing list page's query params.
+
+### 6.1 `summary_discrepancy` (resolved)
+
+`episode_log.compliance_report` is **plain text, not JSON.** It holds the
+summarizer's `discrepancy` output (`workers/summarize.ts:186`,
+`DEFAULT_SUMMARIZATION_PROMPT` in `lib/settings.ts`) — a single note when
+provided metadata (host/guest/show name) contradicts the transcript, otherwise
+`null` or `""`. The dashboard renders it verbatim
+(`app/dashboard/episodes/[id]/page.tsx:649`, simple truthiness check).
+
+Therefore, per episode:
+
+```
+summaryDiscrepancyCount(ep) = (ep.compliance_report?.trim() ? 1 : 0)
+```
+
+No parsing, no schema dependency — a binary contribution to the offense count.
+
+> **Semantic caveat (by design).** A `summary_discrepancy` is a **metadata-quality
+> issue**, *not* an FCC violation like the `compliance_flags` rows. It's included
+> per the product decision, but kept as its **own toggleable type** and **visually
+> distinguished** (it carries no severity and is excluded when the severity facet
+> is narrowed). Default view can show it; users filtering to FCC offenses only can
+> deselect it. The heatmap/matrix should make clear via the type legend that these
+> two sources differ in kind.
 
 ---
 
@@ -193,27 +218,27 @@ helper (kept in `lib/compliance-grid.ts` so both views and tests can use it).
 
 ## 9. Open questions
 
-1. **`compliance_report` shape.** It's `string | null` with no enforced schema.
-   Before counting "summary discrepancies" we need to confirm what
-   `summarize.ts` writes — is it `{ discrepancies: [...] }`, a count, free text?
-   **Action:** inspect a few populated rows / the summarizer write path. If it's
-   unstructured, v1 ships flags-only and adds discrepancies once the shape is
-   pinned. *(Doesn't block the flags-based grid.)*
-2. **Heatmap default granularity** — confirm hourly (24 rows) default vs the full
-   48-row half-hour view. Proposed: hourly default, half-hour toggle.
-3. **Matrix column unit at the boundary** — weeks up to 24 wk, months beyond.
-   Confirm the cutover and whether custom ranges should auto-pick.
-4. **Comparison window picker** — how are A and B chosen? Proposed: A = current
-   preset window, B = the immediately preceding equal-length window (one click),
-   with custom override.
-5. **Public/print route** — deferred. Confirm it stays out of v1.
+*(Resolved: `compliance_report` shape — see §6.1. No longer a blocker.)*
+
+The remaining items are UX defaults, not blockers — each has a proposed answer
+the build can adopt unless overridden:
+
+1. **Heatmap default granularity** — proposed: hourly (24 rows) default, full
+   48-row half-hour view as a toggle.
+2. **Matrix column unit at the boundary** — proposed: weeks up to 24 wk, months
+   beyond; custom ranges auto-pick by span.
+3. **Comparison window picker** — proposed: A = current preset window, B = the
+   immediately preceding equal-length window (one click), with custom override.
+4. **Public/print route** — deferred; stays out of v1 (dashboard placement only).
 
 ---
 
 ## 10. Build order
 
 1. `lib/compliance-grid.ts` (pure, unit-testable) + types.
-2. `app/api/compliance/grid/route.ts` (flags-only first; discrepancies after §9.1).
+2. `app/api/compliance/grid/route.ts` — flags + `summary_discrepancy` together
+   (the discrepancy contribution is a trivial truthiness check per §6.1, no
+   longer a follow-up).
 3. `heatmap.tsx`, then `matrix.tsx`.
 4. `page.tsx` controls wiring + link from `/dashboard/compliance`.
 5. Delta/comparison layer once single-window views are solid.
