@@ -135,7 +135,7 @@ export interface QirDraft {
 export interface ComplianceFlag {
   id: number
   episode_id: number
-  flag_type: 'profanity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id'
+  flag_type: 'profanity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id' | 'indecency'
   severity: 'info' | 'warning' | 'critical'
   excerpt: string | null
   timestamp_seconds: number | null
@@ -183,5 +183,63 @@ export interface QualityFlag {
   headline: string | null
   air_date: string | null
   reason: string
+}
+
+// --- Compliance Grid Report (see ideas/COMPLIANCE_GRID_REPORT_SPEC.md) --------
+
+// One concrete airing reduced to what the grid needs: when it aired and how
+// many offenses it carried (unresolved flags + 0/1 summary discrepancy).
+export interface GridAiring {
+  show_key: string
+  show_name: string | null
+  air_date: string // YYYY-MM-DD (Pacific)
+  air_start: string | null // HH:MM:SS (Pacific), null when unknown
+  offenses: number
+}
+
+// 7 days (Sun..Sat) × N time rows of offense counts.
+export type Heatmap = number[][]
+
+// A column of the show × period matrix (a week or a calendar month).
+export interface GridColumn {
+  key: string
+  label: string
+  start: string // YYYY-MM-DD inclusive
+  end: string // YYYY-MM-DD inclusive
+  weeks: number // for the avg/week metric within the column
+}
+
+export interface MatrixRow {
+  show_key: string
+  show_name: string
+  total: number
+  cells: number[] // aligned to the columns array
+}
+
+// One window's worth of grid data returned by /api/compliance/grid.
+export interface GridWindow {
+  start: string
+  end: string
+  rangeDays: number
+  weeks: number
+  heatmap: Heatmap // 7×48 half-hour resolution; client collapses to hourly
+  columns: GridColumn[]
+  matrix: MatrixRow[]
+  totalOffenses: number
+  airingsCounted: number
+  unplacedOffenses: number // offenses on airings with no air_start
+}
+
+export interface GridResponse {
+  meta: {
+    includeResolved: boolean
+    includeDiscrepancies: boolean
+    flagTypes: string[]
+    severities: string[]
+  }
+  // Single-window response carries `window`; comparison carries `a` and `b`.
+  window?: GridWindow
+  a?: GridWindow
+  b?: GridWindow
 }
 

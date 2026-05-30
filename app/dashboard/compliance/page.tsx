@@ -496,14 +496,22 @@ export default function CompliancePage() {
       <Breadcrumbs />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
-        <a
-          href={`/compliance-report?${buildReportUrl()}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
-        >
-          View Report
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href="/dashboard/compliance/grid"
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 dark:bg-surface-raised dark:text-warm-200 dark:border-warm-600 dark:hover:bg-warm-700/50"
+          >
+            Grid Report
+          </a>
+          <a
+            href={`/compliance-report?${buildReportUrl()}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+          >
+            View Report
+          </a>
+        </div>
       </div>
 
       {/* Summary Stats Strip — uses dedicated stats query for accurate totals */}
