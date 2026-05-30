@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logSummarizationUsage } from '../lib/usage'
 import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused } from '../lib/settings'
+import { isSpendLimitError } from '../lib/retry-policy'
 
 interface SummaryResponse {
   headline: string
@@ -120,9 +121,10 @@ export async function processSummarize(job: Job) {
         continue
       }
 
+      // Air date/time are derived deterministically from the archive MP3 filename
+      // at ingest (parseMp3Url + dateFieldsFromUrl) and stored as episode metadata,
+      // so they're ground truth and don't need to go through the summarizer.
       const userMessage = `Show: ${episode.show_name || ''}
-Air Date: ${episode.air_date || ''}
-Time: ${episode.air_time || ''}
 Host(s): ${episode.host || ''}
 Guest(s): ${episode.guest || ''}
 Transcript:
@@ -203,12 +205,15 @@ ${transcriptText}`
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       console.error(`[summarize] ep ${episode.id} failed:`, errMsg)
+      // A spend-limit block is org-wide, not this episode's fault — don't spend
+      // a retry on it, or a billing outage will eventually mark the backlog dead.
+      const spendBlocked = isSpendLimitError(errMsg)
       await supabaseAdmin
         .from('episode_log')
         .update({
           status: 'failed',
           error_message: errMsg.slice(0, 1000),
-          retry_count: (episode.retry_count ?? 0) + 1,
+          retry_count: spendBlocked ? (episode.retry_count ?? 0) : (episode.retry_count ?? 0) + 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)

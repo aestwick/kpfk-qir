@@ -19,6 +19,16 @@ export interface StationUser {
   created_at: string
 }
 
+// A station member as returned by /api/members — the station_users row joined
+// with the user's email and a flag marking the current caller's own row.
+export interface StationMember {
+  user_id: string
+  email: string | null
+  role: StationRole
+  created_at: string
+  is_self: boolean
+}
+
 export interface StationSetting {
   id: number
   station_id: string

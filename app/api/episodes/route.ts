@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 
 export const dynamic = 'force-dynamic'
@@ -88,6 +88,9 @@ export async function POST(request: NextRequest) {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
 

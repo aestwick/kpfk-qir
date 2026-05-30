@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,6 +43,9 @@ export async function POST(request: NextRequest) {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const contentType = request.headers.get('content-type') ?? ''
 
@@ -150,6 +153,9 @@ export async function PATCH(request: NextRequest) {
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
 
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
+
     const body = await request.json()
     const { id, ...updates } = body
 
@@ -179,6 +185,9 @@ export async function DELETE(request: NextRequest) {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')

@@ -7,6 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
+import type { StationMember, StationRole } from '@/lib/types'
 
 /* ─── lazy-loaded corrections component ─── */
 const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-corrections').then(m => ({ default: m.TranscriptCorrections })), {
@@ -93,7 +94,7 @@ const DEFAULT_CATEGORIES = [
   'Arts & Culture',
 ]
 
-type Tab = 'pipeline' | 'prompts' | 'shows' | 'compliance' | 'corrections'
+type Tab = 'pipeline' | 'prompts' | 'shows' | 'compliance' | 'corrections' | 'members'
 
 
 export default function SettingsPage() {
@@ -146,6 +147,12 @@ export default function SettingsPage() {
   }>>([])
   const [stuckEpisodes, setStuckEpisodes] = useState<typeof errorEpisodes>([])
   const [healthLoading, setHealthLoading] = useState(false)
+
+  // Members tab state (only populated/shown for station admins)
+  const [members, setMembers] = useState<StationMember[]>([])
+  const [canManageMembers, setCanManageMembers] = useState(false)
+  const [newMember, setNewMember] = useState<{ email: string; role: StationRole }>({ email: '', role: 'viewer' })
+  const [memberBusy, setMemberBusy] = useState(false)
 
   // Auto-save debounce timers
   const autoSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -266,6 +273,62 @@ export default function SettingsPage() {
   }, [editValues, savedValues, compliancePrompt, savedCompliancePrompt])
 
   const { toast } = useToast()
+
+  // Load members; a non-admin gets 403, which simply hides the Members tab.
+  const fetchMembers = useCallback(async () => {
+    try {
+      const res = await authedFetch('/api/members')
+      if (!res.ok) { setCanManageMembers(false); return }
+      const data = await res.json()
+      setCanManageMembers(true)
+      setMembers(data.members ?? [])
+    } catch {
+      setCanManageMembers(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchMembers() }, [fetchMembers])
+
+  async function addMember() {
+    const email = newMember.email.trim()
+    if (!email) return
+    setMemberBusy(true)
+    try {
+      const res = await authedFetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, role: newMember.role }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { toast('error', data.error ?? 'Failed to add member'); return }
+      toast('success', data.invited ? `Invite sent to ${email}` : `Added ${email}`)
+      setNewMember({ email: '', role: 'viewer' })
+      await fetchMembers()
+    } finally {
+      setMemberBusy(false)
+    }
+  }
+
+  async function changeMemberRole(userId: string, role: StationRole) {
+    const res = await authedFetch('/api/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, role }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) toast('error', data.error ?? 'Failed to update role')
+    else toast('success', 'Role updated')
+    await fetchMembers() // resync the selector either way
+  }
+
+  async function removeMember(userId: string, email: string | null) {
+    if (!window.confirm(`Remove ${email ?? 'this member'} from this station?`)) return
+    const res = await authedFetch(`/api/members?user_id=${encodeURIComponent(userId)}`, { method: 'DELETE' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) { toast('error', data.error ?? 'Failed to remove member'); return }
+    toast('success', `Removed ${email ?? 'member'}`)
+    await fetchMembers()
+  }
 
   // Auto-save for constrained fields (text, number) — debounced 800ms
   function handleAutoSaveChange(key: string, value: string) {
@@ -674,6 +737,7 @@ export default function SettingsPage() {
     { key: 'shows', label: 'Shows', count: shows.length },
     { key: 'compliance', label: 'Compliance' },
     { key: 'corrections', label: 'Corrections', count: corrections.length },
+    ...(canManageMembers ? [{ key: 'members' as Tab, label: 'Members', count: members.length }] : []),
   ]
 
   return (
@@ -1399,6 +1463,94 @@ export default function SettingsPage() {
             onToggleCorrection={handleToggleCorrection}
             onDeleteCorrection={handleDeleteCorrection}
           />
+        </div>
+      )}
+
+      {/* ════════════════════════════════════════════════════ */}
+      {/* Members Tab */}
+      {/* ════════════════════════════════════════════════════ */}
+      {activeTab === 'members' && (
+        <div className="space-y-6">
+          <div>
+            <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Station Members</h3>
+            <p className="text-sm text-gray-600 dark:text-warm-400 mt-1">
+              Who can access this station. <strong>Viewers</strong> are read-only;{' '}
+              <strong>editors</strong> can run the pipeline and edit content;{' '}
+              <strong>admins</strong> can also manage members.
+            </p>
+          </div>
+
+          {/* Add / invite a member */}
+          <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={newMember.email}
+                  onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
+                  placeholder="person@example.org"
+                  className="w-full text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Role</label>
+                <select
+                  value={newMember.role}
+                  onChange={(e) => setNewMember({ ...newMember, role: e.target.value as StationRole })}
+                  className="text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+                >
+                  <option value="viewer">Viewer</option>
+                  <option value="editor">Editor</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <button
+                onClick={addMember}
+                disabled={memberBusy || !newMember.email.trim()}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-100 dark:text-warm-900"
+              >
+                {memberBusy ? 'Adding…' : 'Add member'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-400 dark:text-warm-500 mt-2">
+              No account yet? An invitation email is sent so they can set a password.
+            </p>
+          </div>
+
+          {/* Member list */}
+          <div className="bg-white rounded-lg shadow divide-y dark:bg-surface-raised dark:shadow-card-dark dark:divide-warm-700">
+            {members.length === 0 && (
+              <div className="p-4 text-sm text-gray-500 dark:text-warm-400">No members yet.</div>
+            )}
+            {members.map((m) => (
+              <div key={m.user_id} className="flex items-center justify-between gap-3 p-3">
+                <div className="min-w-0 text-sm text-gray-900 dark:text-warm-100 truncate">
+                  {m.email ?? m.user_id}
+                  {m.is_self && <span className="text-gray-400 dark:text-warm-500"> (you)</span>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <select
+                    value={m.role}
+                    onChange={(e) => changeMemberRole(m.user_id, e.target.value as StationRole)}
+                    className="text-sm rounded-lg px-2 py-1 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="editor">Editor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button
+                    onClick={() => removeMember(m.user_id, m.email)}
+                    disabled={m.is_self}
+                    title={m.is_self ? "You can't remove yourself" : 'Remove member'}
+                    className="px-2 py-1 text-sm text-red-600 hover:text-red-700 disabled:opacity-40 dark:text-red-400"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

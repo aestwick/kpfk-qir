@@ -128,6 +128,29 @@ export async function getStationContext(request: NextRequest): Promise<StationCo
   }
 }
 
+// Role hierarchy for write-gating: viewer < editor < admin. Super admins outrank
+// all. Roles are enforced in the app layer (RLS stays membership-scoped as the
+// backstop), mirroring how workers rely on explicit app-layer guards.
+const ROLE_RANK: Record<StationRole, number> = { viewer: 0, editor: 1, admin: 2 }
+
+/** True if the caller meets or exceeds `min` for the active station. */
+export function hasRole(context: StationContext, min: StationRole): boolean {
+  if (context.isSuperAdmin) return true
+  return ROLE_RANK[context.role] >= ROLE_RANK[min]
+}
+
+/**
+ * Guard a mutating action by role. Returns a 403 StationContextError when the
+ * caller lacks `min`, or null when allowed. Pair with stationErrorResponse:
+ *   const denied = requireRole(ctx.context, 'editor')
+ *   if (denied) return stationErrorResponse(denied)
+ */
+export function requireRole(context: StationContext, min: StationRole): StationContextError | null {
+  if (hasRole(context, min)) return null
+  const label = min === 'admin' ? 'admin' : 'editor or admin'
+  return { status: 403, error: `This action requires ${label} access for this station` }
+}
+
 /** Map a StationContextError to a JSON NextResponse with the right status. */
 export function stationErrorResponse(error: StationContextError): NextResponse {
   return NextResponse.json({ error: error.error }, { status: error.status })
