@@ -13,6 +13,11 @@ interface DraftRow {
 const DEFAULT_LANGUAGE = 'en'
 const EMPTY_ROW: DraftRow = { show_name: '', key: '', category: '', primary_language: DEFAULT_LANGUAGE }
 
+// Codes we offer in the language dropdown — a lookup that returns anything else
+// (e.g. an uncommon feed <language>) leaves the row's existing value alone so the
+// select doesn't end up on a value it can't display.
+const LANGUAGE_CODES = new Set(['en', 'es', 'fr', 'hy', 'ko', 'zh', 'fa', 'ru', 'ja', 'ar', 'pt', 'tl'])
+
 // Classic iTunes / Apple Podcasts top-level categories (the taxonomy KPFK's
 // archive feeds use, e.g. <itunes:category text="News & Politics"/>). Free text
 // is still allowed — this just powers the autocomplete datalist.
@@ -77,6 +82,7 @@ export function BulkShowEntry({
   const [rows, setRows] = useState<DraftRow[]>([{ ...EMPTY_ROW }])
   const [pasteText, setPasteText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [lookingUp, setLookingUp] = useState<number | null>(null)
 
   const existingSet = useMemo(() => new Set(existingKeys.map((k) => k.trim().toLowerCase())), [existingKeys])
 
@@ -91,6 +97,50 @@ export function BulkShowEntry({
       if (index === next.length - 1 && !rowIsEmpty(next[index])) next.push({ ...EMPTY_ROW })
       return next
     })
+  }
+
+  // Pull show-level metadata from the station's RSS feed for the key in this row
+  // and pre-fill name / category / language. The user confirms before saving;
+  // the FCC issue category is never touched (the bot sets that per episode).
+  async function lookupRow(index: number) {
+    const key = rows[index]?.key.trim()
+    if (!key) {
+      toast('error', 'Enter a feed key first')
+      return
+    }
+    setLookingUp(index)
+    try {
+      const res = await authedFetch(`/api/settings/show-lookup?key=${encodeURIComponent(key)}`)
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast('error', data.error ?? 'Lookup failed')
+        return
+      }
+      if (!data.found) {
+        toast('error', `No feed found for "${key}" — check the key`)
+        return
+      }
+      setRows((prev) => {
+        const next = prev.map((r, i) => {
+          if (i !== index) return r
+          const merged = { ...r }
+          if (data.show_name) merged.show_name = data.show_name
+          if (data.category) merged.category = data.category
+          if (data.primary_language && LANGUAGE_CODES.has(data.primary_language)) {
+            merged.primary_language = data.primary_language
+          }
+          return merged
+        })
+        // Keep a trailing empty row if this filled the last one.
+        if (index === next.length - 1 && !rowIsEmpty(next[index])) next.push({ ...EMPTY_ROW })
+        return next
+      })
+      toast('success', `Filled from RSS — review and save`)
+    } catch {
+      toast('error', 'Network error')
+    } finally {
+      setLookingUp(null)
+    }
   }
 
   function removeRow(index: number) {
@@ -229,13 +279,24 @@ export function BulkShowEntry({
                     />
                   </td>
                   <td className="px-1 py-1">
-                    <input
-                      type="text"
-                      value={row.key}
-                      onChange={(e) => updateCell(i, 'key', e.target.value)}
-                      placeholder="feed key"
-                      className="w-full border dark:border-warm-600 rounded px-2 py-1 text-sm font-mono dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
-                    />
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={row.key}
+                        onChange={(e) => updateCell(i, 'key', e.target.value)}
+                        placeholder="feed key"
+                        className="flex-1 min-w-0 border dark:border-warm-600 rounded px-2 py-1 text-sm font-mono dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => lookupRow(i)}
+                        disabled={!row.key.trim() || lookingUp !== null}
+                        title="Look up name, category and language from the RSS feed"
+                        className="shrink-0 px-2 py-1 text-xs rounded border dark:border-warm-600 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-warm-800 disabled:opacity-40"
+                      >
+                        {lookingUp === i ? '…' : 'RSS'}
+                      </button>
+                    </div>
                   </td>
                   <td className="px-1 py-1">
                     <input
