@@ -47,6 +47,9 @@ export function AudioPlayerWithCaptions({
   const captionsRef = useRef<HTMLDivElement>(null)
   const didInitialSeek = useRef(false)
   const didRegister = useRef(false)
+  // Set when an explicit seek occurs (cue click, "Find in transcript", "Listen at"),
+  // so the caption list scrolls to the active cue even when auto-scroll is off.
+  const scrollOnSeek = useRef(false)
 
   const vttCues = parseVtt(vtt)
   const activeCueIdx = vttCues.findIndex((c) => currentTime >= c.start && currentTime < c.end)
@@ -56,6 +59,8 @@ export function AudioPlayerWithCaptions({
       audioRef.current.currentTime = seconds
       audioRef.current.play()
     }
+    // Scroll the caption list to the seeked cue regardless of the auto-scroll toggle
+    scrollOnSeek.current = true
     // Update state immediately so captions highlight without waiting for onTimeUpdate
     setCurrentTime(seconds)
   }, [])
@@ -87,11 +92,12 @@ export function AudioPlayerWithCaptions({
     }
   }, [initialSeek])
 
-  // Auto-scroll captions to active cue
+  // Scroll captions to the active cue when auto-scroll is on, or after an explicit seek
   useEffect(() => {
-    if (autoScroll && activeCueRef.current && captionsRef.current) {
+    if ((autoScroll || scrollOnSeek.current) && activeCueRef.current && captionsRef.current) {
       activeCueRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
+    scrollOnSeek.current = false
   }, [activeCueIdx, autoScroll])
 
   return (
