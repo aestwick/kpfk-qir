@@ -8,13 +8,14 @@
 -- Feed URL form (from the station archives): https://archive.<host>/getrss.php?id=<key>
 --
 -- mp3_filename_prefix is the leading token of the archive MP3 filename. VERIFIED
--- for WPFW from a sampled enclosure:
+-- from sampled enclosures:
 --   https://archive.wpfwfm.org/mp3/wpfw_260529_080000democragoodman.mp3  -> 'wpfw'
--- KPFT and KPFA use the identical Pacifica Archive convention (prefix = lowercase
--- call sign); these two are INFERRED from that convention. Confirm against a real
--- KPFT/KPFA MP3 before relying on URL-derived air dates for them. (A wrong prefix
--- doesn't drop episodes — ingest falls back to RSS pubDate — it only skips the
--- more reliable filename-derived date/time.)
+--   https://archive.kpft.org/mp3/kpft_260529_070000dn.mp3                -> 'kpft'
+-- KPFA is INFERRED from the identical Pacifica Archive convention (prefix =
+-- lowercase call sign); confirm against a real KPFA MP3 before relying on
+-- URL-derived air dates for it. (A wrong prefix doesn't drop episodes — ingest
+-- falls back to RSS pubDate — it only skips the more reliable filename-derived
+-- date/time.)
 --
 -- WBAI is intentionally left NULL: its archive uses a different URL format (per
 -- project owner) and is out of scope here. It stays skipped by ingest until set.
