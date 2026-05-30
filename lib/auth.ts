@@ -151,6 +151,16 @@ export function requireRole(context: StationContext, min: StationRole): StationC
   return { status: 403, error: `This action requires ${label} access for this station` }
 }
 
+/**
+ * Guard a super-admin-only action. Returns a 403 StationContextError when the
+ * caller is not a super admin, or null when allowed. Used to keep cross-station
+ * cost/usage data out of reach of ordinary station members.
+ */
+export function requireSuperAdmin(context: StationContext): StationContextError | null {
+  if (context.isSuperAdmin) return null
+  return { status: 403, error: 'This view is restricted to super admins' }
+}
+
 /** Map a StationContextError to a JSON NextResponse with the right status. */
 export function stationErrorResponse(error: StationContextError): NextResponse {
   return NextResponse.json({ error: error.error }, { status: error.status })

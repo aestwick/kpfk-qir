@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, requireSuperAdmin, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +8,10 @@ export async function GET(request: NextRequest) {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    // Cost/usage data is super-admin-only.
+    const denied = requireSuperAdmin(result.context)
+    if (denied) return stationErrorResponse(denied)
 
     const { searchParams } = new URL(request.url)
     const from = searchParams.get('from')

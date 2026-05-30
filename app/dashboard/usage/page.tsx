@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
+import { useIsSuperAdmin } from '@/lib/use-super-admin'
 
 interface UsageEntry {
   id: number
@@ -67,6 +68,7 @@ function getDefaultDateRange() {
 
 export default function UsagePage() {
   const defaults = getDefaultDateRange()
+  const isSuperAdmin = useIsSuperAdmin()
   const [from, setFrom] = useState(defaults.from)
   const [to, setTo] = useState(defaults.to)
   const [entries, setEntries] = useState<UsageEntry[]>([])
@@ -74,6 +76,7 @@ export default function UsagePage() {
   const [loading, setLoading] = useState(true)
 
   const fetchUsage = useCallback(async () => {
+    if (isSuperAdmin !== true) return
     setLoading(true)
     const params = new URLSearchParams()
     if (from) params.set('from', from)
@@ -85,9 +88,21 @@ export default function UsagePage() {
       setTotals(data.totals)
     }
     setLoading(false)
-  }, [from, to])
+  }, [from, to, isSuperAdmin])
 
   useEffect(() => { fetchUsage() }, [fetchUsage])
+
+  // Cost/usage is super-admin-only (also enforced server-side by /api/usage).
+  if (isSuperAdmin === false) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold">Usage &amp; Costs</h2>
+        <div className="card p-6 text-sm text-gray-600 dark:text-warm-400">
+          This view is restricted to super admins.
+        </div>
+      </div>
+    )
+  }
 
   // Group entries by date for daily table
   const dailySpend: Record<string, {
