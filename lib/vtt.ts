@@ -61,11 +61,13 @@ export function parseVtt(vtt: string | null | undefined): VttCue[] {
 }
 
 /** Normalize text for forgiving phrase matching: lowercase, strip punctuation,
- *  collapse whitespace. Unicode-aware so accented Spanish text matches. */
+ *  collapse whitespace. Replaces only ASCII punctuation/symbols with a space, so
+ *  chars >= U+0080 (accented Spanish letters etc.) are preserved — and it avoids
+ *  the regex /u flag, which the project's tsconfig target disallows. */
 export function normalizeForMatch(s: string): string {
   return s
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/[!-/:-@[-`{-~]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
