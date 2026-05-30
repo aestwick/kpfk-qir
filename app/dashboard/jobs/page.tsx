@@ -69,6 +69,29 @@ function getEpisodeCompleted(name: typeof queueNames[number], counts?: EpisodeCo
   }
 }
 
+// Episodes that have *reached at least* this stage, over the quarter total —
+// the denominator for each stage's progress bar.
+function getStageProgress(name: typeof queueNames[number], counts?: EpisodeCounts | null): { reached: number; total: number } | null {
+  if (!counts) return null
+  const total = counts.ingested
+  const reached = getEpisodeCompleted(name, counts) ?? 0
+  return { reached, total }
+}
+
+// The distinct status buckets for the quarter (each episode in exactly one),
+// derived from the cumulative episodeCounts + backlog. Drives the overview bar.
+function getPipelineSegments(backlog?: EpisodeBacklog | null): { key: string; label: string; count: number; color: string }[] {
+  if (!backlog) return []
+  const c = backlog.episodeCounts
+  return [
+    { key: 'pending', label: 'Awaiting transcription', count: backlog.pendingTranscription, color: 'bg-slate-400 dark:bg-slate-500' },
+    { key: 'transcribed', label: 'Awaiting summarization', count: backlog.pendingSummarization, color: 'bg-blue-400 dark:bg-blue-500' },
+    { key: 'summarized', label: 'Awaiting QIR', count: backlog.pendingCompliance, color: 'bg-amber-400 dark:bg-amber-500' },
+    { key: 'done', label: 'QIR-ready', count: c?.complianceChecked ?? 0, color: 'bg-emerald-500 dark:bg-emerald-500' },
+    { key: 'failed', label: 'Failed', count: backlog.failed, color: 'bg-red-400 dark:bg-red-500' },
+  ]
+}
+
 function formatJobDescription(job: { name: string; data?: Record<string, unknown>; progress?: { current?: number; total?: number; episodeId?: number; showName?: string; airDate?: string } | null }): string {
   const p = job.progress
   if (p?.showName) {
@@ -459,6 +482,13 @@ export default function JobsPage() {
         </div>
       </div>
 
+      {/* Pipeline Overview — KPIs + status distribution bar */}
+      <PipelineOverview
+        backlog={queues?.backlog}
+        activeCount={activeJobsFromSSE.length}
+        waitingCount={waitingJobs.length}
+      />
+
       {/* Queue Cards — collapsible */}
       <CollapsibleSection
         title="Queues"
@@ -469,16 +499,24 @@ export default function JobsPage() {
           {queueNames.map((name) => {
             const q = queues[name] ?? { active: 0, waiting: 0, completed: 0, failed: 0 }
             const backlogCount = getBacklogCount(name, queues?.backlog)
-            const episodeCompleted = getEpisodeCompleted(name, queues?.backlog?.episodeCounts)
+            const stage = getStageProgress(name, queues?.backlog?.episodeCounts)
             const queueFailed = q.failed ?? 0
+            const isWorking = q.active > 0
             return (
-              <div key={name} className="bg-gray-50 dark:bg-warm-800/50 rounded-lg p-4 space-y-3">
+              <div key={name} className="bg-gray-50 dark:bg-warm-800/50 rounded-lg p-4 space-y-3 border border-transparent data-[working=true]:border-blue-300 dark:data-[working=true]:border-blue-500/40" data-working={isWorking}>
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold">{queueLabels[name]}</h3>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="font-semibold truncate">{queueLabels[name]}</h3>
+                    {isWorking && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-blue-600 dark:text-blue-300 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />running
+                      </span>
+                    )}
+                  </div>
                   <button
                     onClick={() => triggerJob(name)}
                     disabled={anyLoading}
-                    className="px-3 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 disabled:opacity-50 transition-colors"
+                    className="px-3 py-1 text-xs bg-gray-900 text-white rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 disabled:opacity-50 transition-colors shrink-0"
                   >
                     {actionLoading === name ? 'Queuing...' : 'Run Now'}
                   </button>
@@ -495,17 +533,18 @@ export default function JobsPage() {
                     ))}
                   </select>
                 )}
-                {backlogCount !== null && backlogCount > 0 && (
-                  <div className="bg-orange-50 border border-orange-200 dark:bg-orange-900/20 dark:border-orange-800/40 rounded px-3 py-1.5 text-sm">
-                    <span className="font-semibold text-orange-700 dark:text-orange-300">{backlogCount}</span>
-                    <span className="text-orange-600 dark:text-orange-400 ml-1">episode{backlogCount !== 1 ? 's' : ''} waiting</span>
-                  </div>
+
+                {/* Per-stage episode progress: how far this quarter's episodes
+                    have moved through this stage. */}
+                {stage && stage.total > 0 && (
+                  <StageBar reached={stage.reached} total={stage.total} waiting={backlogCount ?? 0} />
                 )}
-                <div className="grid grid-cols-2 gap-2">
-                  <CountCell count={q.active} label="Active" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
-                  <CountCell count={q.waiting} label="Queued" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
-                  <CountCell count={episodeCompleted ?? 0} label="Completed" bg="bg-green-50 dark:bg-green-900/20" text="text-green-700 dark:text-green-300" sub="text-green-600 dark:text-green-400" />
-                  <CountCell count={queueFailed} label="Failed" bg={queueFailed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={queueFailed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={queueFailed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
+
+                {/* Job-machinery counts — clearly separated from episode progress. */}
+                <div className="grid grid-cols-3 gap-2 pt-0.5">
+                  <CountCell count={q.active} label="Active jobs" bg="bg-blue-50 dark:bg-blue-900/20" text="text-blue-700 dark:text-blue-300" sub="text-blue-600 dark:text-blue-400" />
+                  <CountCell count={q.waiting} label="Queued jobs" bg="bg-yellow-50 dark:bg-yellow-900/20" text="text-yellow-700 dark:text-yellow-300" sub="text-yellow-600 dark:text-yellow-400" />
+                  <CountCell count={queueFailed} label="Failed jobs" bg={queueFailed > 0 ? 'bg-red-50 dark:bg-red-900/20' : 'bg-gray-50 dark:bg-warm-700'} text={queueFailed > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-warm-400'} sub={queueFailed > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-400 dark:text-warm-500'} />
                 </div>
               </div>
             )
@@ -559,28 +598,44 @@ export default function JobsPage() {
           onToggle={() => setCurrentExpanded(!currentExpanded)}
         >
           <div className="divide-y dark:divide-warm-700">
-            {activeJobsFromSSE.map((job) => (
-              <div key={`${job.queue}-${job.id}`} className="flex items-center gap-3 py-2.5 text-sm">
-                <span className="shrink-0 w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                <span className="text-xs font-medium text-gray-400 dark:text-warm-500 uppercase w-20 shrink-0">
-                  {queueLabels[job.queue as typeof queueNames[number]] ?? job.queue}
-                </span>
-                <span className="text-gray-700 dark:text-warm-300 truncate flex-1 min-w-0">
-                  {formatJobDescription(job)}
-                </span>
-                {job.progress?.current && job.progress?.total && (
-                  <span className="text-xs text-gray-400 dark:text-warm-500 shrink-0">
-                    {job.progress.current}/{job.progress.total}
-                  </span>
-                )}
-                <span className="text-xs text-gray-400 dark:text-warm-500 shrink-0 tabular-nums">
-                  {job.processedOn ? `running ${formatDuration(Date.now() - job.processedOn)}` : ''}
-                </span>
-                <span className="text-xs px-1.5 py-0.5 rounded font-medium shrink-0 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                  active
-                </span>
-              </div>
-            ))}
+            {activeJobsFromSSE.map((job) => {
+              const cur = job.progress?.current
+              const tot = job.progress?.total
+              const pct = cur && tot ? Math.min(100, Math.round((cur / tot) * 100)) : null
+              return (
+                <div key={`${job.queue}-${job.id}`} className="py-2.5 text-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="shrink-0 w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span className="text-xs font-medium text-gray-400 dark:text-warm-500 uppercase w-20 shrink-0">
+                      {queueLabels[job.queue as typeof queueNames[number]] ?? job.queue}
+                    </span>
+                    <span className="text-gray-700 dark:text-warm-300 truncate flex-1 min-w-0">
+                      {formatJobDescription(job)}
+                    </span>
+                    {cur && tot && (
+                      <span className="text-xs text-gray-400 dark:text-warm-500 shrink-0 tabular-nums">
+                        {cur}/{tot}
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-400 dark:text-warm-500 shrink-0 tabular-nums">
+                      {job.processedOn ? `running ${formatDuration(Date.now() - job.processedOn)}` : ''}
+                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded font-medium shrink-0 bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                      active
+                    </span>
+                  </div>
+                  {/* Per-job progress bar — determinate when the job reports
+                      current/total (e.g. audio chunks), indeterminate otherwise. */}
+                  <div className="mt-1.5 ml-[2.75rem] h-1 rounded-full bg-gray-200 dark:bg-warm-700 overflow-hidden">
+                    {pct !== null ? (
+                      <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                    ) : (
+                      <div className="h-full w-1/3 bg-blue-400/70 rounded-full animate-indeterminate" />
+                    )}
+                  </div>
+                </div>
+              )
+            })}
             {waitingJobs.map((job) => (
               <div key={`${job.queue}-${job.id}`} className="flex items-center gap-3 py-2.5 text-sm">
                 <span className="shrink-0 w-2 h-2 rounded-full bg-yellow-400" />
@@ -747,9 +802,10 @@ export default function JobsPage() {
       <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-4">
         <h3 className="font-semibold mb-3">Cron Schedule</h3>
         <div className="space-y-1.5 text-sm text-gray-600 dark:text-warm-400">
-          <p>Ingest runs at minute :02 of every hour (does not auto-trigger other stages).</p>
-          <p>Transcribe, Summarize, and Compliance must be triggered manually via Run Now or Advance Pipeline.</p>
+          <p>Ingest runs at minute :02 of every hour. New episodes auto-chain through Transcribe → Summarize → QIR generation.</p>
+          <p>Run Now and Advance Pipeline let you trigger any stage manually (e.g. to catch up a backlog).</p>
           <p>Within a stage, batches auto-continue until all pending episodes are processed.</p>
+          <p>Chaining pauses with the pipeline and honors the concurrency mode below.</p>
           <p>Auto-retry runs every 4 hours for failed episodes (max 3 retries).</p>
         </div>
         <p className="text-xs text-gray-400 dark:text-warm-500 mt-3">
@@ -775,6 +831,97 @@ export default function JobsPage() {
 }
 
 // --- Shared Components ---
+
+function PipelineOverview({ backlog, activeCount, waitingCount }: {
+  backlog?: EpisodeBacklog | null
+  activeCount: number
+  waitingCount: number
+}) {
+  const segments = getPipelineSegments(backlog)
+  const total = segments.reduce((sum, s) => sum + s.count, 0)
+  const done = segments.find((s) => s.key === 'done')?.count ?? 0
+  const failed = segments.find((s) => s.key === 'failed')?.count ?? 0
+  const inFlight = total - done - failed
+  const pctDone = total > 0 ? Math.round((done / total) * 100) : 0
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold">Pipeline Overview</h3>
+          <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">This quarter&apos;s episodes, by status</p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-bold tabular-nums">{pctDone}%</p>
+          <p className="text-xs text-gray-500 dark:text-warm-400">QIR-ready</p>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Kpi label="Total episodes" value={total} />
+        <Kpi label="In flight" value={inFlight} accent="text-amber-600 dark:text-amber-400" />
+        <Kpi label="Active jobs" value={activeCount} accent="text-blue-600 dark:text-blue-400" />
+        <Kpi label="Failed" value={failed} accent={failed > 0 ? 'text-red-600 dark:text-red-400' : undefined} />
+      </div>
+
+      {/* Segmented status distribution bar */}
+      {total > 0 ? (
+        <div className="space-y-2">
+          <div className="flex h-3 w-full rounded-full overflow-hidden bg-gray-100 dark:bg-warm-700">
+            {segments.filter((s) => s.count > 0).map((s) => (
+              <div
+                key={s.key}
+                className={`${s.color} h-full transition-all duration-500`}
+                style={{ width: `${(s.count / total) * 100}%` }}
+                title={`${s.label}: ${s.count}`}
+              />
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {segments.filter((s) => s.count > 0).map((s) => (
+              <span key={s.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-warm-400">
+                <span className={`w-2 h-2 rounded-sm ${s.color}`} />
+                {s.label}
+                <span className="font-semibold text-gray-800 dark:text-warm-200 tabular-nums">{s.count}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500 dark:text-warm-400">No episodes ingested for this quarter yet.</p>
+      )}
+    </div>
+  )
+}
+
+function Kpi({ label, value, accent }: { label: string; value: number; accent?: string }) {
+  return (
+    <div className="bg-gray-50 dark:bg-warm-800/50 rounded-lg px-3 py-2.5">
+      <p className={`text-xl font-bold tabular-nums ${accent ?? 'text-gray-900 dark:text-warm-100'}`}>{value}</p>
+      <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">{label}</p>
+    </div>
+  )
+}
+
+function StageBar({ reached, total, waiting }: { reached: number; total: number; waiting: number }) {
+  const pct = total > 0 ? Math.min(100, Math.round((reached / total) * 100)) : 0
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-500 dark:text-warm-400">
+          {reached}/{total} episodes
+        </span>
+        {waiting > 0 && (
+          <span className="text-orange-600 dark:text-orange-400 font-medium">{waiting} waiting</span>
+        )}
+      </div>
+      <div className="h-1.5 rounded-full bg-gray-200 dark:bg-warm-700 overflow-hidden">
+        <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
 
 function CollapsibleSection({ title, badge, badgeColor, badges, expanded, onToggle, children }: {
   title: string
