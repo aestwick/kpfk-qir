@@ -127,16 +127,35 @@ export default function ComplianceGridPage() {
 
   useEffect(() => { fetchGrid() }, [fetchGrid])
 
-  // Drill-through to the flag list (best-effort: list page supports show/type/
-  // severity/resolution, not day/time, so we pass what it understands).
-  function drillToShow(showKey: string) {
+  // Shared facets every drill-through carries (resolution + single-value type/
+  // severity). The list page understands these; multi-select facets are dropped.
+  const drillBaseParams = useCallback(() => {
     const p = new URLSearchParams()
     p.set('resolution', includeResolved ? '' : 'unresolved')
     if (flagTypes.length === 1 && flagTypes[0] !== 'summary_discrepancy') p.set('type', flagTypes[0])
     if (severities.length === 1) p.set('severity', severities[0])
+    return p
+  }, [includeResolved, flagTypes, severities])
+
+  // Drill-through from the matrix: filter the flag list to a single show.
+  function drillToShow(showKey: string) {
+    const p = drillBaseParams()
     const win = data?.window ?? data?.a
     const showName = win?.matrix.find((r) => r.show_key === showKey)?.show_name
     if (showName) p.set('show', showName)
+    router.push(`/dashboard/compliance?${p.toString()}`)
+  }
+
+  // Drill-through from a heatmap cell: a day-of-week + time slot within window A.
+  // The list page expands dow→dates inside [win_start, win_end] server-side.
+  function drillToCell(day: number, airStarts: string[]) {
+    const win = data?.window ?? data?.a
+    if (!win) return
+    const p = drillBaseParams()
+    p.set('dow', String(day))
+    p.set('air_start', airStarts.join(','))
+    p.set('win_start', win.start)
+    p.set('win_end', win.end)
     router.push(`/dashboard/compliance?${p.toString()}`)
   }
 
@@ -186,7 +205,7 @@ export default function ComplianceGridPage() {
           <SummaryStrip winA={winA} winB={winB} compare={compare} />
           <div className="bg-white rounded-xl shadow-sm border p-4 dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
             {view === 'heatmap' ? (
-              <HeatmapView winA={winA} winB={winB} compare={compare} hourly={hourly} metric={metric} />
+              <HeatmapView winA={winA} winB={winB} compare={compare} hourly={hourly} metric={metric} onCellClick={drillToCell} />
             ) : (
               <MatrixView winA={winA} winB={winB} compare={compare} metric={metric} onShowClick={drillToShow} />
             )}
@@ -200,10 +219,13 @@ export default function ComplianceGridPage() {
 
 // --- Heatmap / matrix view wrappers -------------------------------------------
 
-function HeatmapView({ winA, winB, compare, hourly, metric }: {
+function HeatmapView({ winA, winB, compare, hourly, metric, onCellClick }: {
   winA: GridWindow; winB?: GridWindow; compare: boolean; hourly: boolean; metric: Metric
+  onCellClick: (day: number, airStarts: string[]) => void
 }) {
   if (compare && winB) {
+    // Drill-through is disabled in compare mode: a cell spans two windows, so a
+    // single day/time → flag-list query would be ambiguous.
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -220,7 +242,7 @@ function HeatmapView({ winA, winB, compare, hourly, metric }: {
       </div>
     )
   }
-  return <HeatmapGrid grid={winA.heatmap} hourly={hourly} weeks={winA.weeks} metric={metric} />
+  return <HeatmapGrid grid={winA.heatmap} hourly={hourly} weeks={winA.weeks} metric={metric} onCellClick={onCellClick} />
 }
 
 function MatrixView({ winA, winB, compare, metric, onShowClick }: {

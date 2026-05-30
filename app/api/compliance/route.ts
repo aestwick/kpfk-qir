@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { datesForDowInWindow } from '@/lib/compliance-grid'
 
 export const dynamic = 'force-dynamic'
 
@@ -129,6 +130,12 @@ export async function GET(request: NextRequest) {
     const quarter = searchParams.get('quarter')
     const year = searchParams.get('year')
     const show = searchParams.get('show')
+    // Grid drill-through: a day/time cell within a window. dow=0..6 (Sun..Sat);
+    // air_start='HH:MM:SS'; win_start/win_end bound the window.
+    const dowRaw = searchParams.get('dow')
+    const airStart = searchParams.get('air_start')
+    const winStart = searchParams.get('win_start')
+    const winEnd = searchParams.get('win_end')
     const page = parseInt(searchParams.get('page') ?? '1')
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset = (page - 1) * limit
@@ -162,6 +169,24 @@ export async function GET(request: NextRequest) {
 
     if (show) {
       query = query.ilike('episode_log.show_name', `%${show}%`)
+    }
+
+    // Day/time drill-through from the compliance grid. A day-of-week can't be
+    // filtered directly in PostgREST, so expand it to the concrete dates within
+    // the window and match air_date IN (...). air_start filters the time slot
+    // (hourly cells pass two values via comma; e.g. "06:00:00,06:30:00").
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/
+    if (dowRaw && winStart && winEnd && isoRe.test(winStart) && isoRe.test(winEnd)) {
+      const dow = parseInt(dowRaw)
+      if (dow >= 0 && dow <= 6) {
+        const dates = datesForDowInWindow(winStart, winEnd, dow)
+        // No matching dates → force an empty result rather than ignoring the facet.
+        query = query.in('episode_log.air_date', dates.length ? dates : ['0001-01-01'])
+      }
+    }
+    if (airStart) {
+      const slots = airStart.split(',').map((s) => s.trim()).filter(Boolean)
+      if (slots.length) query = query.in('episode_log.air_start', slots)
     }
 
     const { data, error, count } = await query

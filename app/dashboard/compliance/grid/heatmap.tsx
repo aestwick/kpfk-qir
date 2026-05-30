@@ -13,6 +13,7 @@ import {
   deltaClass,
   formatTime12,
   intensityClass,
+  rowToTime,
 } from '@/lib/compliance-grid'
 import type { Heatmap } from '@/lib/types'
 
@@ -23,7 +24,15 @@ interface HeatmapGridProps {
   hourly: boolean
   weeks: number
   metric: 'total' | 'avg'
-  onCellClick?: (day: number, halfHourRow: number) => void
+  // Drill-through: the clicked day (0=Sun) and the air_start slot(s) it covers
+  // ('HH:MM:SS' — one for a half-hour row, two for an hourly row).
+  onCellClick?: (day: number, airStarts: string[]) => void
+}
+
+// The air_start slot strings a display row maps to (1 half-hour, 2 hourly).
+function slotsForRow(row: number, hourly: boolean): string[] {
+  const rows = hourly ? [row * 2, row * 2 + 1] : [row]
+  return rows.map((r) => `${rowToTime(r)}:00`)
 }
 
 function rowLabel(displayRow: number, hourly: boolean): string {
@@ -98,10 +107,12 @@ interface RowCellsProps {
   format: (value: number) => string
   isDelta: boolean
   hourly: boolean
-  onCellClick?: (day: number, halfHourRow: number) => void
+  onCellClick?: (day: number, airStarts: string[]) => void
 }
 
 function RowCells({ row, label, days, cellValue, format, isDelta, hourly, onCellClick }: RowCellsProps) {
+  // The air_start slot(s) this row covers — same for every day in the row.
+  const slots = slotsForRow(row, hourly)
   return (
     <>
       <div className="text-right pr-2 text-2xs text-gray-400 dark:text-warm-500 border-r dark:border-warm-700 flex items-center justify-end h-7">
@@ -111,14 +122,12 @@ function RowCells({ row, label, days, cellValue, format, isDelta, hourly, onCell
         const value = cellValue(day, row)
         const rounded = Math.round(value * 10) / 10
         const cls = isDelta ? deltaClass(rounded) : intensityClass(rounded)
-        // Map a display row back to a representative half-hour row for drill-through.
-        const halfHourRow = hourly ? row * 2 : row
         return (
           <button
             key={day}
             type="button"
             disabled={!onCellClick}
-            onClick={onCellClick ? () => onCellClick(day, halfHourRow) : undefined}
+            onClick={onCellClick ? () => onCellClick(day, slots) : undefined}
             className={`h-7 text-center text-2xs font-medium border-b border-r border-warm-100 dark:border-warm-800 transition-colors ${cls} ${onCellClick ? 'hover:ring-1 hover:ring-inset hover:ring-kpfk-red/50 cursor-pointer' : 'cursor-default'}`}
             title={value ? `${rounded} offense${rounded === 1 ? '' : 's'}` : 'No offenses'}
           >

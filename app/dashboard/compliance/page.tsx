@@ -7,6 +7,7 @@ import { SkeletonCards, SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { useToast } from '@/app/components/toast'
+import { DAY_NAMES_SHORT } from '@/lib/compliance-grid'
 
 interface ComplianceFlag {
   id: number
@@ -92,6 +93,22 @@ function formatTimestamp(seconds: number | null): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
+// 'HH:MM:SS' → '6 AM', '12:30 PM'. Used to label a grid drill-through slot.
+function formatSlot(airStart: string): string {
+  const [h, m] = airStart.split(':').map((p) => parseInt(p, 10))
+  const period = h < 12 ? 'AM' : 'PM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return m === 0 ? `${h12} ${period}` : `${h12}:${String(m).padStart(2, '0')} ${period}`
+}
+
+// Human label for a day/time drill-through chip, e.g. "Mon 6–7 AM".
+function slotLabel(dow: string, airStart: string): string {
+  const day = DAY_NAMES_SHORT[parseInt(dow)] ?? '?'
+  const slots = airStart.split(',').map((s) => s.trim()).filter(Boolean)
+  if (slots.length <= 1) return `${day} ${formatSlot(slots[0] ?? airStart)}`
+  return `${day} ${formatSlot(slots[0])}–${formatSlot(slots[slots.length - 1])}`
+}
+
 export default function CompliancePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -103,6 +120,17 @@ export default function CompliancePage() {
   const [filterResolution, setFilterResolution] = useState(searchParams.get('resolution') ?? 'unresolved')
   const [filterQuarter, setFilterQuarter] = useState(searchParams.get('quarter') ?? '')
   const [filterShow, setFilterShow] = useState(searchParams.get('show') ?? '')
+  // Day/time drill-through from the compliance grid (set via URL params). Not an
+  // editable control — shown as a removable chip; cleared, it stays cleared.
+  const [slotFilter, setSlotFilter] = useState<{
+    dow: string; airStart: string; winStart: string; winEnd: string
+  } | null>(() => {
+    const dow = searchParams.get('dow')
+    const airStart = searchParams.get('air_start')
+    const winStart = searchParams.get('win_start')
+    const winEnd = searchParams.get('win_end')
+    return dow && airStart && winStart && winEnd ? { dow, airStart, winStart, winEnd } : null
+  })
   const [page, setPage] = useState(parseInt(searchParams.get('page') ?? '1'))
 
   // Data
@@ -174,11 +202,17 @@ export default function CompliancePage() {
       params.set('quarter', q)
     }
     if (filterShow) params.set('show', filterShow)
+    if (slotFilter) {
+      params.set('dow', slotFilter.dow)
+      params.set('air_start', slotFilter.airStart)
+      params.set('win_start', slotFilter.winStart)
+      params.set('win_end', slotFilter.winEnd)
+    }
     if (page > 1) params.set('page', String(page))
     params.set('sort', 'created_at')
     params.set('dir', 'desc')
     return params
-  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, page])
+  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, slotFilter, page])
 
   // Fetch flags list
   const fetchFlags = useCallback(async () => {
@@ -242,10 +276,16 @@ export default function CompliancePage() {
     if (filterResolution) params.set('resolution', filterResolution)
     if (filterQuarter) params.set('quarter', filterQuarter)
     if (filterShow) params.set('show', filterShow)
+    if (slotFilter) {
+      params.set('dow', slotFilter.dow)
+      params.set('air_start', slotFilter.airStart)
+      params.set('win_start', slotFilter.winStart)
+      params.set('win_end', slotFilter.winEnd)
+    }
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     router.replace(`/dashboard/compliance${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, page, router])
+  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, slotFilter, page, router])
 
   // Refetch flags when filters/page change (skip initial render)
   const filterChangeCount = useRef(0)
@@ -678,9 +718,23 @@ export default function CompliancePage() {
               className="border rounded-lg px-3 py-1.5 text-sm w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             />
           </div>
-          {(filterType || filterSeverity || filterResolution || filterQuarter || filterShow) && (
+          {slotFilter && (
+            <div className="flex items-end">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-kpfk-red/10 text-kpfk-red-dark border border-kpfk-red/30 dark:text-kpfk-red-light">
+                Grid: {slotLabel(slotFilter.dow, slotFilter.airStart)}
+                <button
+                  onClick={() => { setSlotFilter(null); setPage(1) }}
+                  className="hover:text-kpfk-red"
+                  aria-label="Clear day/time filter"
+                >
+                  ✕
+                </button>
+              </span>
+            </div>
+          )}
+          {(filterType || filterSeverity || filterResolution || filterQuarter || filterShow || slotFilter) && (
             <button
-              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterResolution(''); setFilterQuarter(''); setFilterShow(''); setPage(1) }}
+              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterResolution(''); setFilterQuarter(''); setFilterShow(''); setSlotFilter(null); setPage(1) }}
               className="text-xs text-gray-500 hover:text-gray-700 underline dark:text-warm-400 dark:hover:text-warm-200"
             >
               Clear filters

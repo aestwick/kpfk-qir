@@ -75,6 +75,22 @@ export function weeksInWindow(rangeDays: number): number {
   return Math.max(1, Math.round(rangeDays / 7))
 }
 
+/**
+ * Every `YYYY-MM-DD` date in [start, end] (inclusive) falling on `dow` (0=Sun).
+ * Lets a heatmap cell — which knows only a day-of-week + window — drill through
+ * to a DB query via `air_date IN (...)`, keeping pagination on the DB side.
+ */
+export function datesForDowInWindow(start: string, end: string, dow: number): string[] {
+  const dates: string[] = []
+  // Jump straight to the first matching day, then step by 7.
+  let cursor = addDays(start, (dow - dayOfWeekForIso(start) + 7) % 7)
+  while (cursor <= end) {
+    dates.push(cursor)
+    cursor = addDays(cursor, 7)
+  }
+  return dates
+}
+
 // --- Aggregation --------------------------------------------------------------
 
 /** Empty 7×48 half-hour grid. */
