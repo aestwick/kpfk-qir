@@ -281,6 +281,13 @@ export default function EpisodesPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Episodes</h2>
         <div className="flex gap-2">
+          <a
+            href={`/dashboard/search${quarterFilter ? `?quarter=${encodeURIComponent(quarterFilter)}` : ''}`}
+            className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200"
+            title="Search inside transcript text across shows"
+          >
+            &#9906; Search Transcripts
+          </a>
           <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 dark:bg-red-700">
             Retry Failed
           </button>

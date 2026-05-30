@@ -1,7 +1,22 @@
 # Spec: Transcript Search
 
-> Status: **Design / not yet built.** Phased plan below; Phase 1 is the
-> recommended first slice and is shippable on its own.
+> Status: **Phase 1 (Lexical FTS) implemented.** Phases 2 (embeddings) and 3
+> ("ask the archive" RAG) remain design-only. What shipped for Phase 1:
+> - Migration `022_transcript_fts.sql` — `transcripts.transcript_fts` tsvector +
+>   GIN, the `transcript_cues` table (+ RLS via the episode_log join), and the
+>   `search_transcripts()` RPC (ranked, station-scoped, `ts_headline` snippet,
+>   cue `start_ms` deep-link, 5s statement timeout).
+> - `lib/vtt.ts` (pure VTT parse + runtime aligner, unit-tested in
+>   `lib/vtt.test.ts`), `lib/transcript-search.ts`, `app/api/transcript-search/route.ts`.
+> - Cue population in `workers/transcribe.ts` (right after the VTT is built — note
+>   this is the transcribe worker, where the VTT actually lives, not summarize as
+>   the draft below assumed) + one-time backfill `scripts/backfill-transcript-cues.ts`.
+> - UI: grid-wide `/dashboard/search` page + a "Search Transcripts" entry point on
+>   the episodes page; hits deep-link to `/dashboard/episodes/{id}?seek=<seconds>`.
+>
+> Note: the actual next free migration number was **022** (highest existing is
+> `021_show_keys_primary_language`; there is no "Show Groups" migration as §6.1
+> guessed).
 
 ## 1. Problem & Motivation
 

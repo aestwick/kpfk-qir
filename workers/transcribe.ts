@@ -8,6 +8,28 @@ import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
+import { parseVtt } from '../lib/vtt'
+
+// Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
+// to the transcript itself: a failure here must never fail the episode (search
+// degrades to the runtime VTT aligner), so callers swallow errors.
+async function populateCues(episodeId: number, vtt: string): Promise<void> {
+  const cues = parseVtt(vtt)
+  // Idempotent per episode: clear then re-insert so re-transcribes don't dup.
+  await supabaseAdmin.from('transcript_cues').delete().eq('episode_id', episodeId)
+  if (!cues.length) return
+  const rows = cues.map((c) => ({
+    episode_id: episodeId,
+    cue_idx: c.index,
+    start_ms: c.startMs,
+    end_ms: c.endMs,
+    text: c.text,
+  }))
+  for (let k = 0; k < rows.length; k += 500) {
+    const { error } = await supabaseAdmin.from('transcript_cues').insert(rows.slice(k, k + 500))
+    if (error) throw new Error(error.message)
+  }
+}
 
 const execFileAsync = promisify(execFile)
 
@@ -341,6 +363,14 @@ export async function processTranscribe(job: Job) {
         .from('episode_log')
         .update({ status: 'transcribed', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episode.id)
+
+      // Populate timed search cues from the VTT (best-effort — never fail the
+      // episode over auxiliary search data).
+      try {
+        await populateCues(episode.id, vtt)
+      } catch (cueErr) {
+        console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
+      }
 
       // Log usage
       await logTranscriptionUsage(episode.id, totalDuration, {
