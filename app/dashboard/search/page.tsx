@@ -20,6 +20,7 @@ interface SearchResult {
   rank: number
   snippet: string
   startMs: number | null
+  matchType?: 'lexical' | 'semantic'
 }
 
 interface ShowOption {
@@ -60,6 +61,7 @@ export default function SearchPage() {
   const qParam = searchParams.get('q') ?? ''
   const showKeyParam = searchParams.get('show_key') ?? ''
   const quarterParam = searchParams.get('quarter') ?? ''
+  const modeParam = searchParams.get('mode') === 'semantic' ? 'semantic' : 'lexical'
   const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
   const limit = 20
 
@@ -68,6 +70,7 @@ export default function SearchPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  const [degraded, setDegraded] = useState(false)
   const [shows, setShows] = useState<ShowOption[]>([])
 
   useEffect(() => { setQueryLocal(qParam) }, [qParam])
@@ -125,18 +128,21 @@ export default function SearchPage() {
     const params = new URLSearchParams({ q: qParam, page: String(page), limit: String(limit) })
     if (showKeyParam) params.set('show_key', showKeyParam)
     if (quarterParam) params.set('quarter', quarterParam)
+    if (modeParam === 'semantic') params.set('mode', 'semantic')
     const res = await authedFetch(`/api/transcript-search?${params}`)
     if (res.ok) {
       const data = await res.json()
       setResults(data.results ?? [])
       setTotal(data.total ?? 0)
+      setDegraded(Boolean(data.degraded))
     } else {
       setResults([])
       setTotal(0)
+      setDegraded(false)
     }
     setSearched(true)
     setLoading(false)
-  }, [qParam, showKeyParam, quarterParam, page])
+  }, [qParam, showKeyParam, quarterParam, modeParam, page])
 
   useEffect(() => { runSearch() }, [runSearch])
 
@@ -158,9 +164,13 @@ export default function SearchPage() {
       <div>
         <h2 className="text-2xl font-bold">Search Transcripts</h2>
         <p className="text-sm text-gray-500 dark:text-warm-400">
-          Find where a word or phrase was said across every show&apos;s transcript. Try
+          {modeParam === 'semantic'
+            ? 'Smart search finds passages by meaning — even when the exact words weren’t said — and still deep-links to the audio.'
+            : 'Find where a word or phrase was said across every show’s transcript.'}
+          {' Try '}
           <code className="mx-1 px-1 bg-gray-100 dark:bg-warm-700 rounded">&quot;measles outbreak&quot;</code>
-          or <code className="mx-1 px-1 bg-gray-100 dark:bg-warm-700 rounded">housing -rent</code>.
+          {' or '}
+          <code className="mx-1 px-1 bg-gray-100 dark:bg-warm-700 rounded">{modeParam === 'semantic' ? 'vaccine hesitancy' : 'housing -rent'}</code>.
         </p>
       </div>
 
@@ -194,7 +204,33 @@ export default function SearchPage() {
             <option key={q} value={q}>{q}</option>
           ))}
         </select>
+
+        {/* Exact (lexical, free) vs Smart (hybrid FTS + vector). Exact is the
+            default — deterministic and the most trustworthy for an FCC proof. */}
+        <div className="inline-flex rounded border overflow-hidden text-sm dark:border-warm-600">
+          {(['lexical', 'semantic'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => updateParams({ mode: m === 'semantic' ? 'semantic' : '', page: '' })}
+              className={
+                (modeParam === m
+                  ? 'bg-blue-600 text-white dark:bg-blue-700'
+                  : 'bg-white text-gray-700 dark:bg-warm-800 dark:text-warm-300') +
+                ' px-3 py-2'
+              }
+            >
+              {m === 'lexical' ? 'Exact' : 'Smart'}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {degraded && (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          Smart search is temporarily unavailable — showing exact matches instead.
+        </p>
+      )}
 
       {/* Result count */}
       {searched && !loading && (
@@ -228,6 +264,11 @@ export default function SearchPage() {
                       <span className="font-medium text-blue-700 dark:text-blue-400">{r.showName ?? `Episode ${r.episodeId}`}</span>
                       <span className="text-gray-400 dark:text-warm-500">·</span>
                       <span className="text-gray-500 dark:text-warm-400">{r.airDate ?? '—'}</span>
+                      {r.matchType === 'semantic' && (
+                        <span className="inline-flex items-center text-[10px] font-medium uppercase tracking-wide text-purple-700 bg-purple-100 dark:text-purple-300 dark:bg-purple-500/20 rounded px-1.5 py-0.5" title="Matched by meaning, not exact words">
+                          &asymp; match
+                        </span>
+                      )}
                       {r.startMs != null && (
                         <span className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded px-2 py-0.5">
                           <span>&#9654;</span> {formatSeek(r.startMs)}

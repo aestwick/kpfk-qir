@@ -1,11 +1,11 @@
 # Spec: Transcript Search
 
-> Status: **Phase 1 (Lexical FTS) implemented** on branch
-> `claude/pensive-cray-JPXyT`. Phases 2 (embeddings) and 3 ("ask the archive"
-> RAG) remain design-only. See **§0 Implementation status** below for what
-> shipped, what's required to make it live, and current gaps. The design sections
-> (§1–§14) are unchanged from the original draft and remain the source of truth
-> for intent; where the build deviated, §0 says so explicitly.
+> Status: **Phase 1 (Lexical FTS)** and **Phase 2 (Semantic / embeddings)**
+> implemented. Phase 3 ("ask the archive" RAG) remains design-only. See **§0
+> Implementation status** below for what shipped, what's required to make it
+> live, and current gaps. The design sections (§1–§14) are unchanged from the
+> original draft and remain the source of truth for intent; where the build
+> deviated, §0 says so explicitly.
 
 ## 0. Implementation status (Phase 1)
 
@@ -72,6 +72,66 @@
   future reader doesn't trust commit messages over `tsc`/test output.
 - The first nav-link attempt used a text-icon nav format that didn't match the
   layout's SVG-icon `navItems` array and silently no-op'd; fixed in `7470694`.
+
+## 0b. Implementation status (Phase 2 — Semantic / embeddings)
+
+### Shipped
+
+| Area | File(s) | Notes |
+|---|---|---|
+| DB schema + hybrid RPC | `supabase/migrations/023_transcript_embeddings.sql` | `create extension vector`; `transcript_chunks` (`embedding vector(1536)`) + HNSW (cosine) index + unique `(episode_id, chunk_idx)` + RLS via the `episode_id → episode_log.station_id` join; `search_transcripts_hybrid()` RPC — **Reciprocal Rank Fusion** of the Phase-1 lexical FTS rank and vector distance, same return shape as `search_transcripts()` plus a `match_type`, `security invoker` + explicit `station_id`, 8s statement timeout. Query embedding passed in as a text vector literal (cast inside) so PostgREST never coerces an array. |
+| Pure chunker | `lib/transcript-chunks.ts` (+ `.test.ts`) | `chunkCues()` groups VTT cues into ~200-word passages carrying `start_ms`/`end_ms` (never splits a cue, so timestamps stay exact). 6 unit tests. Pure, no DB/network. |
+| OpenAI embeddings | `lib/embeddings.ts` | `embedTexts`/`embedQuery` (text-embedding-3-small, 1536 dims) with the same 429/5xx retry as summarize; `toPgVector` for the `[..]` literal. |
+| Embed orchestration | `lib/transcript-embeddings.ts` | `buildEpisodeChunkRows` (VTT → chunks → embeddings → rows, no DB) + `storeEpisodeChunks` (idempotent clear-then-insert). Shared by the worker and the backfill so they can't drift. |
+| Query path | `lib/transcript-search.ts` | `searchTranscriptsSemantic()` embeds the query and calls the hybrid RPC; **degrades to lexical** (flagged `degraded`) if the embed call fails. |
+| API route | `app/api/transcript-search/route.ts` | `mode=lexical` (default) \| `mode=semantic`. Still thin. |
+| Embed-on-summarize (live) | `workers/summarize.ts` | After a successful summary, best-effort embed (gated by `embeddings_enabled`; a failure logs and never fails the episode — same contract as cue populate). Reuses the worker's existing OpenAI client. |
+| Backfill (one-time) | `scripts/backfill-transcript-embeddings.ts` | `npm run backfill-transcript-embeddings` (`--force` re-embeds all). Re-runnable; joins `episode_log` to log per-station embed cost. |
+| Settings | `lib/settings.ts` | `isEmbeddingsEnabled` (default **true**), `getEmbeddingModel` (default `text-embedding-3-small`). |
+| Cost logging | `lib/usage.ts` | `logEmbeddingUsage` → `usage_log` with `operation='embed'`, **station_id set explicitly** (the older log helpers omit it — see gaps). Surfaces in the existing usage analytics automatically (it groups by operation). |
+| Types | `lib/types.ts` | `TranscriptChunk`; `TranscriptSearchResult.matchType?`; `UsageLog.operation` gains `'embed'`. |
+| UI | `app/dashboard/search/page.tsx` | **Exact / Smart** toggle (`?mode`); Smart hits get a `≈ match` badge; a degraded-fallback notice. Deep-link / snippet rendering unchanged (same `<mark>` sentinels). |
+| Tooling | `package.json` | `npm run backfill-transcript-embeddings`. |
+
+### Required to make it live (NOT done in this session — no DB was reachable)
+
+1. **Apply migration 023** (`scripts/migrate.sh`). Needs the `vector` extension —
+   the direct (5432) Supabase connection role can create it.
+2. **Backfill embeddings once**: `OPENAI_API_KEY=… npm run backfill-transcript-embeddings`.
+   New episodes embed automatically via the summarize worker; this only catches
+   the corpus summarized before 023.
+
+### Deviations from the original draft (intentional)
+
+- **Hybrid via RRF**, not a hand-tuned `FTS_rank + (1 - cosine)` blend (§6.2 said
+  only "combine"). RRF is scale-free, so it needs no normalizing of two
+  incomparable scores and stays stable as the corpus grows.
+- **Index is HNSW**, not IVFFlat — no list training, better recall, and it
+  handles the incremental per-episode inserts the worker produces.
+- **Query-embed cost is NOT logged.** §5 calls Tier 2 "light (one embed/query)"
+  and §8's logging requirement is Tier-3-only; a per-keystroke usage row (and a
+  service-role write on the request path) isn't worth it. Only the corpus embed
+  (worker + backfill) is logged — that's the real spend.
+- **Default mode stays lexical.** Per §10's "lean by default," Smart is opt-in
+  per search; embeddings populate in the background so it's instant when chosen.
+
+### Current gaps / known limitations
+
+- **Not verified end-to-end against a live database.** SQL/route/types are
+  statically checked (`tsc --noEmit` clean) and `lib/transcript-chunks.test.ts`
+  passes 6/6, but `search_transcripts_hybrid()` and the pgvector cast / HNSW scan
+  have never run against Postgres in this session. Treat the first live run as
+  the real integration test (especially the `extensions`-schema resolution of
+  `vector`/`<=>` and the full-outer-join fusion).
+- **Model/dimension are pinned to 1536.** Changing `embedding_model` to a
+  different-dimension model (e.g. `-3-large`, 3072) requires altering the column
+  AND re-embedding the whole corpus; the query and stored vectors must match.
+- **Pre-existing latent bug noted, not fixed:** the older `lib/usage.ts` log
+  helpers insert without `station_id` (a NOT NULL column since migration 013), so
+  those writes likely fail silently. `logEmbeddingUsage` sets it correctly (like
+  the translate route); fixing the others is out of scope here.
+- **Phase 3 (RAG) unaffected** — it retrieves top-k via Tier 1/2 and is still
+  design-only.
 
 ## 1. Problem & Motivation
 

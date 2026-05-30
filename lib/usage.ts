@@ -7,6 +7,9 @@ const GROQ_WHISPER_COST_PER_SECOND = 0.111 / 3600
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
+// OpenAI text-embedding-3-small pricing: $0.02/1M tokens
+const OPENAI_EMBEDDING_COST_PER_TOKEN = 0.02 / 1_000_000
+
 export async function logTranscriptionUsage(
   episodeId: number,
   durationSeconds: number,
@@ -67,6 +70,33 @@ export async function logComplianceUsage(
     operation: 'compliance',
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    duration_seconds: null,
+    estimated_cost: estimatedCost,
+    metadata: metadata ?? {},
+  })
+}
+
+// Corpus embedding for semantic search (Phase 2). Unlike the older helpers above,
+// this sets station_id explicitly (matching the translate route) so the cost
+// rolls up per station in the existing usage analytics. episode_id may be null
+// (e.g. a future ad-hoc embed); for the per-episode corpus embed it is set.
+export async function logEmbeddingUsage(
+  stationId: string,
+  episodeId: number | null,
+  inputTokens: number,
+  model = 'text-embedding-3-small',
+  metadata?: Record<string, unknown>
+) {
+  const estimatedCost = inputTokens * OPENAI_EMBEDDING_COST_PER_TOKEN
+
+  await supabaseAdmin.from('usage_log').insert({
+    station_id: stationId,
+    episode_id: episodeId,
+    service: 'openai',
+    model,
+    operation: 'embed',
+    input_tokens: inputTokens,
+    output_tokens: 0,
     duration_seconds: null,
     estimated_cost: estimatedCost,
     metadata: metadata ?? {},

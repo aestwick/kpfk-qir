@@ -1,9 +1,10 @@
 import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
-import { logSummarizationUsage } from '../lib/usage'
-import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused } from '../lib/settings'
+import { logSummarizationUsage, logEmbeddingUsage } from '../lib/usage'
+import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
+import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
 
 interface SummaryResponse {
   headline: string
@@ -42,6 +43,10 @@ export async function processSummarize(job: Job) {
   const excludedCategories = await getExcludedCategories(stationId)
   const batchSize = await getSummarizeBatchSize(stationId)
   const systemPrompt = await getSummarizationPrompt(stationId)
+  // Phase 2 semantic search: embed each episode's transcript right after the
+  // summary (resolved once per batch — the 60s settings cache makes this cheap).
+  const embeddingsEnabled = await isEmbeddingsEnabled(stationId)
+  const embeddingModel = await getEmbeddingModel(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
   // Get candidate transcribed episodes from current quarter (including those with null
@@ -93,11 +98,14 @@ export async function processSummarize(job: Job) {
   const epIds = filteredEpisodes.map((ep) => ep.id)
   const { data: transcriptsData } = await supabaseAdmin
     .from('transcripts')
-    .select('episode_id, transcript')
+    .select('episode_id, transcript, vtt')
     .in('episode_id', epIds)
 
   const transcriptMap = new Map(
     (transcriptsData ?? []).map((t) => [t.episode_id, t.transcript])
+  )
+  const vttMap = new Map(
+    (transcriptsData ?? []).map((t) => [t.episode_id, t.vtt as string | null])
   )
 
   let summarized = 0
@@ -198,6 +206,21 @@ ${transcriptText}`
           usage.prompt_tokens,
           usage.completion_tokens
         )
+      }
+
+      // Embed the transcript for semantic search (Phase 2). Best-effort and
+      // auxiliary — like the cue populate in transcribe.ts, a failure here must
+      // never fail a successfully-summarized episode (search degrades to lexical).
+      if (embeddingsEnabled) {
+        try {
+          const vtt = vttMap.get(episode.id)
+          const { rows, tokens } = await buildEpisodeChunkRows(vtt, embeddingModel, openai)
+          await storeEpisodeChunks(supabaseAdmin, episode.id, rows)
+          if (tokens > 0) await logEmbeddingUsage(stationId, episode.id, tokens, embeddingModel)
+          if (rows.length) console.log(`[summarize] ep ${episode.id} embedded ${rows.length} chunks`)
+        } catch (embErr) {
+          console.warn(`[summarize] ep ${episode.id} embedding failed:`, embErr instanceof Error ? embErr.message : embErr)
+        }
       }
 
       summarized++
