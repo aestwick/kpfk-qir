@@ -113,6 +113,19 @@ export async function getSummarizeBatchSize(stationId: string): Promise<number> 
   return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
 }
 
+// Semantic search (Phase 2): whether the summarize worker embeds each episode's
+// transcript into transcript_chunks. On by default — disable per station to stop
+// the (cheap) embedding spend if a station doesn't want semantic search. The
+// embedding model is pinned to 1536 dims to match the vector column; changing it
+// requires re-embedding the corpus with a same-dimension model.
+export async function isEmbeddingsEnabled(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('embeddings_enabled', stationId)) ?? true
+}
+
+export async function getEmbeddingModel(stationId: string): Promise<string> {
+  return (await getSetting<string>('embedding_model', stationId)) ?? 'text-embedding-3-small'
+}
+
 export async function getComplianceChecksEnabled(stationId: string): Promise<Record<string, boolean>> {
   return (await getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId)) ?? {
     profanity: true,

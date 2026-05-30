@@ -109,11 +109,27 @@ export interface TranscriptCue {
   text: string
 }
 
+// A timed, embedded passage of a transcript, used by semantic search (Phase 2).
+// Chunked from the VTT cues so each carries a start_ms/end_ms range for the audio
+// deep-link. Scoped to a station via the episode_id -> episode_log.station_id
+// join (no station_id column of its own). See migration 023.
+export interface TranscriptChunk {
+  id: number
+  episode_id: number
+  chunk_idx: number
+  start_ms: number
+  end_ms: number
+  content: string
+  // embedding (vector(1536)) is never round-tripped to the client.
+}
+
 // One transcript-search hit returned by /api/transcript-search. `snippet` is a
 // ts_headline fragment whose matches are wrapped in private-use sentinels the
 // client swaps for <mark> after escaping (never trust it as raw HTML). `startMs`
 // is the matching cue's audio offset, or null when no cue matched (the UI then
 // shows the snippet with no deep-link — a wrong timestamp is worse than none).
+// `matchType` distinguishes a lexical (exact-word) hit from a semantic (vector)
+// hit in hybrid mode; omitted by the pure-lexical Phase-1 path.
 export interface TranscriptSearchResult {
   episodeId: number
   showKey: string
@@ -123,6 +139,7 @@ export interface TranscriptSearchResult {
   rank: number
   snippet: string
   startMs: number | null
+  matchType?: 'lexical' | 'semantic'
 }
 
 export interface UsageLog {
@@ -131,7 +148,7 @@ export interface UsageLog {
   episode_id: number | null
   service: 'groq' | 'openai'
   model: string
-  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance'
+  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance' | 'embed'
   input_tokens: number
   output_tokens: number
   duration_seconds: number | null
