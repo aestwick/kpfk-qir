@@ -6,6 +6,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/dashboard/episodes': 'Episodes',
   '/dashboard/compliance': 'Compliance',
+  '/dashboard/compliance/grid': 'Grid Report',
   '/dashboard/jobs': 'Jobs',
   '/dashboard/activity': 'Activity',
   '/dashboard/usage': 'Usage',
