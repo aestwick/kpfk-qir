@@ -36,7 +36,7 @@ differently-named hours).
 
 ## 3. Data Model
 
-### 3.1 New table `show_groups` (migration `019_show_groups.sql`)
+### 3.1 New table `show_groups` (migration `020_show_groups.sql`)
 
 Station-scoped, mirrors the conventions in `012`–`014`.
 
@@ -177,7 +177,10 @@ group-level value is wanted.
 
 ### 6.1 New route `app/api/show-groups/route.ts`
 Uses `getStationContext(request)` (RLS client + `stationId`) like other routes;
-every query also `.eq('station_id', stationId)`.
+every query also `.eq('station_id', stationId)`. Per the per-station roles added
+in migration `019_member_management.sql`, all **write** handlers (POST/PATCH/
+DELETE) must gate on `requireRole(result.context, 'editor')` — matching the
+guards now on `app/api/settings/route.ts` PUT/PATCH.
 
 - **GET** → `{ groups: ShowGroupWithMembers[] }` — groups for the active
   station, each with member keys + per-show episode counts + resolved `display`.
@@ -190,7 +193,8 @@ every query also `.eq('station_id', stationId)`.
 
 ### 6.2 Membership assignment (extend `app/api/settings/route.ts`)
 - Add `group_id` to the `resource: 'show'` PATCH allowlist (currently
-  `['show_name','category','default_category','active','email']`).
+  `['show_name','category','default_category','active','email']`). This handler
+  already enforces `requireRole(..., 'editor')` on main — unchanged.
 - Validate that a non-null `group_id` belongs to a group in the **same
   station** before assigning (defense in depth alongside RLS).
 - The existing `GET ?resource=shows` response gains each show's `group_id` so
@@ -336,7 +340,7 @@ Replace the auto name-matching `groupedShows` (rowSpan-by-name) added in
 
 ## 14. Implementation Plan (phased, each phase independently verifiable)
 
-1. **Schema** — `supabase/migrations/019_show_groups.sql`: `show_groups` table,
+1. **Schema** — `supabase/migrations/020_show_groups.sql`: `show_groups` table,
    `show_keys.group_id`, indexes, RLS policies.
 2. **Types & helpers** — `lib/types.ts` (`ShowGroup`, `ShowGroupWithMembers`,
    `ShowKey.group_id`); new `lib/show-groups.ts` (fetch + resolution helpers).
