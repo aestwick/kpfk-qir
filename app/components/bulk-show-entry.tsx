@@ -6,22 +6,46 @@ import { authedFetch } from '@/lib/api-client'
 interface DraftRow {
   show_name: string
   key: string
-  default_category: string
-  primary_language: string
+  category: string          // iTunes feed category, e.g. "News & Politics"
+  primary_language: string  // ISO 639-1, defaults to 'en'
 }
 
-const EMPTY_ROW: DraftRow = { show_name: '', key: '', default_category: '', primary_language: '' }
+const DEFAULT_LANGUAGE = 'en'
+const EMPTY_ROW: DraftRow = { show_name: '', key: '', category: '', primary_language: DEFAULT_LANGUAGE }
 
-// Common ISO 639-1 codes for KPFK / Pacifica programming. Free-text is still
-// allowed — this just powers the autocomplete datalist.
-const COMMON_LANGUAGES = ['en', 'es', 'fr', 'hy', 'ko', 'zh', 'fa', 'ru', 'ja', 'ar', 'pt', 'tl']
+// Classic iTunes / Apple Podcasts top-level categories (the taxonomy KPFK's
+// archive feeds use, e.g. <itunes:category text="News & Politics"/>). Free text
+// is still allowed — this just powers the autocomplete datalist.
+const ITUNES_CATEGORIES = [
+  'Arts', 'Business', 'Comedy', 'Education', 'Games & Hobbies',
+  'Government & Organizations', 'Health', 'Kids & Family', 'Music',
+  'News & Politics', 'Religion & Spirituality', 'Science & Medicine',
+  'Society & Culture', 'Sports & Recreation', 'Technology', 'TV & Film',
+]
+
+// Languages offered in the dropdown (KPFK / Pacifica programming).
+const LANGUAGE_OPTIONS: { code: string; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Spanish' },
+  { code: 'fr', label: 'French' },
+  { code: 'hy', label: 'Armenian' },
+  { code: 'ko', label: 'Korean' },
+  { code: 'zh', label: 'Chinese' },
+  { code: 'fa', label: 'Persian' },
+  { code: 'ru', label: 'Russian' },
+  { code: 'ja', label: 'Japanese' },
+  { code: 'ar', label: 'Arabic' },
+  { code: 'pt', label: 'Portuguese' },
+  { code: 'tl', label: 'Tagalog' },
+]
 
 function isHeaderRow(cells: string[]): boolean {
   return cells.some((c) => /^(show ?name|name|show ?key|key|category|cat|primary ?language|language|lang)$/i.test(c.trim()))
 }
 
 // Parse a pasted table. Splits on tab (preferred — spreadsheet copy) or comma,
-// one row per line. Column order: name, key, category, language.
+// one row per line. Column order: name, key, category, language. A missing or
+// blank language column defaults to English.
 function parsePaste(text: string): DraftRow[] {
   const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, '')).filter((l) => l.trim() !== '')
   const rows = lines.map((line) => (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim()))
@@ -29,22 +53,22 @@ function parsePaste(text: string): DraftRow[] {
   return rows.map((cells) => ({
     show_name: cells[0] ?? '',
     key: cells[1] ?? '',
-    default_category: cells[2] ?? '',
-    primary_language: cells[3] ?? '',
+    category: cells[2] ?? '',
+    primary_language: (cells[3] ?? '').trim() || DEFAULT_LANGUAGE,
   }))
 }
 
-const rowIsEmpty = (r: DraftRow) => !r.show_name.trim() && !r.key.trim() && !r.default_category.trim() && !r.primary_language.trim()
+// A row is "empty" for grid bookkeeping if it has no name, key, or category.
+// Language is ignored here because every fresh row carries the default 'en'.
+const rowIsEmpty = (r: DraftRow) => !r.show_name.trim() && !r.key.trim() && !r.category.trim()
 const rowIsValid = (r: DraftRow) => !!r.show_name.trim() && !!r.key.trim()
 
 /* ─── Fast bulk entry for show keys (grid typing or paste) ─── */
 export function BulkShowEntry({
-  categories,
   existingKeys,
   onAdded,
   toast,
 }: {
-  categories: string[]
   existingKeys: string[]            // existing show keys for this station (for new/update badges)
   onAdded: () => void               // refresh the parent shows list after a successful save
   toast: (type: 'success' | 'error', msg: string) => void
@@ -76,16 +100,20 @@ export function BulkShowEntry({
     })
   }
 
+  function loadParsed(parsed: DraftRow[]) {
+    // Merge onto any rows already typed (drop the trailing empty), then re-add one.
+    setRows((prev) => [...prev.filter((r) => !rowIsEmpty(r)), ...parsed, { ...EMPTY_ROW }])
+    toast('success', `Loaded ${parsed.length} row${parsed.length === 1 ? '' : 's'} — review and save`)
+  }
+
   function loadPaste() {
     const parsed = parsePaste(pasteText)
     if (parsed.length === 0) {
       toast('error', 'Nothing to load — paste rows of: name, key, category, language')
       return
     }
-    // Merge onto any rows already typed (drop the trailing empty), then re-add one.
-    setRows((prev) => [...prev.filter((r) => !rowIsEmpty(r)), ...parsed, { ...EMPTY_ROW }])
+    loadParsed(parsed)
     setPasteText('')
-    toast('success', `Loaded ${parsed.length} row${parsed.length === 1 ? '' : 's'} — review and save`)
   }
 
   async function save() {
@@ -141,7 +169,7 @@ export function BulkShowEntry({
       {/* Paste loader */}
       <div className="space-y-1.5">
         <label className="text-xs text-gray-500 dark:text-warm-400">
-          Paste from a spreadsheet (columns: name, key, category, language — tab or comma separated)
+          Paste from a spreadsheet (columns: name, key, category, language — tab or comma separated). Language defaults to English.
         </label>
         <div className="flex gap-2">
           <textarea
@@ -154,14 +182,11 @@ export function BulkShowEntry({
                 if (text.includes('\n') || text.includes('\t')) {
                   e.preventDefault()
                   const parsed = parsePaste(text)
-                  if (parsed.length) {
-                    setRows((prev) => [...prev.filter((r) => !rowIsEmpty(r)), ...parsed, { ...EMPTY_ROW }])
-                    toast('success', `Loaded ${parsed.length} row${parsed.length === 1 ? '' : 's'} — review and save`)
-                  }
+                  if (parsed.length) loadParsed(parsed)
                 }
               }
             }}
-            placeholder={'Democracy Now!\tdn9\tNews\ten\nThe Lawyers\tlawyers\tLaw\ten'}
+            placeholder={'Democracy Now!\tdn9\tNews & Politics\ten\nUprising\tuprising\tNews & Politics'}
             rows={2}
             className="flex-1 border dark:border-warm-600 rounded px-2 py-1.5 text-sm font-mono dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
           />
@@ -216,21 +241,35 @@ export function BulkShowEntry({
                     <input
                       type="text"
                       list="bulk-show-categories"
-                      value={row.default_category}
-                      onChange={(e) => updateCell(i, 'default_category', e.target.value)}
-                      placeholder="optional"
+                      value={row.category}
+                      onChange={(e) => updateCell(i, 'category', e.target.value)}
+                      placeholder="e.g. News & Politics"
                       className="w-full border dark:border-warm-600 rounded px-2 py-1 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
                     />
                   </td>
                   <td className="px-1 py-1">
-                    <input
-                      type="text"
-                      list="bulk-show-languages"
-                      value={row.primary_language}
-                      onChange={(e) => updateCell(i, 'primary_language', e.target.value)}
-                      placeholder="e.g. en"
-                      className="w-full border dark:border-warm-600 rounded px-2 py-1 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
-                    />
+                    <div className="flex items-center gap-1">
+                      <select
+                        value={row.primary_language}
+                        onChange={(e) => updateCell(i, 'primary_language', e.target.value)}
+                        className="flex-1 border dark:border-warm-600 rounded px-2 py-1 text-sm dark:bg-warm-800 dark:text-warm-100"
+                      >
+                        <option value="">—</option>
+                        {LANGUAGE_OPTIONS.map((l) => (
+                          <option key={l.code} value={l.code}>{l.label} ({l.code})</option>
+                        ))}
+                      </select>
+                      {row.primary_language && (
+                        <button
+                          type="button"
+                          onClick={() => updateCell(i, 'primary_language', '')}
+                          className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 px-1"
+                          title="Clear language"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-1 py-1 text-center">
                     {incomplete ? (
@@ -258,10 +297,7 @@ export function BulkShowEntry({
           </tbody>
         </table>
         <datalist id="bulk-show-categories">
-          {categories.map((c) => <option key={c} value={c} />)}
-        </datalist>
-        <datalist id="bulk-show-languages">
-          {COMMON_LANGUAGES.map((l) => <option key={l} value={l} />)}
+          {ITUNES_CATEGORIES.map((c) => <option key={c} value={c} />)}
         </datalist>
       </div>
 

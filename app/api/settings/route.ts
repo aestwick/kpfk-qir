@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
     // Normalize + validate. A row needs a key and a name; everything else is optional.
     // De-dupe by key within the payload (last write wins) so a doubled paste row
     // doesn't trip the upsert's "cannot affect row a second time" error.
-    const byKey = new Map<string, { station_id: string; key: string; show_name: string; default_category: string | null; primary_language: string | null; active: boolean }>()
+    const byKey = new Map<string, { station_id: string; key: string; show_name: string; category: string | null; primary_language: string | null; active: boolean }>()
     const skipped: { row: number; reason: string }[] = []
 
     input.forEach((raw: Record<string, unknown>, i: number) => {
@@ -142,11 +142,12 @@ export async function POST(request: NextRequest) {
         skipped.push({ row: i, reason: 'missing key or name' })
         return
       }
-      const default_category = raw.default_category != null && String(raw.default_category).trim() !== ''
-        ? String(raw.default_category).trim() : null
+      // category = iTunes feed category (e.g. "News & Politics"), stored on show_keys.category.
+      const category = raw.category != null && String(raw.category).trim() !== ''
+        ? String(raw.category).trim() : null
       const primary_language = raw.primary_language != null && String(raw.primary_language).trim() !== ''
         ? String(raw.primary_language).trim().toLowerCase() : null
-      byKey.set(key, { station_id: stationId, key, show_name, default_category, primary_language, active: true })
+      byKey.set(key, { station_id: stationId, key, show_name, category, primary_language, active: true })
     })
 
     const rows = Array.from(byKey.values())

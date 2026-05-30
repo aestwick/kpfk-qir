@@ -597,6 +597,7 @@ export default function SettingsPage() {
   function startShowEdit(show: Show, field: string) {
     setEditingShow({ id: show.id, field })
     if (field === 'show_name') setEditingShowValue(show.show_name)
+    else if (field === 'category') setEditingShowValue(show.category ?? '')
     else if (field === 'default_category') setEditingShowValue(show.default_category ?? '')
     else if (field === 'primary_language') setEditingShowValue(show.primary_language ?? '')
     setTimeout(() => showEditRef.current?.focus(), 0)
@@ -1203,7 +1204,6 @@ export default function SettingsPage() {
           </div>
 
           <BulkShowEntry
-            categories={categories}
             existingKeys={shows.map((s) => s.key)}
             onAdded={refreshShows}
             toast={toast}
@@ -1215,7 +1215,8 @@ export default function SettingsPage() {
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">Key</th>
                   <th className="text-left px-3 py-2 font-medium">Name</th>
-                  <th className="text-left px-3 py-2 font-medium">Default Category</th>
+                  <th className="text-left px-3 py-2 font-medium" title="iTunes feed category from the RSS (e.g. News & Politics)">Category</th>
+                  <th className="text-left px-3 py-2 font-medium" title="FCC issue category applied to summaries">Default Category</th>
                   <th className="text-left px-3 py-2 font-medium">Language</th>
                   <th className="text-center px-3 py-2 font-medium">Active</th>
                   <th className="text-center px-3 py-2 font-medium" title="Exclude this feed (show key) from ingest. Only this key is dropped — other airings of the same show keep running.">Exclude</th>
@@ -1224,7 +1225,7 @@ export default function SettingsPage() {
               </thead>
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={7} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
+                  <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
                 ) : groupedShows.map((group) => (
@@ -1264,6 +1265,35 @@ export default function SettingsPage() {
                       )}
                     </td>
                     )}
+                    <td className="px-3 py-2">
+                      {editingShow?.id === show.id && editingShow.field === 'category' ? (
+                        <input
+                          ref={showEditRef as React.RefObject<HTMLInputElement>}
+                          type="text"
+                          list="show-itunes-categories"
+                          value={editingShowValue}
+                          onChange={(e) => setEditingShowValue(e.target.value)}
+                          onBlur={() => saveShowEdit(show.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveShowEdit(show.id)
+                            if (e.key === 'Escape') {
+                              showEditCancelled.current = true
+                              ;(e.target as HTMLInputElement).blur()
+                            }
+                          }}
+                          placeholder="e.g. News & Politics"
+                          className="border rounded px-2 py-0.5 text-sm w-full dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                        />
+                      ) : (
+                        <button
+                          onClick={() => startShowEdit(show, 'category')}
+                          className="text-left hover:text-blue-600 cursor-pointer text-gray-600 dark:text-warm-400"
+                          title="Click to edit"
+                        >
+                          {show.category || <span className="text-gray-300 italic dark:text-warm-500">None</span>}
+                        </button>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       {editingShow?.id === show.id && editingShow.field === 'default_category' ? (
                         <select
@@ -1370,6 +1400,11 @@ export default function SettingsPage() {
                 ))}
               </tbody>
             </table>
+            <datalist id="show-itunes-categories">
+              {['Arts','Business','Comedy','Education','Games & Hobbies','Government & Organizations','Health','Kids & Family','Music','News & Politics','Religion & Spirituality','Science & Medicine','Society & Culture','Sports & Recreation','Technology','TV & Film'].map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </div>
         </div>
       )}
