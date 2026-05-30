@@ -1,7 +1,77 @@
 # Spec: Transcript Search
 
-> Status: **Design / not yet built.** Phased plan below; Phase 1 is the
-> recommended first slice and is shippable on its own.
+> Status: **Phase 1 (Lexical FTS) implemented** on branch
+> `claude/pensive-cray-JPXyT`. Phases 2 (embeddings) and 3 ("ask the archive"
+> RAG) remain design-only. See **§0 Implementation status** below for what
+> shipped, what's required to make it live, and current gaps. The design sections
+> (§1–§14) are unchanged from the original draft and remain the source of truth
+> for intent; where the build deviated, §0 says so explicitly.
+
+## 0. Implementation status (Phase 1)
+
+### Shipped
+
+| Area | File(s) | Notes |
+|---|---|---|
+| DB schema + search RPC | `supabase/migrations/022_transcript_fts.sql` | `transcripts.transcript_fts` (`'simple'` config) + GIN; `transcript_cues` table + GIN + RLS via the `episode_id → episode_log.station_id` join; `search_transcripts()` RPC — ranked, station-scoped, `ts_headline` snippet, best-matching cue `start_ms`, 5s statement timeout, `security invoker` + explicit `station_id` arg. |
+| VTT parse + aligner | `lib/vtt.ts` (+ `lib/vtt.test.ts`) | Pure, no DB. `parseVtt`, `normalizeForMatch`, `findCueForPhrase` (returns `null` rather than guessing a timestamp). 11 unit tests via vitest. |
+| Query construction | `lib/transcript-search.ts` | Thin wrapper over the RPC: arg building, quarter→range reuse, row→`TranscriptSearchResult` shaping. |
+| API route | `app/api/transcript-search/route.ts` | Thin: auth, param validation (`MIN_QUERY_LENGTH`), pagination, response shaping. |
+| Shows list (for filter) | `app/api/shows/route.ts` | `GET /api/shows` → `{ shows: [{key, show_name, ...}] }`, station-scoped. Added because the search UI's Show dropdown needed it and only `/api/shows/audit` existed. |
+| Cue population (live) | `workers/transcribe.ts` | `populateCues()` runs right after the VTT is built (best-effort — a failure logs and never fails the episode). |
+| Cue backfill (one-time) | `scripts/backfill-transcript-cues.ts` | `npm run backfill-transcript-cues` (`--force` rebuilds all). Re-runnable. |
+| Types | `lib/types.ts` | `TranscriptCue`, `TranscriptSearchResult`. |
+| UI | `app/dashboard/search/page.tsx`, `app/dashboard/layout.tsx` (nav), `app/dashboard/episodes/page.tsx` (entry point) | Grid-wide search; hits deep-link to `/dashboard/episodes/{id}?seek=<seconds>` (reuses the existing audio-seek support). |
+| Tooling | `package.json`, `vitest.config.ts` | Added `vitest` devDep, `npm test`, `npm run backfill-transcript-cues`. |
+
+### Required to make it live (NOT done in this session — no DB was reachable)
+
+1. **Apply migration 022** (`scripts/migrate.sh` or your usual path).
+2. **Backfill cues once**: `npm run backfill-transcript-cues`. New episodes get
+   cues automatically via the transcribe worker; this only catches the corpus
+   transcribed before 022.
+
+### Deviations from the original draft (intentional)
+
+- **Migration number is `022`**, not whatever follows "Show Groups". §6.1 assumed
+  Show Groups targeted `021`; in reality the highest existing migration is
+  `021_show_keys_primary_language` and **there is no Show Groups migration**.
+- **Cue population lives in `workers/transcribe.ts`**, not `summarize.ts`. §6.1
+  / §13 said summarize, but the VTT is actually built in the transcribe worker
+  (`buildVtt`), so that's the only place cues can be parsed from fresh VTT.
+- **Snippet highlighting uses private-use sentinels** (`U+E000`/`U+E001`, written
+  in SQL as `chr(57344)`/`chr(57345)`) that the client swaps for `<mark>` *after*
+  HTML-escaping, so transcript text can never inject markup. The runtime VTT
+  aligner mentioned in §7.1 exists in `lib/vtt.ts` as `findCueForPhrase` but is
+  **not yet wired into the route** — the route relies on the cue table only (see
+  gaps).
+
+### Current gaps / known limitations
+
+- **Not verified end-to-end against a live database.** The SQL, route, and types
+  are statically checked (`tsc --noEmit` clean) and `lib/vtt.test.ts` passes
+  11/11, but `search_transcripts()` has never actually run against Postgres in
+  this session. Treat the first live run as the real integration test
+  (especially the `ts_headline` sentinel options string and the lateral cue
+  join).
+- **Runtime aligner is unused by the route.** If an episode has no
+  `transcript_cues` rows (e.g. backfill not yet run), results return
+  `start_ms = null` and simply show no deep-link. `findCueForPhrase` is written
+  and tested but not invoked as the §7.1 fallback. Decide later whether to wire
+  it in or rely solely on the cue table.
+- **No summary/discovery search yet** (§7.2). Only transcript-text search shipped;
+  the cheap summary/category search companion is not built.
+- **No integration tests** for RLS isolation / station scoping of
+  `search_transcripts` (the unit tests cover only `lib/vtt.ts`).
+
+### Process note (mistakes made during the build, now resolved)
+
+- A "fix vtt regex" commit (`c25513e`) recorded the message but the edit had
+  **failed to apply**, so `tsc` stayed red on the `/u` regex flag. Caught on the
+  next verification pass and fixed for real in `26cf933`. Lesson logged here so a
+  future reader doesn't trust commit messages over `tsc`/test output.
+- The first nav-link attempt used a text-icon nav format that didn't match the
+  layout's SVG-icon `navItems` array and silently no-op'd; fixed in `7470694`.
 
 ## 1. Problem & Motivation
 

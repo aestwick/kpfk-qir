@@ -96,6 +96,35 @@ export interface Transcript {
   created_at: string
 }
 
+// A timed cue parsed from a transcript's VTT, used by transcript search to
+// deep-link the audio at start_ms. Scoped to a station via the episode_id ->
+// episode_log.station_id join (no station_id column of its own). See
+// ideas/TRANSCRIPT_SEARCH_SPEC.md and migration 022.
+export interface TranscriptCue {
+  id: number
+  episode_id: number
+  cue_idx: number
+  start_ms: number
+  end_ms: number
+  text: string
+}
+
+// One transcript-search hit returned by /api/transcript-search. `snippet` is a
+// ts_headline fragment whose matches are wrapped in private-use sentinels the
+// client swaps for <mark> after escaping (never trust it as raw HTML). `startMs`
+// is the matching cue's audio offset, or null when no cue matched (the UI then
+// shows the snippet with no deep-link — a wrong timestamp is worse than none).
+export interface TranscriptSearchResult {
+  episodeId: number
+  showKey: string
+  showName: string | null
+  airDate: string | null
+  status: string
+  rank: number
+  snippet: string
+  startMs: number | null
+}
+
 export interface UsageLog {
   id: number
   station_id: string
