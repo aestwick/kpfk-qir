@@ -69,7 +69,9 @@ Container limits today (`docker-compose.yml`): `qir-worker` `cpus: 1.5` / `mem_l
 steady:    { transcribe: 1 → 2,  summarize: 5 }   // unchanged: summarize
 catch-up:  { transcribe: 3 → 4,  summarize: 10 }
 ```
-Summarize stays 5/10 (already ample). Compliance stays at concurrency 1 (fast text-only call) — flagged as a watch-point, not changed.
+Summarize stays 5/10 (already ample). Compliance stays at concurrency 1 — it is a **gpt-4o-mini call per episode** (no audio/ffmpeg work), serialized across all stations' summarized output at one slot. Fine at current volume, but a genuine watch-point (and trivially bumped to 2–3 if it backs up). "Text-only" undersells the LLM call.
+
+**Framing — the concurrency bump is not the throughput win.** The pipeline is I/O-bound on Groq + archive bandwidth (Section 1), which local concurrency cannot raise — so 1→2→4 mostly converts "stations queuing politely" into "stations hitting Groq 429s in parallel." The real win is **hands-off dispatch (Phase 2)**; the concurrency bump rides along, and exists to find the true external ceiling empirically (moderate + watch-429s + one-line rollback). Don't expect the number itself to buy throughput.
 
 **`docker-compose.yml` — `qir-worker` (`:41-42`)**
 ```
@@ -80,9 +82,23 @@ Within proven headroom (idle ~2.8 GB RAM, 26% peak CPU from one station). `qir-a
 
 ### Phase 2 — Hands-off auto-dispatch
 
-No new scheduler is required, because each station's chain is already single-job-at-a-time, so a station can hold **at most one** transcribe slot at any instant. With concurrency ≥ number of active stations, BullMQ's FIFO naturally round-robins the slots across stations — fairness is automatic. The atomic `status='pending'` claim guard (`workers/transcribe.ts:204-209`) already prevents double-processing.
+#### Drain mechanism (how a station empties a backlog) — load-bearing
 
-Two surgical edits:
+A single `transcribe` job is **not** one episode. `processTranscribe` claims up to `transcribe_batch_size` pending episodes for the station (default **5**, per-station setting, `lib/settings.ts:108`; `.limit(batchSize)` at `workers/transcribe.ts:183`), processes them serially, then returns `{ transcribed, remaining }` where `remaining` = "more pending exist for this station." The worker `completed` handler (`workers/index.ts:94-105`) **self-requeues** a `transcribe-continue` job — carrying `stationId` and the `chain` flag — whenever `remaining` is true (or backs off 5 min if a cycle made zero progress).
+
+So both things the reviewer flagged are true and combined: **(a)** a job loops a batch of 5, **and (b)** the worker re-queues itself while work remains. A station with 12 pending drains in ⌈12/5⌉ = 3 cycles, each enqueued immediately after the prior completes — *not* one episode per hourly kick. The hourly `cron-transcribe` only has to **start** the loop; the self-requeue drains it. This mechanism already exists in the code (it is not a new edit). Catch-up raises **concurrency** (parallel slots / more stations at once), **not** batch size — so "catch-up" speeds cross-station parallelism, not within-station batch depth.
+
+_Side effect:_ each draining cycle that transcribes >0 fires a summarize kick (chain), so a multi-cycle drain emits several summarize kicks. Harmless — summarize batches and claims atomically (`status='transcribed'` guard), so the extra kicks no-op or grab the next batch.
+
+#### Fairness — corrected
+
+The earlier "concurrency ≥ number of active stations" justification is **wrong for steady mode** (transcribe=2 vs. the 4-station target). The accurate reason it still works: **each station's chain holds at most one in-flight transcribe job** (the next `transcribe-continue` is enqueued only *after* the current completes). So even when active stations (up to 4) exceed steady slots (2), no station can occupy more than one slot at a time, and the single-job chains round-robin through the available slots in FIFO order. **Fairness granularity is one batch** (`transcribe_batch_size`, default 5): worst case a station waits one batch-length (~5 episodes) behind the others — *not* its full backlog, so no unbounded head-of-line blocking. The atomic `status='pending'` claim guard (`workers/transcribe.ts:204-209`) prevents any double-processing.
+
+**This holds only if each station has a single chain.** The hourly `cron-transcribe` kick and manual `advance` triggers can enqueue a **second** chain for a station that is still draining from the previous hour — letting that one station occupy both steady slots and starve the others. Under auto-dispatch this is no longer hypothetical, so the dedupe guard below is **REQUIRED, not optional.**
+
+#### Edits
+
+Three edits (the third was "optional" in earlier drafts — now required):
 
 1. **`workers/index.ts` ingest `completed` handler (`:78-82`):** for **per-station** ingest jobs only (`job.data.stationId` set — not the stationless dispatcher tick, which would throw in `processTranscribe`), enqueue:
    ```
@@ -95,6 +111,8 @@ Two surgical edits:
    - summarize → compliance (`workers/index.ts:135`)
 
    The `chain: true` flag already propagates through the `*-continue` re-queues (`:103`, `:131`), so the whole `ingest → transcribe → summarize → compliance` chain flows automatically. Existing `audit` callers (which pass `chain: true`) are unaffected. Compliance is terminal (no further auto-chain); QIR generation remains manual.
+
+3. **Per-station dedupe guard (required).** Before the ingest→transcribe kick (and in the `advance` action), skip enqueuing a `cron-transcribe`/`advance` job for a station that **already has an active or waiting transcribe job for that `stationId`**. Implementation: inspect `transcribeQueue.getActive()` + `getWaiting()` and match on `job.data.stationId` (the `app/api/jobs/route.ts` GET already reads these lists), or maintain a short-lived per-station lock key in Redis. This prevents a slow-draining station from accumulating a second chain at the hourly boundary and grabbing both steady slots — the failure mode that breaks the fairness argument above. The atomic DB claim still guards correctness; this guard preserves *fairness*.
 
 **Behavioral notes**
 - `isPipelinePaused()` is checked at the top of every processor — pause still halts the chain globally.
@@ -139,6 +157,8 @@ Add `requireSuperAdmin(request)`:
 - **Watch the Groq 429 rate** in worker logs (`workers/transcribe.ts:143-150`) — the true external ceiling. If 429 backoffs spike, drop steady transcribe back to 1.
 - Confirm Master Control shows all stations updating live, and that non-super-admins cannot reach it (403 + hidden nav link).
 - Confirm `pipeline_paused` from Master Control halts every station's chain.
+- **Fairness check:** during a multi-station backlog, confirm no single `stationId` ever holds >1 active transcribe job (the dedupe guard working) and that stations interleave at roughly batch granularity rather than one draining fully before another starts.
+- **Disk check:** confirm the disk graph stays flat-ish during the first 4-station run (per-episode cleanup bounds transient chunk disk to ~slots × 29 MB); confirm total VPS disk capacity out-of-band.
 
 ## 6. Rollback
 
@@ -150,7 +170,8 @@ All changes are config + small, isolated edits:
 ## 7. Risks & prerequisites
 
 - **Groq tier is the real limiter** and is not documented in the repo — confirm the RPM / audio-minutes allowance. Moderate settings are conservative enough to start.
-- **archive.kpfk.org bandwidth:** 4 concurrent stations ≈ ~11 GB incoming per catch-up run, pulled from one origin. VPS monthly transfer quota is fine; the origin's capacity is the shared limit.
+- **archive.kpfk.org bandwidth:** 4 concurrent stations ≈ ~11 GB incoming per catch-up run, pulled from one origin. VPS monthly transfer quota is fine; the origin's capacity is the shared limit. Note this ~11 GB is **bandwidth transferred**, not disk-resident — ffmpeg streams each MP3 from the archive URL and writes only the AAC chunks.
+- **Disk:** chunk cleanup is **per-episode** (`workers/transcribe.ts:367`, inside the loop), so transient chunk disk ≈ (concurrent transcribe slots) × (one episode ≈ ~29 MB AAC) — i.e. ~tens of MB even at 4 slots, *not* per-station-backlog. Total VPS disk is **unconfirmed** (usage-graph axis ~60 GB, ~36 GB used → likely an ~80–100 GB Hostinger NVMe); confirm before catch-up. The case to watch is 4 stations peaking temp chunks simultaneously — still bounded to ~(slots × 29 MB) by per-episode cleanup, so this is expected to be a non-issue, but verify on the disk graph during the first 4-station run.
 - **OpenAI org spend limit** is shared across all stations; a billing block halts everyone (spend-limit errors already avoid burning retries — `lib/retry-policy.ts`).
 - The 3 non-KPFK stations still need `rss_base_url` / `mp3_filename_prefix` set before they ingest; auto-dispatch skips them visibly until then.
 
@@ -158,7 +179,8 @@ All changes are config + small, isolated edits:
 
 | File | Change |
 |---|---|
-| `workers/index.ts` | concurrency presets; ingest→transcribe kick; broaden 2 chain conditions |
+| `workers/index.ts` | concurrency presets; ingest→transcribe kick; broaden 2 chain conditions; per-station dedupe guard on the kick |
+| `app/api/jobs/route.ts` | per-station dedupe guard on the `advance` action (reuses its existing active/waiting reads) |
 | `docker-compose.yml` | `qir-worker` cpus/mem |
 | `lib/auth.ts` | `requireSuperAdmin()` helper |
 | `app/api/control/route.ts` | **new** — aggregated GET + control POST |
