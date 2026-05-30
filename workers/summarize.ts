@@ -3,6 +3,7 @@ import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logSummarizationUsage } from '../lib/usage'
 import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused } from '../lib/settings'
+import { isSpendLimitError } from '../lib/retry-policy'
 
 interface SummaryResponse {
   headline: string
@@ -203,12 +204,15 @@ ${transcriptText}`
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       console.error(`[summarize] ep ${episode.id} failed:`, errMsg)
+      // A spend-limit block is org-wide, not this episode's fault — don't spend
+      // a retry on it, or a billing outage will eventually mark the backlog dead.
+      const spendBlocked = isSpendLimitError(errMsg)
       await supabaseAdmin
         .from('episode_log')
         .update({
           status: 'failed',
           error_message: errMsg.slice(0, 1000),
-          retry_count: (episode.retry_count ?? 0) + 1,
+          retry_count: spendBlocked ? (episode.retry_count ?? 0) : (episode.retry_count ?? 0) + 1,
           updated_at: new Date().toISOString(),
         })
         .eq('id', episode.id)
