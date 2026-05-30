@@ -495,12 +495,20 @@ export default function EpisodeDetailPage() {
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   /** Locate a flag excerpt in the VTT captions and return its cue start time, or
-   *  null. Delegates to findCueForPhrase, which matches across cue boundaries —
-   *  flag excerpts routinely span several short cues, so single-cue containment
-   *  almost never resolves a timestamp. */
+   *  null. First tries findCueForPhrase on the full excerpt (verbatim, matches
+   *  across cue boundaries). If that misses — common for AI-detected flags whose
+   *  excerpt is the model's paraphrase rather than a verbatim quote — it retries
+   *  with just the opening words, which usually are quoted accurately. This is a
+   *  best-effort UI convenience and may land a few seconds off; rule-based flags
+   *  (sliced verbatim from the transcript) resolve on the first, exact attempt. */
   function findTimestampFromVtt(excerpt: string): number | null {
     const cue = findCueForPhrase(vttCues, excerpt)
-    return cue ? cue.startMs / 1000 : null
+    if (cue) return cue.startMs / 1000
+    // Fallback: match just the opening words (mirrors workers/compliance.ts).
+    const opening = excerpt.split(/\s+/).slice(0, 5).join(' ')
+    if (opening.length <= 10) return null
+    const partial = findCueForPhrase(vttCues, opening)
+    return partial ? partial.startMs / 1000 : null
   }
 
   function jumpToTimestamp(seconds: number, excerpt?: string | null) {
