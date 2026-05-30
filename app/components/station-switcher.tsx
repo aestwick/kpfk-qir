@@ -44,15 +44,24 @@ export function StationSwitcher() {
         .eq('user_id', userId)
         .maybeSingle()
 
+      // Only stations with a configured RSS feed are selectable — an unconfigured
+      // station (e.g. WBAI/New York until its rss_base_url is set) can't ingest or
+      // produce a report, so hide it from the switcher. It reappears automatically
+      // once rss_base_url is set.
       let opts: StationOption[] = []
       if (superRow) {
-        const { data } = await supabase.from('stations').select('id, slug, name').order('name')
+        const { data } = await supabase
+          .from('stations')
+          .select('id, slug, name')
+          .not('rss_base_url', 'is', null)
+          .order('name')
         opts = data ?? []
       } else {
         const { data } = await supabase
           .from('station_users')
           .select('stations!inner(id, slug, name)')
           .eq('user_id', userId)
+          .not('stations.rss_base_url', 'is', null)
         opts = (data ?? []).map((row) => {
           const s = Array.isArray(row.stations) ? row.stations[0] : row.stations
           return { id: s.id, slug: s.slug, name: s.name }

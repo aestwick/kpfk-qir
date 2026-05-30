@@ -76,11 +76,17 @@ export async function getStationContext(request: NextRequest): Promise<StationCo
   }
   const isSuperAdmin = !!superRow
 
+  // Gate on a configured RSS feed: a station with no rss_base_url (e.g. WBAI/New
+  // York until provisioned) can't be ingested or reported on, so it isn't an
+  // active station the dashboard can operate on. It becomes available the moment
+  // rss_base_url is set. (Public finalized reports resolve via
+  // resolveStationIdBySlug, not this path, so they're unaffected.)
   let allowed: { station_id: string; slug: string; role: StationRole }[]
   if (isSuperAdmin) {
     const { data, error } = await supabase
       .from('stations')
       .select('id, slug')
+      .not('rss_base_url', 'is', null)
     if (error) {
       return { error: { status: 401, error: `Failed to load stations: ${error.message}` } }
     }
@@ -90,6 +96,7 @@ export async function getStationContext(request: NextRequest): Promise<StationCo
       .from('station_users')
       .select('station_id, role, stations!inner(slug)')
       .eq('user_id', userId)
+      .not('stations.rss_base_url', 'is', null)
     if (error) {
       return { error: { status: 401, error: `Failed to load memberships: ${error.message}` } }
     }
