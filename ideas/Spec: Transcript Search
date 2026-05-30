@@ -1,0 +1,290 @@
+# Spec: Per-Station Metering & Pipeline Control (Revised)
+
+**Status:** Draft / proposed
+**Supersedes:** the framing and Phase-2/4 design of *Concurrent Multi-Station
+Pipeline + Master Control*. The hands-off auto-dispatch chain, `requireSuperAdmin`,
+and the control route/page from that spec are **carried forward**; the
+concurrency-as-throughput framing and the "fairness" model are **replaced** by
+what's below.
+**Written for:** Claude Code (repo `aestwick/kpfk-qir`).
+
+---
+
+## 1. What changed, and why
+
+The original spec was framed around throughput — raise concurrency, run stations
+in parallel. That framing was wrong, and we should bury it explicitly so nobody
+re-derives it:
+
+- The pipeline is **I/O-bound on shared external resources** — Groq Whisper rate
+  tier, the OpenAI org spend limit, archive bandwidth. Local concurrency cannot
+  raise any of them. The concurrency bump converts "stations queuing politely"
+  into "stations hitting Groq 429s in parallel." It is not the win.
+- **The win is two things:** (a) the pipeline runs *hands-off* so nobody
+  babysits it, and (b) the shared external budget is **deliberately allocated**
+  across stations that are **not equal**.
+
+Stations are not equal: **KPFK is production; the others are test.** So the goal
+is not fairness (equal round-robin) — it's **designed priority**, expressed as a
+per-station budget. And the reason this is worth real complexity is that it's a
+**firewall**: the scariest failure in the system is a runaway test station
+burning the shared OpenAI budget, tripping the spend limit, and killing KPFK's
+production pipeline the week before a filing. Per-station metering is the
+blast-radius wall that lets us trial other stations without gambling the one
+filing that counts.
+
+---
+
+## 2. Goals / Non-goals
+
+### Goals
+- Per-station **metering** of the shared budget: ingest always-on, transcribe
+  N/day, summarize N/day.
+- A three-rung **control ladder** per station: auto rate-limit → soft pause →
+  hard stop.
+- **Trustworthy confirmation**: what the dashboard shows and what the system
+  enforces are the same number.
+- **Honest tenant-facing states** for users of non-KPFK stations, who never see
+  Master Control.
+- **Master Control** (super-admin) as a *glance-and-set* surface, not a cockpit.
+
+### Non-goals
+- QIR draft generation stays **manual** (unchanged).
+- No per-station queue infrastructure (shared queues + `stationId` retained).
+- No move off single VPS / Redis / Supabase.
+- **No latency scheduler.** Priority is volume allocation (how much per day), not
+  queue-jumping (who's next). Given the quarterly cadence, prompt ordering
+  doesn't matter; eventually-correct is fine.
+- Not a real-time monitoring cockpit. Daily reality is a glance.
+
+---
+
+## 3. Locked decisions
+
+| Decision | Choice |
+|---|---|
+| Daily window | **Calendar day, midnight Pacific reset** (not rolling 24h — legible, shows a real clock time) |
+| Pause behavior | **Graceful** — finish the running job, start nothing new |
+| Pause + ingest | Ingest **keeps running** during pause (it's free; it's the liveness signal) |
+| Hard stop | **Kills everything incl. ingest**, aborts in-flight, reversible, confirm-gated |
+| Priority | Per-station **tier (production / test)** that presets the caps |
+| Ingest cap | None — always on |
+| Confirmation | Display and enforcement read the **same counter** |
+
+---
+
+## 4. Design
+
+### 4.1 Metering model
+
+Per station, per stage: **ingest = always; transcribe = N/day; summarize =
+N/day.** Ingest is uncapped because it's the cheap stage (archive bandwidth, no
+AI spend).
+
+- **Unit:** episodes/day, as a *legible proxy* for the real scarce resource
+  (Groq audio-minutes, OpenAI dollars). Counts are friendlier on a dashboard than
+  minutes; just know it's a proxy — 20 three-hour shows ≠ 20 vignettes in true
+  cost. Don't build minute-accounting now.
+- **Mechanism:** a cap is a **gate on the existing self-requeue drain**. When a
+  station's stage reaches its daily count, stop re-queuing that stage until the
+  window resets at midnight Pacific. The backlog **defers, it does not drop** —
+  tomorrow the chain picks up where it left off. This rides on the drain loop
+  that already exists; it is a turnstile, not a new pipeline.
+- **Counter = single source of truth.** One record per `(station, stage, day)`,
+  keyed to midnight Pacific. The worker reads it to decide whether to keep going;
+  the UI reads the *same* record to display "14 / 20 · resets 12:00 AM PT." There
+  is no separate display estimate — that's what makes the meter trustworthy
+  rather than decorative.
+- **Tier presets.** `tier` is one field per station. `production` (KPFK) presets
+  to uncapped / high; `test` presets to low. Presets are editable per station.
+  This also retires the murky implicit "test = has no `rss_base_url`" — make the
+  tier explicit, and it becomes a lifecycle: a station starts `test`, runs real
+  audio without ever competing with KPFK's budget, and graduates to `production`
+  when the flag is flipped.
+
+### 4.2 The three-state control ladder
+
+Exactly two things escalate down the ladder: whether ingest survives, and whether
+the in-flight job survives.
+
+| State | Trigger | Expensive stages | Ingest | Running job | Comes back |
+|---|---|---|---|---|---|
+| **Rate-limited** | automatic (daily cap) | stop | runs | finishes | auto, midnight PT |
+| **Pause** (soft) | admin | stop | runs | finishes (graceful) | admin un-pauses |
+| **Hard stop** | admin | stop | **stops** | **aborted** | admin restarts |
+
+**Hard stop — clean abort is non-negotiable.** Aborting an in-flight transcribe
+must revert the interrupted episode to `pending` with **no half-state** (no
+`status='transcribed'` without a transcript row). Get this wrong and the hard-stop
+button becomes a ghost-episode generator — the exact failure already paid to fix.
+Honest caveat: a Groq call already sent is already billed; hard stop halts
+everything *after* it, it cannot claw back the request in flight. "Kill" means
+"nothing more," not "un-spend."
+
+**Friction scales with blast radius.** Soft pause is free to hit (graceful,
+reversible). Hard stop requires a **confirm**, especially on KPFK — an accidental
+kill of the production station the week before filing is the precise disaster this
+whole design prevents.
+
+**Reversible, not destructive.** Restart resumes the backlog. Hard stop does
+**not** wipe data or de-provision the station. Decommissioning is a separate,
+slower, more-deliberate action — no single panic-click does permanent harm.
+
+**Naming:** `Pause` / `Stop` carries the severity in the verb (Stop reads more
+final). "Emergency stop" if the friction should live in the label.
+
+### 4.3 Reliable visual confirmation
+
+- One counter, read by both the gate and the UI (§4.1).
+- **Transitional honesty:** show `pausing…` while the in-flight job is still
+  wrapping up, and settle to `paused` only once it has actually stopped. Same for
+  hard stop (`stopping…` → `stopped`). Never display a stopped state while a job
+  is still running — that's the whole point of graceful.
+- The pause/stop state the worker checks is the state the UI shows. No optimistic
+  toggles.
+
+### 4.4 Tenant-facing states (non-KPFK station users)
+
+Other stations have their own users who **do not see Master Control** — they see
+their own station's normal dashboard. A stop that doesn't explain itself reads as
+broken. So every non-running state must name **its cause and its resolution**, and
+answer the three questions a user is silently asking: *is it broken? why did it
+stop? did I lose anything?*
+
+| State | What the user sees |
+|---|---|
+| **Rate-limited** | "**Paused for the day — resumes 12:00 AM PT**" + "20 / 20 transcribed today · 6 new episodes received and queued." Calm, neutral indicator — **not** a red error. |
+| **Pause** (soft) | "**Processing paused — contact your administrator**" + liveness count ("6 received and queued"), since ingest still runs. No resume clock. |
+| **Hard stop** | "**Processing stopped — contact your administrator**." Fully dark — no liveness count (ingest is off), no resume time. The one state where "dark" is the honest truth. |
+
+- The **ingestion count** is the liveness signal ("still receiving, not dead") and
+  must appear *with* the cap number, not alone — alone it only proves liveness;
+  together they tell the whole story (alive · why stopped · nothing lost).
+- **SaaS framing:** present the rate-limit as *that station's own daily
+  allowance* — neutral, per-tenant. **Never expose the KPFK-priority hierarchy.**
+  "Different stations have different processing allowances" is a normal plan-tier
+  truth that survives two tenants comparing notes; "KPFK eats first" is a bad look
+  you'd have to walk back the day they're paying. This screen is the future
+  billing-tier surface — design it neutrally once and it does both jobs.
+- **Scope the stop.** Caps and pause stop only the throttled stages. Do not grey
+  out the app — users can still ingest, read already-processed episodes, and work
+  QIR drafts. The dashboard should read "pacing itself," not "dead."
+
+### 4.5 Master Control (super-admin)
+
+A glance-and-set surface, not a cockpit. The GM looks roughly once a day, and it
+only truly matters one week per quarter — so the design optimizes for *legibility
+on a glance after a long unattended stretch*.
+
+- **Primary signal is time, not depth.** "This station last advanced 4 days ago"
+  matters; "3 pending" is meaningless to a weekly glancer. Lead each station card
+  with a **staleness clock** + loud threshold.
+- **Hierarchy mirrors priority.** KPFK is the prominent card; test stations are a
+  quiet row beneath. The visual order *is* the priority order.
+- **Per-station controls:** edit the daily caps (transcribe/summarize N/day),
+  soft pause, hard stop (confirm-gated). Global pause + steady/catch-up mode
+  retained from the original spec.
+- **One push channel.** Because attention is bursty (weeks off, then crunch),
+  keep a single out-of-band alert: **"KPFK has gone dark"** if the production
+  station hasn't advanced in ~48h. Not real-time monitoring — just the one ping
+  that converts "it's probably been fine all quarter" from faith into verified.
+- Reads via `requireSuperAdmin` (carried from original spec); `403` for everyone
+  else; nav link hidden for non-super-admins.
+
+### 4.6 Dispatch & concurrency (carried, with one correction)
+
+- Hands-off auto-dispatch chain (`ingest → transcribe → summarize → compliance`
+  via the `chain` flag) is carried unchanged from the original spec.
+- **Per-station dedupe MUST use an atomic Redis lock** keyed on `stationId` (e.g.
+  `SET NX` with a TTL refreshed per cycle, released when the chain's `remaining`
+  goes false) — **not** a `getActive()`+`getWaiting()` scan. The scan is a
+  check-then-act race and misses BullMQ's `delayed` set, where the zero-progress
+  backoff parks jobs; under hourly auto-dispatch that stacks a second chain on a
+  station and breaks the priority guarantee. The atomic lock spans every job
+  state and closes the window. The DB claim guard still protects correctness; the
+  lock protects the allocation.
+- The concurrency bump exists only to find the external ceiling empirically
+  (moderate + watch Groq 429s + one-line rollback). It is not throughput.
+- **Per-station caps are now the primary allocation lever.** Global
+  steady/catch-up mode still governs raw parallelism and is orthogonal; revisit
+  whether catch-up still earns its keep once caps exist (Open Questions).
+
+---
+
+## 5. Engineering directives
+
+- **No god files.** Split by responsibility: the cap-gate logic in the drain
+  module, the counter in its own small lib (read by both worker and API), the
+  Redis lock in its own helper, the tenant-state copy/logic separate from Master
+  Control. Routes stay thin (auth, validate, shape); no business logic in
+  handlers.
+- **Single source of truth** for every counter and every pause/stop flag — the
+  worker and the UI read the same record. This is the spec's central reliability
+  requirement; do not introduce a display-side estimate.
+- Best practices throughout: parameterized queries, idempotent migrations (next
+  free number), small single-responsibility modules, named exports.
+- **Surface health in the UI, not via SSH** — the staleness clock, the live
+  counters, and the pause/stop states are the diagnostic surface.
+
+---
+
+## 6. Validation
+
+- **Caps:** a station stops its stage exactly at N and resumes after midnight
+  Pacific; the number shown equals the number enforced.
+- **Pause (graceful):** the in-flight job finishes, nothing new starts, the UI
+  honestly shows `pausing…` → `paused`; ingest keeps running and the liveness
+  count keeps moving.
+- **Hard stop:** everything halts incl. ingest, the in-flight job aborts, every
+  interrupted episode is left at `pending` (no ghosts), restart resumes the
+  backlog; the confirm step is required (and present on KPFK).
+- **Tenant view:** rate-limited / paused / stopped each render the correct copy;
+  the KPFK-priority hierarchy is never visible to a tenant.
+- **Master Control:** staleness is the lead signal; the KPFK-dark alert fires at
+  the threshold; non-super-admins get `403` and no nav link.
+- Carry the original spec's **Groq 429** and **disk** watch-points.
+
+---
+
+## 7. Rollback
+
+- Caps/tier are config + a gate check — neutralize by setting uncapped or
+  removing the gate; the drain reverts to its current always-drain behavior.
+- Pause/hard-stop are additive controls; the default state is "running."
+- Master Control is additive (route/page/helper/alert) — remove to disable.
+
+---
+
+## 8. Open questions
+
+1. **Hard stop — abort vs finish-then-dark?** This spec assumes **abort the
+   running job** (truer to "kill everything," owns the clean-revert requirement
+   in §4.2). The alternative is *finish the current job, then go dark* — safer,
+   essentially "pause that also cuts ingest." Confirm the abort intent, or flip.
+2. **Cap defaults per tier.** What are KPFK's actual numbers — uncapped, or a high
+   ceiling as a safety net against its own runaway? What defaults for a `test`
+   station?
+3. **Does global catch-up mode survive** the move to per-station caps, or retire
+   it as redundant?
+4. **KPFK-dark alert:** channel (email / Slack via existing connectors?) and
+   threshold (48h assumed).
+
+---
+
+## 9. Files touched (delta from original spec)
+
+Carry from the original: the two `chain === true` conditions, the ingest→transcribe
+kick, `requireSuperAdmin`, the control route/page, the super-admin nav link, the
+CLAUDE.md doc fix.
+
+New / changed:
+- **schema/settings:** per-station `tier`, per-stage daily caps; the
+  `(station, stage, day)` counter record keyed to midnight Pacific; per-station
+  `pause` / `hard_stop` state.
+- **drain (`workers/`):** cap gate on the self-requeue; graceful-pause check;
+  hard-stop abort with clean `pending` revert; the atomic Redis dedupe lock
+  (replacing any queue-scan approach).
+- **counter lib:** read by both worker and control API (single source of truth).
+- **tenant UI:** the three honest states (§4.4), scoped to throttled stages only.
+- **Master Control UI:** staleness-first cards, priority-ordered hierarchy,
+  per-station cap editors + pause + hard-stop (confirm), KPFK-dark alert.
