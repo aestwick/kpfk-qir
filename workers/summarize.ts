@@ -121,9 +121,10 @@ export async function processSummarize(job: Job) {
         continue
       }
 
+      // Air date/time are derived deterministically from the archive MP3 filename
+      // at ingest (parseMp3Url + dateFieldsFromUrl) and stored as episode metadata,
+      // so they're ground truth and don't need to go through the summarizer.
       const userMessage = `Show: ${episode.show_name || ''}
-Air Date: ${episode.air_date || ''}
-Time: ${episode.air_time || ''}
 Host(s): ${episode.host || ''}
 Guest(s): ${episode.guest || ''}
 Transcript:

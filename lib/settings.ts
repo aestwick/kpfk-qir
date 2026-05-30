@@ -165,7 +165,7 @@ export const DEFAULT_SUMMARIZATION_PROMPT = `You are an expert public radio prod
 Your task is to produce an internal archival log of a radio broadcast based on a transcript, and to flag any clear conflicts with provided metadata.
 This is NOT a program description or promotional summary.
 INPUTS:
-- Episode metadata (may include show title, air date/time, listed host(s), listed guest(s))
+- Episode metadata (may include show title, listed host(s), listed guest(s))
 - A transcript of the broadcast
 GENERAL RULES:
 - Be concise, neutral, and factual.
@@ -183,9 +183,8 @@ LANGUAGE RULES:
 - Prefer speaker-led or topic-led sentences.
 - When a claim or opinion appears, attribute it to the speaker.
 DISCREPANCY RULE:
-- Compare the provided metadata fields (show name, air date, host, guest) with what is explicitly stated in the transcript.
+- Compare the provided metadata fields (show name, host, guest) with what is explicitly stated in the transcript.
 - Only flag a conflict when a metadata field directly contradicts an explicit statement in the transcript (e.g., listed host name differs from who introduces themselves).
-- A New Year's greeting or holiday reference that matches the air date year is NOT a discrepancy.
 - Do NOT compare transcript content against your own knowledge or the current date — only compare against the provided metadata.
 - Do NOT guess, infer, resolve, or explain conflicts.
 - If there is no clear conflict, leave "discrepancy" blank.
