@@ -539,17 +539,31 @@ export default function CompliancePage() {
         <div className="flex items-center gap-2">
           <a
             href="/dashboard/compliance/grid"
-            className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 dark:bg-surface-raised dark:text-warm-200 dark:border-warm-600 dark:hover:bg-warm-700/50"
+            title="Open the offense-density grid — a heatmap of flags by show and day"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 dark:bg-surface-raised dark:text-warm-200 dark:border-warm-600 dark:hover:bg-warm-700/50"
           >
-            Grid Report
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            Grid
           </a>
           <a
             href={`/compliance-report?${buildReportUrl()}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+            title="Open a print-ready compliance report for the current filters (new tab)"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-900 rounded-lg hover:bg-gray-700 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
           >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z" />
+            </svg>
             View Report
+            <svg className="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5v5m0-5L10 14M19 14v5a1 1 0 01-1 1H6a1 1 0 01-1-1V7a1 1 0 011-1h5" />
+            </svg>
           </a>
         </div>
       </div>
