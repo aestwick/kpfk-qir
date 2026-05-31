@@ -78,7 +78,14 @@ const ingestWorker = new Worker('ingest', processIngest, {
 ingestWorker.on('completed', async (job) => {
   const newCount = job.returnvalue?.newEpisodes ?? 0
   console.log(`[ingest] completed — ${newCount} new episodes`)
-  // No auto-chain: transcription must be triggered manually from the dashboard
+  // Auto-chain: new episodes flow straight into transcription, which cascades on
+  // through summarize → compliance. Skipped while the pipeline is paused (the
+  // station-level job carries stationId; the cron fan-out tick does not).
+  const stationId = job.data?.stationId
+  if (newCount > 0 && stationId && !(await isPipelinePaused())) {
+    console.log('[ingest] auto-chain → transcribe')
+    await transcribeQueue.add('chain-transcribe', { stationId, source: 'chain', chain: true })
+  }
 })
 ingestWorker.on('failed', (job, err) => {
   console.error(`[ingest] failed:`, err.message)
@@ -103,10 +110,11 @@ transcribeWorker.on('completed', async (job) => {
       await transcribeQueue.add('transcribe-continue', { stationId: job.data?.stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) })
     }
   }
-  // Auto-chain to summarize when triggered from audit
-  if (job.data?.source === 'audit' && job.data?.chain && count > 0) {
-    console.log('[transcribe] audit auto-chain → summarize')
-    await summarizeQueue.add('audit-summarize', { stationId: job.data?.stationId, source: 'audit', chain: true })
+  // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
+  // Skipped while paused so a resumed pipeline doesn't fan out stale work.
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused())) {
+    console.log(`[transcribe] ${job.data.source} auto-chain → summarize`)
+    await summarizeQueue.add('chain-summarize', { stationId: job.data?.stationId, source: job.data.source, chain: true })
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -131,10 +139,12 @@ summarizeWorker.on('completed', async (job) => {
       await summarizeQueue.add('summarize-continue', { stationId: job.data?.stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) })
     }
   }
-  // Auto-chain to compliance when triggered from audit
-  if (job.data?.source === 'audit' && job.data?.chain && count > 0) {
-    console.log('[summarize] audit auto-chain → compliance')
-    await complianceQueue.add('audit-compliance', { stationId: job.data?.stationId, source: 'audit' })
+  // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).
+  // This is the final automated stage — episodes get compliance-checked without a
+  // manual trigger. Skipped while paused.
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused())) {
+    console.log(`[summarize] ${job.data.source} auto-chain → compliance`)
+    await complianceQueue.add('chain-compliance', { stationId: job.data?.stationId, source: job.data.source })
   }
 })
 summarizeWorker.on('failed', (job, err) => {
