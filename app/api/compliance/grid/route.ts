@@ -9,6 +9,7 @@ import {
   weeksInWindow,
 } from '@/lib/compliance-grid'
 import type { GridAiring, GridWindow } from '@/lib/types'
+import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -127,10 +128,12 @@ async function buildWindow(
   if (epIds.length > 0) {
     let flagQuery = supabase
       .from('compliance_flags')
-      .select('episode_id, flag_type, severity, resolved, episode_log!inner(station_id)')
+      .select('episode_id, flag_type, severity, review_status, episode_log!inner(station_id)')
       .eq('episode_log.station_id', stationId)
       .in('episode_id', epIds)
-    if (!filters.includeResolved) flagQuery = flagQuery.eq('resolved', false)
+    // Default: only active offenses (investigating + violation). includeResolved
+    // widens it to every flag, including suggested + dismissed.
+    if (!filters.includeResolved) flagQuery = flagQuery.in('review_status', ACTIVE_REVIEW_STATUSES)
     if (filters.flagTypes.length > 0) {
       const realTypes = filters.flagTypes.filter((t) => FLAG_TYPES.has(t))
       // If the only requested type is summary_discrepancy, no flag rows match.

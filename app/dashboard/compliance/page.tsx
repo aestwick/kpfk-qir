@@ -8,6 +8,7 @@ import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { useToast } from '@/app/components/toast'
 import { DAY_NAMES_SHORT } from '@/lib/compliance-grid'
+import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
 
 interface ComplianceFlag {
   id: number
@@ -17,7 +18,7 @@ interface ComplianceFlag {
   excerpt: string | null
   timestamp_seconds: number | null
   details: string | null
-  resolved: boolean
+  review_status: ReviewStatus
   resolved_by: string | null
   resolved_notes: string | null
   created_at: string
@@ -54,7 +55,22 @@ interface Stats {
   byType: Record<string, number>
   bySeverity: Record<string, number>
   total: number
+  pendingTriage: number
 }
+
+// Status filter options for the list. 'active' is a UI convenience that maps
+// to investigating + violation on the API.
+const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: 'All statuses' },
+  { value: 'suggested', label: 'Suggested (to review)' },
+  { value: 'active', label: 'Active (Investigating + Violation)' },
+  { value: 'investigating', label: 'Investigating' },
+  { value: 'violation', label: 'Violation' },
+  { value: 'dismissed', label: 'Dismissed' },
+]
+
+// Status transitions offered as quick actions, given the flag's current status.
+const STATUS_ACTIONS: ReviewStatus[] = ['investigating', 'violation', 'dismissed', 'suggested']
 
 const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency'] as const
 const SEVERITIES = ['info', 'warning', 'critical']
@@ -117,7 +133,9 @@ export default function CompliancePage() {
   // Filters from URL
   const [filterType, setFilterType] = useState(searchParams.get('type') ?? '')
   const [filterSeverity, setFilterSeverity] = useState(searchParams.get('severity') ?? '')
-  const [filterResolution, setFilterResolution] = useState(searchParams.get('resolution') ?? 'unresolved')
+  // Default to the triage inbox (untriaged AI suggestions) — that's where the
+  // review work is. An empty status= param from the grid drill means "all".
+  const [filterStatus, setFilterStatus] = useState(searchParams.get('status') ?? 'suggested')
   const [filterQuarter, setFilterQuarter] = useState(searchParams.get('quarter') ?? '')
   const [filterShow, setFilterShow] = useState(searchParams.get('show') ?? '')
   // Day/time drill-through from the compliance grid (set via URL params). Not an
@@ -135,7 +153,7 @@ export default function CompliancePage() {
 
   // Data
   const [flags, setFlags] = useState<ComplianceFlag[]>([])
-  const [stats, setStats] = useState<Stats>({ byType: {}, bySeverity: {}, total: 0 })
+  const [stats, setStats] = useState<Stats>({ byType: {}, bySeverity: {}, total: 0, pendingTriage: 0 })
   const [showHealth, setShowHealth] = useState<ShowHealth[]>([])
   const [showHealthExpanded, setShowHealthExpanded] = useState(false)
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 0 })
@@ -146,10 +164,11 @@ export default function CompliancePage() {
   // Selection for bulk resolve
   const [selected, setSelected] = useState<Set<number>>(new Set())
 
-  // Resolve UI
-  const [resolveTarget, setResolveTarget] = useState<number | null>(null)
+  // Status-change UI. statusTarget tracks which flag is being given which
+  // status while the reviewer types a note inline.
+  const [statusTarget, setStatusTarget] = useState<{ id: number; status: ReviewStatus } | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
-  const [bulkResolveOpen, setBulkResolveOpen] = useState(false)
+  const [bulkStatus, setBulkStatus] = useState<ReviewStatus | null>(null)
   const [bulkNotes, setBulkNotes] = useState('')
 
   // Loading states for actions
@@ -194,8 +213,8 @@ export default function CompliancePage() {
     const params = new URLSearchParams()
     if (filterType) params.set('flag_type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
-    if (filterResolution === 'unresolved') params.set('unresolved', 'true')
-    else if (filterResolution === 'resolved') params.set('resolved', 'true')
+    if (filterStatus === 'active') params.set('status', 'investigating,violation')
+    else if (filterStatus) params.set('status', filterStatus)
     if (filterQuarter) {
       const [y, q] = filterQuarter.split('-')
       params.set('year', y)
@@ -212,7 +231,7 @@ export default function CompliancePage() {
     params.set('sort', 'created_at')
     params.set('dir', 'desc')
     return params
-  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, slotFilter, page])
+  }, [filterType, filterSeverity, filterStatus, filterQuarter, filterShow, slotFilter, page])
 
   // Fetch flags list
   const fetchFlags = useCallback(async () => {
@@ -235,7 +254,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance?stats=true')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setStats(data.stats ?? { byType: {}, bySeverity: {}, total: 0 })
+      setStats(data.stats ?? { byType: {}, bySeverity: {}, total: 0, pendingTriage: 0 })
     } catch (err) {
       console.error('Failed to fetch stats:', err)
     }
@@ -273,7 +292,7 @@ export default function CompliancePage() {
     const params = new URLSearchParams()
     if (filterType) params.set('type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
-    if (filterResolution) params.set('resolution', filterResolution)
+    if (filterStatus) params.set('status', filterStatus)
     if (filterQuarter) params.set('quarter', filterQuarter)
     if (filterShow) params.set('show', filterShow)
     if (slotFilter) {
@@ -285,7 +304,7 @@ export default function CompliancePage() {
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     router.replace(`/dashboard/compliance${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [filterType, filterSeverity, filterResolution, filterQuarter, filterShow, slotFilter, page, router])
+  }, [filterType, filterSeverity, filterStatus, filterQuarter, filterShow, slotFilter, page, router])
 
   // Refetch flags when filters/page change (skip initial render)
   const filterChangeCount = useRef(0)
@@ -317,31 +336,31 @@ export default function CompliancePage() {
     }
   }
 
-  // Resolve single flag
-  async function resolveFlag(id: number) {
+  // Set a single flag's review status
+  async function setFlagStatus(id: number, status: ReviewStatus, notes: string) {
     if (actionLoading) return
     setActionLoading(true)
     try {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, resolved: true, resolved_notes: resolveNotes, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ id, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      toast('success', 'Flag resolved')
-      setResolveTarget(null)
+      toast('success', `Marked ${REVIEW_STATUS_LABELS[status]}`)
+      setStatusTarget(null)
       setResolveNotes('')
       await Promise.all([fetchFlags(), fetchStats()])
     } catch (err) {
-      console.error('Failed to resolve flag:', err)
-      toast('error', 'Failed to resolve flag')
+      console.error('Failed to update flag status:', err)
+      toast('error', 'Failed to update flag')
     } finally {
       setActionLoading(false)
     }
   }
 
-  // Bulk resolve
-  async function bulkResolve() {
+  // Bulk-set the review status of the selected flags
+  async function bulkSetStatus(status: ReviewStatus) {
     if (actionLoading) return
     setActionLoading(true)
     try {
@@ -349,17 +368,17 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, resolved: true, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ ids, review_status: status, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      toast('success', `Resolved ${ids.length} flag${ids.length > 1 ? 's' : ''}`)
+      toast('success', `Marked ${ids.length} flag${ids.length > 1 ? 's' : ''} ${REVIEW_STATUS_LABELS[status]}`)
       setSelected(new Set())
-      setBulkResolveOpen(false)
+      setBulkStatus(null)
       setBulkNotes('')
       await Promise.all([fetchFlags(), fetchStats()])
     } catch (err) {
-      console.error('Failed to bulk resolve:', err)
-      toast('error', 'Failed to resolve flags')
+      console.error('Failed to bulk update:', err)
+      toast('error', 'Failed to update flags')
     } finally {
       setActionLoading(false)
     }
@@ -506,9 +525,9 @@ export default function CompliancePage() {
     if (stationSlug) params.set('station', decodeURIComponent(stationSlug))
     if (filterType) params.set('type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
-    if (filterResolution === 'unresolved') params.set('unresolved', 'true')
-    else if (filterResolution === 'resolved') params.set('unresolved', 'false')
-    else params.set('unresolved', 'false') // "all" shows everything
+    // The public report distinguishes active-offenses-only vs. everything.
+    const activeViews = ['active', 'investigating', 'violation']
+    params.set('unresolved', activeViews.includes(filterStatus) ? 'true' : 'false')
     if (filterQuarter) params.set('quarter', filterQuarter)
     if (filterShow) params.set('show', filterShow)
     return params.toString()
@@ -568,13 +587,26 @@ export default function CompliancePage() {
         </div>
       </div>
 
-      {/* Summary Stats Strip — uses dedicated stats query for accurate totals */}
+      {/* Triage inbox callout — raw AI suggestions awaiting review */}
+      {stats.pendingTriage > 0 && (
+        <button
+          onClick={() => { setFilterStatus('suggested'); setPage(1) }}
+          className="w-full text-left bg-gray-50 border rounded-xl px-4 py-3 flex items-center justify-between hover:bg-gray-100 dark:bg-warm-800 dark:border-warm-700 dark:hover:bg-warm-700/50"
+        >
+          <span className="text-sm text-gray-700 dark:text-warm-200">
+            <span className="font-semibold">{stats.pendingTriage}</span> suggested flag{stats.pendingTriage !== 1 ? 's' : ''} awaiting review
+          </span>
+          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Review &rarr;</span>
+        </button>
+      )}
+
+      {/* Summary Stats Strip — active offenses (investigating + violation) by type */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {FLAG_TYPES.map((type) => (
           <div key={type} className="bg-white rounded-xl shadow-sm border p-3 dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide dark:text-warm-500">{typeLabels[type]}</p>
             <p className="text-2xl font-bold text-gray-900 mt-1 dark:text-warm-100">{stats.byType[type] ?? 0}</p>
-            <p className="text-xs text-gray-500 dark:text-warm-400">unresolved</p>
+            <p className="text-xs text-gray-500 dark:text-warm-400">active</p>
           </div>
         ))}
       </div>
@@ -698,15 +730,15 @@ export default function CompliancePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Resolution</label>
+            <label className="block text-xs font-medium text-gray-500 dark:text-warm-400 mb-1">Status</label>
             <select
-              value={filterResolution}
-              onChange={(e) => { setFilterResolution(e.target.value); setPage(1) }}
+              value={filterStatus}
+              onChange={(e) => { setFilterStatus(e.target.value); setPage(1) }}
               className="border rounded-lg px-3 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             >
-              <option value="">All</option>
-              <option value="unresolved">Unresolved</option>
-              <option value="resolved">Resolved</option>
+              {STATUS_FILTER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -746,9 +778,9 @@ export default function CompliancePage() {
               </span>
             </div>
           )}
-          {(filterType || filterSeverity || filterResolution || filterQuarter || filterShow || slotFilter) && (
+          {(filterType || filterSeverity || filterStatus || filterQuarter || filterShow || slotFilter) && (
             <button
-              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterResolution(''); setFilterQuarter(''); setFilterShow(''); setSlotFilter(null); setPage(1) }}
+              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterStatus(''); setFilterQuarter(''); setFilterShow(''); setSlotFilter(null); setPage(1) }}
               className="text-xs text-gray-500 hover:text-gray-700 underline dark:text-warm-400 dark:hover:text-warm-200"
             >
               Clear filters
@@ -759,15 +791,29 @@ export default function CompliancePage() {
 
       {/* Bulk Actions */}
       {selected.size > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between dark:bg-blue-900/20 dark:border-blue-800/40">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 dark:bg-blue-900/20 dark:border-blue-800/40">
           <span className="text-sm text-blue-800 font-medium dark:text-blue-300">{selected.size} flag{selected.size > 1 ? 's' : ''} selected</span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => setBulkResolveOpen(true)}
+              onClick={() => { setBulkStatus('investigating'); setBulkNotes('') }}
               disabled={actionLoading}
-              className="px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
+              className="px-3 py-1.5 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50"
             >
-              Resolve Selected
+              Investigating
+            </button>
+            <button
+              onClick={() => { setBulkStatus('violation'); setBulkNotes('') }}
+              disabled={actionLoading}
+              className="px-3 py-1.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+            >
+              Violation
+            </button>
+            <button
+              onClick={() => { setBulkStatus('dismissed'); setBulkNotes('') }}
+              disabled={actionLoading}
+              className="px-3 py-1.5 text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              Dismiss
             </button>
             <button
               onClick={() => setSelected(new Set())}
@@ -779,32 +825,34 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {/* Bulk resolve notes dialog */}
-      {bulkResolveOpen && (
+      {/* Bulk status-change notes dialog */}
+      {bulkStatus && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setBulkResolveOpen(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => setBulkStatus(null)} />
           <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6 dark:bg-surface-raised dark:shadow-card-dark">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2 dark:text-warm-100">Bulk Resolve {selected.size} Flags</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2 dark:text-warm-100">
+              Mark {selected.size} flag{selected.size > 1 ? 's' : ''} as {REVIEW_STATUS_LABELS[bulkStatus]}
+            </h3>
             <textarea
               value={bulkNotes}
               onChange={(e) => setBulkNotes(e.target.value)}
-              placeholder="Resolution notes (optional)..."
+              placeholder="Review notes (optional)..."
               className="w-full border rounded-lg p-3 text-sm mb-4 h-24 resize-none dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             />
             <div className="flex justify-end gap-3">
               <button
-                onClick={() => setBulkResolveOpen(false)}
+                onClick={() => setBulkStatus(null)}
                 disabled={actionLoading}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50 dark:bg-warm-700 dark:text-warm-200 dark:hover:bg-warm-600"
               >
                 Cancel
               </button>
               <button
-                onClick={bulkResolve}
+                onClick={() => bulkSetStatus(bulkStatus)}
                 disabled={actionLoading}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
               >
-                {actionLoading ? 'Resolving...' : 'Resolve All'}
+                {actionLoading ? 'Saving...' : `Mark ${REVIEW_STATUS_LABELS[bulkStatus]}`}
               </button>
             </div>
           </div>
@@ -896,52 +944,51 @@ export default function CompliancePage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {flag.resolved ? (
-                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">Resolved</span>
-                      ) : (
-                        <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Open</span>
-                      )}
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${REVIEW_STATUS_BADGE[flag.review_status]}`}>
+                        {REVIEW_STATUS_LABELS[flag.review_status]}
+                      </span>
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                      {!flag.resolved && (
-                        <>
-                          {resolveTarget === flag.id ? (
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={resolveNotes}
-                                onChange={(e) => setResolveNotes(e.target.value)}
-                                placeholder="Notes..."
-                                className="border rounded px-2 py-1 text-xs w-32 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
-                                autoFocus
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') resolveFlag(flag.id)
-                                  if (e.key === 'Escape') { setResolveTarget(null); setResolveNotes('') }
-                                }}
-                              />
-                              <button
-                                onClick={() => resolveFlag(flag.id)}
-                                disabled={actionLoading}
-                                className="text-xs text-green-600 hover:text-green-800 font-medium disabled:opacity-50"
-                              >
-                                {actionLoading ? '...' : 'Save'}
-                              </button>
-                              <button
-                                onClick={() => { setResolveTarget(null); setResolveNotes('') }}
-                                className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-500 dark:hover:text-warm-300"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
+                      {statusTarget?.id === flag.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={resolveNotes}
+                            onChange={(e) => setResolveNotes(e.target.value)}
+                            placeholder="Notes (optional)..."
+                            className="border rounded px-2 py-1 text-xs w-32 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') setFlagStatus(flag.id, statusTarget.status, resolveNotes)
+                              if (e.key === 'Escape') { setStatusTarget(null); setResolveNotes('') }
+                            }}
+                          />
+                          <button
+                            onClick={() => setFlagStatus(flag.id, statusTarget.status, resolveNotes)}
+                            disabled={actionLoading}
+                            className="text-xs text-green-600 hover:text-green-800 font-medium disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {actionLoading ? '...' : `Save: ${REVIEW_STATUS_LABELS[statusTarget.status]}`}
+                          </button>
+                          <button
+                            onClick={() => { setStatusTarget(null); setResolveNotes('') }}
+                            className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-500 dark:hover:text-warm-300"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          {STATUS_ACTIONS.filter((s) => s !== flag.review_status).map((s) => (
                             <button
-                              onClick={() => setResolveTarget(flag.id)}
-                              className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                              key={s}
+                              onClick={() => { setStatusTarget({ id: flag.id, status: s }); setResolveNotes('') }}
+                              className="text-xs font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400"
                             >
-                              Resolve
+                              {s === 'suggested' ? 'Reset' : REVIEW_STATUS_LABELS[s]}
                             </button>
-                          )}
-                        </>
+                          ))}
+                        </div>
                       )}
                     </td>
                   </tr>

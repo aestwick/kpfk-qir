@@ -2,6 +2,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
 import PrintButton from './print-button'
 import type { Metadata } from 'next'
+import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,7 @@ interface ComplianceFlag {
   excerpt: string | null
   details: string | null
   timestamp_seconds: number | null
-  resolved: boolean
+  review_status: string
   resolved_by: string | null
   resolved_notes: string | null
 }
@@ -109,7 +110,9 @@ export default async function ComplianceReportPage({
   const flagType = (searchParams.type as string) ?? ''
   const severity = (searchParams.severity as string) ?? ''
   const quarter = (searchParams.quarter as string) ?? ''
-  const unresolvedOnly = (searchParams.unresolved as string) !== 'false' // default true
+  // "unresolved" here means active offenses only (investigating + violation);
+  // default true. Pass unresolved=false to include every flag.
+  const activeOnly = (searchParams.unresolved as string) !== 'false'
   const showFilter = (searchParams.show as string) ?? ''
 
   // Resolve the station this report is for (passed by the dashboard link).
@@ -129,7 +132,7 @@ export default async function ComplianceReportPage({
 
   if (flagType) query = query.eq('flag_type', flagType)
   if (severity) query = query.eq('severity', severity)
-  if (unresolvedOnly) query = query.eq('resolved', false)
+  if (activeOnly) query = query.in('review_status', ACTIVE_REVIEW_STATUSES)
   if (showFilter) query = query.ilike('episode_log.show_name', `%${showFilter}%`)
 
   if (quarter) {
@@ -201,7 +204,7 @@ export default async function ComplianceReportPage({
       excerpt: flag.excerpt,
       details: flag.details,
       timestamp_seconds: flag.timestamp_seconds,
-      resolved: flag.resolved,
+      review_status: flag.review_status,
       resolved_by: flag.resolved_by,
       resolved_notes: flag.resolved_notes,
     })
@@ -228,7 +231,7 @@ export default async function ComplianceReportPage({
   const filterParts: string[] = []
   if (flagType) filterParts.push(typeLabels[flagType] ?? flagType)
   if (severity) filterParts.push(`${severity} only`)
-  if (unresolvedOnly) filterParts.push('unresolved only')
+  if (activeOnly) filterParts.push('active offenses only')
   if (showFilter) filterParts.push(`show: "${showFilter}"`)
 
   return (

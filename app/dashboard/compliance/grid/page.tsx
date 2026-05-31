@@ -131,7 +131,9 @@ export default function ComplianceGridPage() {
   // severity). The list page understands these; multi-select facets are dropped.
   const drillBaseParams = useCallback(() => {
     const p = new URLSearchParams()
-    p.set('resolution', includeResolved ? '' : 'unresolved')
+    // Mirror the grid's offense definition on the list page: active offenses
+    // by default, every status when resolved are included.
+    p.set('status', includeResolved ? '' : 'active')
     if (flagTypes.length === 1 && flagTypes[0] !== 'summary_discrepancy') p.set('type', flagTypes[0])
     if (severities.length === 1) p.set('severity', severities[0])
     return p
@@ -384,7 +386,7 @@ function Controls(p: ControlsProps) {
           </div>
         </div>
         <ToggleChip label="Compare A/B" on={p.compare} onClick={() => p.setCompare(!p.compare)} />
-        <ToggleChip label="Include resolved" on={p.includeResolved} onClick={() => p.setIncludeResolved(!p.includeResolved)} />
+        <ToggleChip label="Include non-active" on={p.includeResolved} onClick={() => p.setIncludeResolved(!p.includeResolved)} />
         <ToggleChip label="Discrepancies" on={p.includeDiscrepancies} onClick={() => p.setIncludeDiscrepancies(!p.includeDiscrepancies)} />
       </div>
 

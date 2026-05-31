@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { datesForDowInWindow } from '@/lib/compliance-grid'
+import { ACTIVE_REVIEW_STATUSES, REVIEW_STATUSES, isReviewStatus } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -13,24 +14,30 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
 
-    // GET /api/compliance?stats=true — return unresolved counts by type and severity
+    // GET /api/compliance?stats=true — active-offense counts by type and
+    // severity (investigating + violation), plus how many raw suggestions are
+    // still awaiting triage.
     if (searchParams.get('stats') === 'true') {
       const { data, error } = await supabase
         .from('compliance_flags')
-        .select('flag_type, severity, episode_log!inner(station_id)')
+        .select('flag_type, severity, review_status, episode_log!inner(station_id)')
         .eq('episode_log.station_id', stationId)
-        .eq('resolved', false)
 
       if (error) throw error
 
       const byType: Record<string, number> = {}
       const bySeverity: Record<string, number> = {}
+      let total = 0
+      let pendingTriage = 0
       for (const flag of data ?? []) {
+        if (flag.review_status === 'suggested') { pendingTriage++; continue }
+        if (flag.review_status === 'dismissed') continue
         byType[flag.flag_type] = (byType[flag.flag_type] ?? 0) + 1
         bySeverity[flag.severity] = (bySeverity[flag.severity] ?? 0) + 1
+        total++
       }
 
-      return NextResponse.json({ stats: { byType, bySeverity, total: (data ?? []).length } })
+      return NextResponse.json({ stats: { byType, bySeverity, total, pendingTriage } })
     }
 
     // GET /api/compliance?by_show=true — per-show compliance summary
@@ -44,12 +51,13 @@ export async function GET(request: NextRequest) {
 
       if (epError) throw epError
 
-      // Get all unresolved flags (scoped to this station via episode_log join)
+      // Get all active flags (investigating + violation), scoped to this
+      // station via the episode_log join.
       const { data: flagRows, error: flagError } = await supabase
         .from('compliance_flags')
         .select('episode_id, flag_type, severity, episode_log!inner(station_id)')
         .eq('episode_log.station_id', stationId)
-        .eq('resolved', false)
+        .in('review_status', ACTIVE_REVIEW_STATUSES)
 
       if (flagError) throw flagError
 
@@ -125,8 +133,13 @@ export async function GET(request: NextRequest) {
     const episodeId = searchParams.get('episode_id')
     const flagType = searchParams.get('flag_type')
     const severity = searchParams.get('severity')
-    const unresolvedOnly = searchParams.get('unresolved') === 'true'
-    const resolvedOnly = searchParams.get('resolved') === 'true'
+    // status=suggested,investigating,... (comma-separated review statuses).
+    // Legacy aliases: unresolved=true → active offenses; resolved=true →
+    // dismissed (the closest analog to the old boolean).
+    const statusFilter = (searchParams.get('status') ?? '')
+      .split(',').map((s) => s.trim()).filter(isReviewStatus)
+    if (searchParams.get('unresolved') === 'true') statusFilter.push(...ACTIVE_REVIEW_STATUSES)
+    if (searchParams.get('resolved') === 'true') statusFilter.push('dismissed')
     const quarter = searchParams.get('quarter')
     const year = searchParams.get('year')
     const show = searchParams.get('show')
@@ -139,7 +152,7 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') ?? '1')
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
     const offset = (page - 1) * limit
-    const allowedSortColumns = ['created_at', 'flag_type', 'severity', 'resolved']
+    const allowedSortColumns = ['created_at', 'flag_type', 'severity', 'review_status']
     const sortByRaw = searchParams.get('sort') ?? 'created_at'
     const sortBy = allowedSortColumns.includes(sortByRaw) ? sortByRaw : 'created_at'
     const sortDir = searchParams.get('dir') === 'asc'
@@ -155,8 +168,7 @@ export async function GET(request: NextRequest) {
     if (episodeId) query = query.eq('episode_id', parseInt(episodeId))
     if (flagType) query = query.eq('flag_type', flagType)
     if (severity) query = query.eq('severity', severity)
-    if (unresolvedOnly) query = query.eq('resolved', false)
-    if (resolvedOnly) query = query.eq('resolved', true)
+    if (statusFilter.length) query = query.in('review_status', Array.from(new Set(statusFilter)))
 
     // Filter by quarter/year via the joined episode_log
     if (quarter && year) {
@@ -207,7 +219,8 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PATCH /api/compliance — resolve/unresolve flags (single or bulk)
+// PATCH /api/compliance — set a flag's review status (single or bulk).
+// Body: { id | ids, review_status, resolved_by?, resolved_notes? }
 export async function PATCH(request: NextRequest) {
   try {
     const result = await getStationContext(request)
@@ -218,15 +231,23 @@ export async function PATCH(request: NextRequest) {
     if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
+    const { review_status, resolved_by, resolved_notes } = body
 
-    // Bulk resolve: { ids: number[], resolved_by, resolved_notes }
+    if (!isReviewStatus(review_status)) {
+      return NextResponse.json(
+        { error: `review_status must be one of: ${REVIEW_STATUSES.join(', ')}` },
+        { status: 400 },
+      )
+    }
+
+    const update: Record<string, unknown> = { review_status }
+    if (resolved_by) update.resolved_by = resolved_by
+    if (resolved_notes !== undefined) update.resolved_notes = resolved_notes
+
+    // Bulk: { ids: number[], review_status, ... }
     if (Array.isArray(body.ids)) {
-      const { ids, resolved, resolved_by, resolved_notes } = body
+      const { ids } = body
       if (!ids.length) return NextResponse.json({ error: 'ids array required' }, { status: 400 })
-
-      const update: Record<string, unknown> = { resolved: resolved ?? true }
-      if (resolved_by) update.resolved_by = resolved_by
-      if (resolved_notes !== undefined) update.resolved_notes = resolved_notes
 
       // compliance_flags has no station_id; restrict the update to ids whose
       // episode belongs to this station (resolved via the episode_log join).
@@ -251,13 +272,9 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ ok: true, count: ownedIds.length })
     }
 
-    // Single resolve: { id, resolved, resolved_by, resolved_notes }
-    const { id, resolved, resolved_by, resolved_notes } = body
+    // Single: { id, review_status, ... }
+    const { id } = body
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
-
-    const update: Record<string, unknown> = { resolved: resolved ?? true }
-    if (resolved_by) update.resolved_by = resolved_by
-    if (resolved_notes !== undefined) update.resolved_notes = resolved_notes
 
     // Confirm the flag's episode belongs to this station before updating.
     const { data: ownedFlag, error: ownedError } = await supabase
