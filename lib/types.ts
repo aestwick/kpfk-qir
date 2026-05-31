@@ -1,3 +1,5 @@
+import type { ReviewStatus } from './compliance-status'
+
 export type StationRole = 'viewer' | 'editor' | 'admin'
 
 export interface Station {
@@ -187,7 +189,7 @@ export interface ComplianceFlag {
   excerpt: string | null
   timestamp_seconds: number | null
   details: string | null
-  resolved: boolean
+  review_status: ReviewStatus
   resolved_by: string | null
   resolved_notes: string | null
   created_at: string

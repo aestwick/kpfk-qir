@@ -160,11 +160,11 @@ function runValidation(draft: QirDraft, complianceSummary: Record<string, { coun
   const totalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.count, 0)
   const criticalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.critical, 0)
   if (totalFlags === 0) {
-    checks.push({ label: 'Compliance', status: 'pass', detail: 'No unresolved compliance flags' })
+    checks.push({ label: 'Compliance', status: 'pass', detail: 'No active compliance flags' })
   } else if (criticalFlags > 0) {
-    checks.push({ label: 'Compliance', status: 'fail', detail: `${criticalFlags} critical compliance flags unresolved` })
+    checks.push({ label: 'Compliance', status: 'fail', detail: `${criticalFlags} critical compliance flags active` })
   } else {
-    checks.push({ label: 'Compliance', status: 'warn', detail: `${totalFlags} compliance warnings unresolved` })
+    checks.push({ label: 'Compliance', status: 'warn', detail: `${totalFlags} active compliance warnings` })
   }
 
   return checks

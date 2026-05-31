@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import { isActiveReviewStatus } from '@/lib/compliance-status'
 
 interface Show {
   key: string
@@ -15,7 +16,7 @@ interface ComplianceFlag {
   severity: string
   excerpt: string | null
   details: string | null
-  resolved: boolean
+  review_status: string
 }
 
 interface AuditEpisode {
@@ -755,20 +756,20 @@ export default function ShowAuditPage() {
           {/* Compliance overview */}
           {(() => {
             const allFlags = completedEpisodes.flatMap((ep) => ep.compliance_flags)
-            const unresolvedFlags = allFlags.filter((f) => !f.resolved)
-            const criticalCount = unresolvedFlags.filter((f) => f.severity === 'critical').length
-            const warningCount = unresolvedFlags.filter((f) => f.severity === 'warning').length
+            const activeFlags = allFlags.filter((f) => isActiveReviewStatus(f.review_status))
+            const criticalCount = activeFlags.filter((f) => f.severity === 'critical').length
+            const warningCount = activeFlags.filter((f) => f.severity === 'warning').length
 
             return (
               <div className="bg-white dark:bg-warm-800 rounded-xl shadow-sm border dark:border-warm-700 p-5">
                 <h3 className="text-sm font-semibold text-gray-700 dark:text-warm-200 mb-3">Compliance Summary</h3>
-                {unresolvedFlags.length === 0 ? (
-                  <p className="text-sm text-green-600 dark:text-green-400">No unresolved compliance flags</p>
+                {activeFlags.length === 0 ? (
+                  <p className="text-sm text-green-600 dark:text-green-400">No active compliance flags</p>
                 ) : (
                   <div className="flex gap-4">
                     <span className="text-sm text-red-600">Critical: {criticalCount}</span>
                     <span className="text-sm text-yellow-600">Warnings: {warningCount}</span>
-                    <span className="text-sm text-blue-600">Info: {unresolvedFlags.length - criticalCount - warningCount}</span>
+                    <span className="text-sm text-blue-600">Info: {activeFlags.length - criticalCount - warningCount}</span>
                   </div>
                 )}
               </div>
@@ -801,9 +802,9 @@ export default function ShowAuditPage() {
                         {ep.issue_category}
                       </span>
                     )}
-                    {ep.compliance_flags.filter((f) => !f.resolved).length > 0 && (
+                    {ep.compliance_flags.filter((f) => isActiveReviewStatus(f.review_status)).length > 0 && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">
-                        {ep.compliance_flags.filter((f) => !f.resolved).length} flag{ep.compliance_flags.filter((f) => !f.resolved).length !== 1 ? 's' : ''}
+                        {ep.compliance_flags.filter((f) => isActiveReviewStatus(f.review_status)).length} flag{ep.compliance_flags.filter((f) => isActiveReviewStatus(f.review_status)).length !== 1 ? 's' : ''}
                       </span>
                     )}
                   </div>
@@ -819,9 +820,9 @@ export default function ShowAuditPage() {
                     {ep.duration && <span>{ep.duration} min</span>}
                     {ep.start_time && <span>Aired: {ep.start_time}</span>}
                   </div>
-                  {ep.compliance_flags.filter((f) => !f.resolved).length > 0 && (
+                  {ep.compliance_flags.filter((f) => isActiveReviewStatus(f.review_status)).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {ep.compliance_flags.filter((f) => !f.resolved).map((flag, i) => (
+                      {ep.compliance_flags.filter((f) => isActiveReviewStatus(f.review_status)).map((flag, i) => (
                         <span key={i} className={`text-[10px] px-2 py-0.5 rounded ${severityColors[flag.severity]}`}>
                           {flag.flag_type}: {flag.details ?? flag.excerpt ?? ''}
                         </span>
