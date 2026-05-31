@@ -621,7 +621,7 @@ export default function DashboardOverview() {
               <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
                 <h3 className="section-header">Compliance</h3>
                 <span className={`badge tabular-nums ${totalCritical > 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                  {totalFlags} unresolved
+                  {totalFlags} active
                 </span>
               </div>
               <div className="px-5 py-4">

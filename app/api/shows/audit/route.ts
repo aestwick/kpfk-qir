@@ -97,9 +97,9 @@ export async function GET(request: NextRequest) {
     // episodeIds are already scoped to this station (from the query above), so
     // these by-id batch lookups cannot cross stations.
     const [complianceFlags, usageRows] = await Promise.all([
-      batchInQuery<{ episode_id: number; flag_type: string; severity: string; excerpt: string | null; details: string | null; resolved: boolean }>(
+      batchInQuery<{ episode_id: number; flag_type: string; severity: string; excerpt: string | null; details: string | null; review_status: string }>(
         supabase, 'compliance_flags', 'episode_id', episodeIds,
-        'episode_id, flag_type, severity, excerpt, details, resolved'
+        'episode_id, flag_type, severity, excerpt, details, review_status'
       ),
       batchInQuery<{ episode_id: number; estimated_cost: number }>(
         supabase, 'usage_log', 'episode_id', episodeIds,

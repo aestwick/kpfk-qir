@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { ACTIVE_REVIEW_STATUSES, isReviewStatus } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,19 +16,24 @@ export async function GET(request: NextRequest) {
     const flagType = searchParams.get('flag_type')
     const severity = searchParams.get('severity')
     const quarter = searchParams.get('quarter') // e.g. "2026-1"
+    // status=... (comma-separated review statuses). Legacy: unresolved=true →
+    // active offenses (investigating + violation).
+    const statusFilter = (searchParams.get('status') ?? '')
+      .split(',').map((s) => s.trim()).filter(isReviewStatus)
     const unresolvedOnly = searchParams.get('unresolved') === 'true'
+    if (unresolvedOnly) statusFilter.push(...ACTIVE_REVIEW_STATUSES)
     const show = searchParams.get('show')
 
     // Build query (scoped to station via the inner episode_log join)
     let query = supabase
       .from('compliance_flags')
-      .select('*, episode_log!inner(show_name, show_key, air_date, air_time, duration, headline, host, status, station_id)')
+      .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host, status, station_id)')
       .eq('episode_log.station_id', stationId)
       .order('created_at', { ascending: false })
 
     if (flagType) query = query.eq('flag_type', flagType)
     if (severity) query = query.eq('severity', severity)
-    if (unresolvedOnly) query = query.eq('resolved', false)
+    if (statusFilter.length) query = query.in('review_status', Array.from(new Set(statusFilter)))
     if (show) query = query.ilike('episode_log.show_name', `%${show}%`)
 
     // Filter by quarter via the joined episode_log
@@ -51,7 +57,7 @@ export async function GET(request: NextRequest) {
       show_name: string
       show_key: string
       air_date: string | null
-      air_time: string | null
+      air_start: string | null
       duration: number | null
       headline: string | null
       host: string | null
@@ -98,7 +104,7 @@ export async function GET(request: NextRequest) {
           show_name: ep.show_name ?? key,
           show_key: key,
           air_date: ep.air_date,
-          air_time: ep.air_time,
+          air_start: ep.air_start,
           duration: ep.duration,
           headline: ep.headline,
           host: ep.host,
@@ -114,7 +120,7 @@ export async function GET(request: NextRequest) {
         excerpt: flag.excerpt,
         details: flag.details,
         timestamp_seconds: flag.timestamp_seconds,
-        resolved: flag.resolved,
+        review_status: flag.review_status,
         resolved_by: flag.resolved_by,
         resolved_notes: flag.resolved_notes,
         created_at: flag.created_at,

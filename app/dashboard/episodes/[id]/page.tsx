@@ -10,6 +10,7 @@ import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { BackLink } from '@/app/components/back-link'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import type { SeekToFn } from '@/app/components/episode-media'
+import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
 
 /* ─── lazy-loaded media components ─── */
 const AudioPlayerWithCaptions = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.AudioPlayerWithCaptions })), {
@@ -64,7 +65,7 @@ interface ComplianceFlag {
   excerpt: string | null
   timestamp_seconds: number | null
   details: string | null
-  resolved: boolean
+  review_status: ReviewStatus
   resolved_by: string | null
   resolved_notes: string | null
   created_at: string
@@ -473,23 +474,14 @@ export default function EpisodeDetailPage() {
     }
   }
 
-  async function resolveFlag(flagId: number) {
+  async function setFlagStatus(flagId: number, status: ReviewStatus, notes: string | null) {
     await authedFetch('/api/compliance', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: flagId, resolved: true, resolved_notes: resolveNotes }),
+      body: JSON.stringify({ id: flagId, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
     })
     setResolvingFlag(null)
     setResolveNotes('')
-    fetchEpisode()
-  }
-
-  async function unresolveFlag(flagId: number) {
-    await authedFetch('/api/compliance', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: flagId, resolved: false, resolved_notes: null }),
-    })
     fetchEpisode()
   }
 
@@ -610,8 +602,10 @@ export default function EpisodeDetailPage() {
   )
   if (!episode) return <p className="text-red-600">Episode not found</p>
 
-  const unresolvedFlags = complianceFlags.filter((f) => !f.resolved)
-  const resolvedFlags = complianceFlags.filter((f) => f.resolved)
+  // Open = not yet dismissed (suggested + investigating + violation); dismissed
+  // flags collapse into a "show dismissed" section.
+  const openFlags = complianceFlags.filter((f) => f.review_status !== 'dismissed')
+  const dismissedFlags = complianceFlags.filter((f) => f.review_status === 'dismissed')
 
   // Build metadata grid items — Host and Guest use inline editing
   const metadataItems: { label: string; value: string; editable?: 'host' | 'guest' }[] = [
@@ -759,28 +753,33 @@ export default function EpisodeDetailPage() {
           <div className="px-4 py-3 border-b dark:border-warm-700 flex items-center justify-between">
             <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Compliance Flags</h3>
             <div className="flex items-center gap-2">
-              {unresolvedFlags.length > 0 && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 font-medium">{unresolvedFlags.length} unresolved</span>
+              {openFlags.length > 0 && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300 font-medium">{openFlags.length} open</span>
               )}
-              {resolvedFlags.length > 0 && (
+              {dismissedFlags.length > 0 && (
                 <button
                   onClick={() => setShowResolved(!showResolved)}
                   className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200"
                 >
-                  {showResolved ? 'Hide' : 'Show'} {resolvedFlags.length} resolved
+                  {showResolved ? 'Hide' : 'Show'} {dismissedFlags.length} dismissed
                 </button>
               )}
             </div>
           </div>
           <div className="divide-y dark:divide-warm-700">
-            {unresolvedFlags.map((flag) => (
+            {openFlags.map((flag) => (
               <div key={flag.id} className="px-4 py-3">
                 <div className="flex items-start gap-3">
                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0 mt-0.5 ${SEVERITY_COLORS[flag.severity] ?? SEVERITY_COLORS.warning}`}>
                     {flag.severity}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-warm-100">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-gray-900 dark:text-warm-100">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${REVIEW_STATUS_BADGE[flag.review_status]}`}>
+                        {REVIEW_STATUS_LABELS[flag.review_status]}
+                      </span>
+                    </div>
                     {flag.details && <p className="text-xs text-gray-600 dark:text-warm-400 mt-0.5">{flag.details}</p>}
                     {flag.excerpt && (
                       <button
@@ -848,16 +847,22 @@ export default function EpisodeDetailPage() {
                       Copy
                     </button>
                     {resolvingFlag === flag.id ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
                         <input
                           type="text"
                           value={resolveNotes}
                           onChange={(e) => setResolveNotes(e.target.value)}
                           placeholder="Notes (optional)"
-                          className="border rounded px-2 py-1 text-xs w-48 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+                          className="border rounded px-2 py-1 text-xs w-40 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
                         />
-                        <button onClick={() => resolveFlag(flag.id)} className="text-xs px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700">
-                          Resolve
+                        <button onClick={() => setFlagStatus(flag.id, 'investigating', resolveNotes || null)} className="text-xs px-2 py-1 bg-amber-500 text-white rounded hover:bg-amber-600">
+                          Investigating
+                        </button>
+                        <button onClick={() => setFlagStatus(flag.id, 'violation', resolveNotes || null)} className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700">
+                          Violation
+                        </button>
+                        <button onClick={() => setFlagStatus(flag.id, 'dismissed', resolveNotes || null)} className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700">
+                          Dismiss
                         </button>
                         <button onClick={() => setResolvingFlag(null)} className="text-xs text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200">
                           Cancel
@@ -868,14 +873,14 @@ export default function EpisodeDetailPage() {
                         onClick={() => { setResolvingFlag(flag.id); setResolveNotes('') }}
                         className="text-xs px-2 py-1 border rounded hover:bg-gray-50 text-gray-500 dark:text-warm-400 dark:border-warm-600 dark:hover:bg-warm-700"
                       >
-                        Resolve
+                        Review
                       </button>
                     )}
                   </div>
                 </div>
               </div>
             ))}
-            {showResolved && resolvedFlags.map((flag) => (
+            {showResolved && dismissedFlags.map((flag) => (
               <div key={flag.id} className="px-4 py-3 opacity-60">
                 <div className="flex items-start gap-3">
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-gray-100 text-gray-500 border-gray-200 dark:bg-warm-700 dark:text-warm-400 dark:border-warm-600 shrink-0 mt-0.5 line-through">
@@ -883,11 +888,11 @@ export default function EpisodeDetailPage() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-500 dark:text-warm-400 line-through">{FLAG_TYPE_LABELS[flag.flag_type] ?? flag.flag_type}</p>
-                    {flag.resolved_notes && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Resolved: {flag.resolved_notes}</p>}
+                    {flag.resolved_notes && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">Dismissed: {flag.resolved_notes}</p>}
                     {flag.resolved_by && <p className="text-[10px] text-gray-400 dark:text-warm-500 mt-0.5">by {flag.resolved_by}</p>}
                   </div>
                   <button
-                    onClick={() => unresolveFlag(flag.id)}
+                    onClick={() => setFlagStatus(flag.id, 'suggested', null)}
                     className="text-[10px] text-gray-400 hover:text-gray-600 dark:text-warm-400 dark:hover:text-warm-200 shrink-0"
                   >
                     Undo

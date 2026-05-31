@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
 import PrintButton from './print-button'
 import type { Metadata } from 'next'
+import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,7 @@ interface ComplianceFlag {
   excerpt: string | null
   details: string | null
   timestamp_seconds: number | null
-  resolved: boolean
+  review_status: string
   resolved_by: string | null
   resolved_notes: string | null
 }
@@ -32,7 +33,7 @@ interface EpisodeGroup {
   episode_id: number
   show_name: string
   air_date: string | null
-  air_time: string | null
+  air_start: string | null
   duration: number | null
   headline: string | null
   host: string | null
@@ -110,7 +111,9 @@ export default async function ComplianceReportPage({
   const flagType = (searchParams.type as string) ?? ''
   const severity = (searchParams.severity as string) ?? ''
   const quarter = (searchParams.quarter as string) ?? ''
-  const unresolvedOnly = (searchParams.unresolved as string) !== 'false' // default true
+  // "unresolved" here means active offenses only (investigating + violation);
+  // default true. Pass unresolved=false to include every flag.
+  const activeOnly = (searchParams.unresolved as string) !== 'false'
   const showFilter = (searchParams.show as string) ?? ''
 
   // Resolve the station this report is for (passed by the dashboard link).
@@ -124,13 +127,13 @@ export default async function ComplianceReportPage({
   // (compliance_flags has no station_id column of its own).
   let query = supabaseAdmin
     .from('compliance_flags')
-    .select('*, episode_log!inner(show_name, show_key, air_date, air_time, duration, headline, host)')
+    .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host)')
     .eq('episode_log.station_id', station.id)
     .order('created_at', { ascending: false })
 
   if (flagType) query = query.eq('flag_type', flagType)
   if (severity) query = query.eq('severity', severity)
-  if (unresolvedOnly) query = query.eq('resolved', false)
+  if (activeOnly) query = query.in('review_status', ACTIVE_REVIEW_STATUSES)
   if (showFilter) query = query.ilike('episode_log.show_name', `%${showFilter}%`)
 
   if (quarter) {
@@ -186,7 +189,7 @@ export default async function ComplianceReportPage({
         episode_id: flag.episode_id,
         show_name: ep.show_name ?? key,
         air_date: ep.air_date,
-        air_time: ep.air_time,
+        air_start: ep.air_start,
         duration: ep.duration,
         headline: ep.headline,
         host: ep.host,
@@ -202,7 +205,7 @@ export default async function ComplianceReportPage({
       excerpt: flag.excerpt,
       details: flag.details,
       timestamp_seconds: flag.timestamp_seconds,
-      resolved: flag.resolved,
+      review_status: flag.review_status,
       resolved_by: flag.resolved_by,
       resolved_notes: flag.resolved_notes,
     })
@@ -229,7 +232,7 @@ export default async function ComplianceReportPage({
   const filterParts: string[] = []
   if (flagType) filterParts.push(typeLabels[flagType] ?? flagType)
   if (severity) filterParts.push(`${severity} only`)
-  if (unresolvedOnly) filterParts.push('unresolved only')
+  if (activeOnly) filterParts.push('active offenses only')
   if (showFilter) filterParts.push(`show: "${showFilter}"`)
 
   return (
@@ -336,7 +339,7 @@ export default async function ComplianceReportPage({
                 <div className="mb-2">
                   <p className="font-semibold text-sm">
                     {ep.air_date ?? 'Unknown date'}
-                    {ep.air_time && <span className="text-gray-500 dark:text-warm-400"> at {ep.air_time}</span>}
+                    {ep.air_start && <span className="text-gray-500 dark:text-warm-400"> at {ep.air_start}</span>}
                     {ep.duration && <span className="text-gray-500 dark:text-warm-400"> ({ep.duration} min)</span>}
                   </p>
                   {ep.headline && (

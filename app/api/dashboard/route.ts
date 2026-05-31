@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { getIssueCategories, isPipelinePaused } from '@/lib/settings'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
@@ -158,11 +159,12 @@ export async function GET(request: NextRequest) {
       .eq('station_id', stationId)
       .eq('active', true),
 
-    // 15. Unresolved compliance flags (scoped to station via episode_log join)
+    // 15. Active compliance flags — investigating + violation (scoped to
+    // station via episode_log join)
     supabase
       .from('compliance_flags')
       .select('flag_type, severity, episode_log!inner(station_id)')
-      .eq('resolved', false)
+      .in('review_status', ACTIVE_REVIEW_STATUSES)
       .eq('episode_log.station_id', stationId),
 
     // 16. QIR drafts for current quarter
