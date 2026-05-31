@@ -344,9 +344,12 @@ export async function processCompliance(job: Job) {
     query = query.eq('status', 'summarized')
   }
 
-  // Filter to current quarter (including null air_date episodes created this quarter)
+  // Filter to current quarter (including null air_date episodes created this quarter).
+  // Audit-flagged `priority` episodes are also pulled in regardless of quarter, and
+  // ordered ahead of the backlog, so a compliance audit can complete any show's data.
   const { data: episodes, error } = await query
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .order('priority', { ascending: false })
     .order('created_at', { ascending: true })
     .limit(batchSize)
 
@@ -400,7 +403,7 @@ export async function processCompliance(job: Job) {
         // Still mark as checked - no transcript means nothing to check
         await supabaseAdmin
           .from('episode_log')
-          .update({ status: 'compliance_checked', updated_at: new Date().toISOString() })
+          .update({ status: 'compliance_checked', priority: false, updated_at: new Date().toISOString() })
           .eq('id', episode.id)
         checked++
         continue
@@ -451,7 +454,7 @@ export async function processCompliance(job: Job) {
       // Update status
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'compliance_checked', error_message: null, updated_at: new Date().toISOString() })
+        .update({ status: 'compliance_checked', priority: false, error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episode.id)
 
       checked++
@@ -486,7 +489,7 @@ export async function processCompliance(job: Job) {
   }
 
   const { count: remainingCount } = await remainQuery
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 
   // For show-specific runs, "remaining" means there are more than what we just processed
   const remaining = showKey

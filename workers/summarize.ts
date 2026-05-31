@@ -50,13 +50,16 @@ export async function processSummarize(job: Job) {
   const { start, end } = getCurrentQuarterBounds()
 
   // Get candidate transcribed episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
+  // air_date that were created during this quarter — older ingests didn't populate it).
+  // Audit-flagged `priority` episodes are also pulled in regardless of quarter, and
+  // ordered ahead of the backlog, so a compliance audit can complete any show's data.
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
     .eq('station_id', stationId)
     .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .order('priority', { ascending: false })
     .order('created_at', { ascending: true })
     .limit(batchSize)
 
@@ -250,7 +253,7 @@ ${transcriptText}`
     .select('id', { count: 'exact', head: true })
     .eq('station_id', stationId)
     .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
 
   const remaining = (remainingCount ?? 0) > 0
   if (remaining) {

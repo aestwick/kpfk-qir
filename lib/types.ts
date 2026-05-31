@@ -63,6 +63,7 @@ export interface EpisodeLog {
   issue_category: string | null
   error_message: string | null
   retry_count: number
+  priority: boolean
   created_at: string
   updated_at: string
 }
