@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     // Fetch episodes for these shows in the date range
     const { data: episodes, error: epError } = await supabase
       .from('episode_log')
-      .select('id, show_key, show_name, status, air_date, start_time, duration, headline, host, guest, summary, issue_category, error_message, compliance_status, mp3_url')
+      .select('id, show_key, show_name, status, air_date, start_time, duration, headline, host, guest, summary, issue_category, error_message, compliance_status, mp3_url, retry_count')
       .eq('station_id', stationId)
       .in('show_key', showKeys)
       .gte('air_date', from)

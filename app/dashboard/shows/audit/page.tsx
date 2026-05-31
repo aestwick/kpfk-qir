@@ -34,6 +34,7 @@ interface AuditEpisode {
   error_message: string | null
   compliance_status: string | null
   mp3_url: string
+  retry_count: number
   compliance_flags: ComplianceFlag[]
   actual_cost: number
 }
@@ -62,6 +63,8 @@ const statusColors: Record<string, string> = {
   summarized: 'bg-green-100 text-green-800',
   compliance_checked: 'bg-emerald-100 text-emerald-800',
   failed: 'bg-red-100 text-red-800',
+  transcript_missing: 'bg-red-100 text-red-800',
+  dead: 'bg-gray-200 text-gray-600',
   unavailable: 'bg-gray-100 text-gray-600',
 }
 
@@ -71,8 +74,13 @@ const statusLabels: Record<string, string> = {
   summarized: 'Summarized',
   compliance_checked: 'Checked',
   failed: 'Failed',
+  transcript_missing: 'Transcript Missing',
+  dead: 'Dead',
   unavailable: 'Unavailable',
 }
+
+// Episodes the pipeline has stopped on — the audit offers retry/drop for these.
+const STUCK_STATUSES = new Set(['failed', 'dead', 'transcript_missing'])
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-100 text-red-700',
@@ -97,6 +105,7 @@ export default function ShowAuditPage() {
   const [auditData, setAuditData] = useState<AuditData | null>(null)
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [resolvingId, setResolvingId] = useState<number | null>(null)
   const [processMessage, setProcessMessage] = useState('')
   const [expandedEpisode, setExpandedEpisode] = useState<number | null>(null)
   const [pollCount, setPollCount] = useState(0)
@@ -269,6 +278,25 @@ export default function ShowAuditPage() {
     setProcessing(false)
   }
 
+  // Retry (fresh attempt + priority) or drop (exclude) a stuck episode
+  const handleResolve = async (episodeId: number, action: 'retry' | 'drop') => {
+    if (action === 'drop' && !confirm('Drop this episode? It will be excluded from processing and the report.')) return
+    setResolvingId(episodeId)
+    try {
+      const res = await authedFetch('/api/shows/audit/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episode_ids: [episodeId], action }),
+      })
+      const data = await res.json()
+      setProcessMessage(data.ok ? data.message : `Error: ${data.error}`)
+      if (data.ok) await fetchAudit()
+    } catch {
+      setProcessMessage('Failed to update episode')
+    }
+    setResolvingId(null)
+  }
+
   const handleViewReport = () => {
     setStep('report')
   }
@@ -319,6 +347,9 @@ export default function ShowAuditPage() {
   ) ?? []
 
   const episodesNeedingWork = auditData?.processing.episodesNeedingWork ?? 0
+  const stuckCount = auditData
+    ? (auditData.statusCounts['failed'] ?? 0) + (auditData.statusCounts['dead'] ?? 0) + (auditData.statusCounts['transcript_missing'] ?? 0)
+    : 0
 
   return (
     <div className="space-y-6">
@@ -579,6 +610,17 @@ export default function ShowAuditPage() {
             </div>
           )}
 
+          {/* Stuck episodes notice — these won't complete on their own */}
+          {stuckCount > 0 && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4">
+              <p className="text-sm text-red-800 dark:text-red-300">
+                <strong>{stuckCount} episode{stuckCount !== 1 ? 's' : ''} stuck.</strong>{' '}
+                These have failed repeatedly and won&apos;t complete on their own. Expand an episode below to{' '}
+                <span className="font-medium">Retry</span> it with a fresh attempt or <span className="font-medium">Drop</span> it from the report.
+              </p>
+            </div>
+          )}
+
           {/* Status breakdown */}
           <div className="bg-white dark:bg-warm-800 rounded-xl shadow-sm border dark:border-warm-700 p-5">
             <h3 className="text-sm font-semibold text-gray-700 dark:text-warm-200 mb-3">Status Breakdown</h3>
@@ -667,6 +709,28 @@ export default function ShowAuditPage() {
                       {ep.error_message && (
                         <div className="text-xs bg-red-50 dark:bg-red-900/20 p-2 rounded text-red-600 dark:text-red-400">
                           Error: {ep.error_message}
+                          {ep.retry_count > 0 && <span className="ml-1 opacity-75">(retries: {ep.retry_count})</span>}
+                        </div>
+                      )}
+                      {STUCK_STATUSES.has(ep.status) && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleResolve(ep.id, 'retry')}
+                            disabled={resolvingId === ep.id}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {resolvingId === ep.id ? 'Working…' : 'Retry'}
+                          </button>
+                          <button
+                            onClick={() => handleResolve(ep.id, 'drop')}
+                            disabled={resolvingId === ep.id}
+                            className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-100 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-700 disabled:opacity-50"
+                          >
+                            Drop
+                          </button>
+                          <span className="text-[11px] text-gray-400 dark:text-warm-500">
+                            Retry gives a fresh attempt &amp; prioritizes it; Drop excludes it from the report.
+                          </span>
                         </div>
                       )}
                       {ep.compliance_flags.length > 0 && (
