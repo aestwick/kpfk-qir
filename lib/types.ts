@@ -74,6 +74,12 @@ export interface ShowKey {
   station_id: string
   key: string
   show_name: string
+  /** Explicit grouping identity — feeds sharing a non-null show_group are one logical show. */
+  show_group: string | null
+  /** Display name auto-derived from the RSS channel title at ingest. Display-only. */
+  feed_name: string | null
+  /** Manual override for the displayed name; wins over feed_name/show_name. Display-only. */
+  display_name: string | null
   category: string | null
   default_category: string | null
   primary_language: string | null

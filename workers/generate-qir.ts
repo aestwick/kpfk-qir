@@ -4,6 +4,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
 import { getSetting, getCurationPrompt } from '../lib/settings'
 import { getStation } from '../lib/stations'
+import { resolveShowDisplayName } from '../lib/shows'
 import {
   episodeToQirEntry,
   formatFullReport,
@@ -79,8 +80,24 @@ export async function processGenerateQir(job: Job) {
     return { drafted: false, reason: 'no episodes match filter' }
   }
 
-  // Convert to QIR entries
-  const allEntries = filteredEpisodes.map(episodeToQirEntry)
+  // Resolve each feed's display name so sibling feeds of one logical show appear
+  // under a single consistent name in the report (the episode's show_name is a
+  // possibly-stale snapshot from ingest time). Display-only — grouping/merging
+  // happens via the explicit show_group in the picker, not here.
+  const { data: showKeyRows } = await supabaseAdmin
+    .from('show_keys')
+    .select('key, show_name, feed_name, display_name, show_group')
+    .eq('station_id', stationId)
+  const displayNameByKey = new Map(
+    (showKeyRows ?? []).map((r) => [r.key, resolveShowDisplayName(r)])
+  )
+
+  // Convert to QIR entries, overriding the snapshot name with the resolved one.
+  const allEntries = filteredEpisodes.map((ep) => {
+    const entry = episodeToQirEntry(ep)
+    const resolved = ep.show_key ? displayNameByKey.get(ep.show_key) : undefined
+    return resolved ? { ...entry, show_name: resolved } : entry
+  })
 
   // Group by category
   const grouped: Record<string, QirEntry[]> = {}

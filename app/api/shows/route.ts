@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { resolveShowDisplayName, resolveShowGroup } from '@/lib/shows'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     let query = supabase
       .from('show_keys')
-      .select('key, show_name, category, active')
+      .select('key, show_name, feed_name, display_name, show_group, category, active')
       .eq('station_id', stationId)
       .order('show_name')
 
@@ -26,7 +27,16 @@ export async function GET(request: NextRequest) {
     const { data, error } = await query
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    return NextResponse.json({ shows: data ?? [] })
+    // Additively expose the resolved display name + grouping identity alongside
+    // the raw row, so listings can show a clean name without breaking existing
+    // consumers that still read show_name.
+    const shows = (data ?? []).map((row) => ({
+      ...row,
+      display: resolveShowDisplayName(row),
+      group: resolveShowGroup(row),
+    }))
+
+    return NextResponse.json({ shows })
   } catch (err) {
     console.error('GET /api/shows failed:', err)
     return NextResponse.json({ error: 'Failed to fetch shows' }, { status: 500 })
