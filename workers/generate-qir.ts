@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
 import { getSetting, getCurationPrompt } from '../lib/settings'
 import { getStation } from '../lib/stations'
-import { resolveShowDisplayName } from '../lib/shows'
+import { resolveGroupDisplayName, resolveShowGroup } from '../lib/shows'
 import {
   episodeToQirEntry,
   formatFullReport,
@@ -80,17 +80,26 @@ export async function processGenerateQir(job: Job) {
     return { drafted: false, reason: 'no episodes match filter' }
   }
 
-  // Resolve each feed's display name so sibling feeds of one logical show appear
-  // under a single consistent name in the report (the episode's show_name is a
-  // possibly-stale snapshot from ingest time). Display-only — grouping/merging
-  // happens via the explicit show_group in the picker, not here.
+  // Resolve a single display name per logical show (group) so sibling feeds —
+  // which can carry different name spellings — appear under one consistent name
+  // in the report (the episode's show_name is a possibly-stale ingest snapshot).
+  // Display-only; grouping/merging happens via the explicit show_group.
   const { data: showKeyRows } = await supabaseAdmin
     .from('show_keys')
     .select('key, show_name, feed_name, display_name, show_group')
     .eq('station_id', stationId)
-  const displayNameByKey = new Map(
-    (showKeyRows ?? []).map((r) => [r.key, resolveShowDisplayName(r)])
-  )
+  const feedsByGroup = new Map<string, typeof showKeyRows>()
+  for (const r of showKeyRows ?? []) {
+    const group = resolveShowGroup(r)
+    const list = feedsByGroup.get(group) ?? []
+    list.push(r)
+    feedsByGroup.set(group, list)
+  }
+  const displayNameByKey = new Map<string, string>()
+  for (const r of showKeyRows ?? []) {
+    const group = resolveShowGroup(r)
+    displayNameByKey.set(r.key, resolveGroupDisplayName(feedsByGroup.get(group) ?? [r]))
+  }
 
   // Convert to QIR entries, overriding the snapshot name with the resolved one.
   const allEntries = filteredEpisodes.map((ep) => {

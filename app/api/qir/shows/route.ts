@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
-import { resolveShowDisplayName, resolveShowGroup } from '@/lib/shows'
+import { resolveGroupDisplayName, resolveShowGroup } from '@/lib/shows'
 
 export const dynamic = 'force-dynamic'
 
@@ -54,13 +54,12 @@ export async function GET(request: NextRequest) {
     // so generation can filter on them.
     const showMap = new Map<
       string,
-      { group: string; show_name: string; show_keys: string[]; episode_count: number }
+      { group: string; show_keys: string[]; episode_count: number }
     >()
     for (const ep of episodes ?? []) {
       if (!ep.show_key) continue
       const row = keyMap.get(ep.show_key)
       const group = resolveShowGroup({ key: ep.show_key, show_group: row?.show_group ?? null })
-      const displayName = row ? resolveShowDisplayName(row) : ep.show_name ?? ep.show_key
       const existing = showMap.get(group)
       if (existing) {
         existing.episode_count++
@@ -68,18 +67,24 @@ export async function GET(request: NextRequest) {
           existing.show_keys.push(ep.show_key)
         }
       } else {
-        showMap.set(group, {
-          group,
-          show_name: displayName,
-          show_keys: [ep.show_key],
-          episode_count: 1,
-        })
+        showMap.set(group, { group, show_keys: [ep.show_key], episode_count: 1 })
       }
     }
 
-    const shows = Array.from(showMap.values()).sort((a, b) =>
-      a.show_name.localeCompare(b.show_name)
-    )
+    // Resolve one canonical display name per group from its feeds (an override on
+    // any feed wins for the whole logical show). Fall back to the key when a feed
+    // has no show_keys row (e.g. legacy episodes).
+    const shows = Array.from(showMap.values())
+      .map((s) => {
+        const feeds = s.show_keys.map((k) => keyMap.get(k)).filter(Boolean) as NonNullable<
+          ReturnType<typeof keyMap.get>
+        >[]
+        const show_name = feeds.length
+          ? resolveGroupDisplayName(feeds)
+          : s.show_keys[0]
+        return { group: s.group, show_name, show_keys: s.show_keys, episode_count: s.episode_count }
+      })
+      .sort((a, b) => a.show_name.localeCompare(b.show_name))
 
     return NextResponse.json({ shows })
   } catch (err) {
