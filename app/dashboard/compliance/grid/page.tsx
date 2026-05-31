@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { SkeletonBlock } from '@/app/components/skeleton'
@@ -172,12 +173,12 @@ export default function ComplianceGridPage() {
             When in the week are we getting flagged, and which shows repeat?
           </p>
         </div>
-        <a
+        <Link
           href="/dashboard/compliance"
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 dark:bg-surface-raised dark:text-warm-200 dark:border-warm-600 dark:hover:bg-warm-700/50"
         >
           ← Flag list
-        </a>
+        </Link>
       </div>
 
       <Controls

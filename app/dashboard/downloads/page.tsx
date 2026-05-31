@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useState } from 'react'
 
 function getQuarterOptions() {
@@ -124,12 +125,12 @@ export default function DownloadsPage() {
                 <p className="text-sm font-medium">{exp.label}</p>
                 <p className="text-xs text-gray-500 dark:text-warm-400">{exp.description}</p>
               </div>
-              <a
+              <Link
                 href={`/dashboard/generate`}
                 className="px-4 py-2 border text-sm rounded hover:bg-gray-50 dark:border-warm-600 dark:hover:bg-warm-700/50 dark:text-warm-200"
               >
                 Go to QIR Builder
-              </a>
+              </Link>
             </div>
           ))}
         </div>

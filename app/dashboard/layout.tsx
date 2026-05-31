@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createBrowserClient } from '@/lib/supabase'
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ErrorBoundary } from '@/app/components/error-boundary'
 import { ToastProvider } from '@/app/components/toast'
@@ -192,7 +193,7 @@ export default function DashboardLayout({
           {navItems.map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             return (
-              <a
+              <Link
                 key={item.href}
                 href={item.href}
                 className={`nav-item ${
@@ -205,7 +206,7 @@ export default function DashboardLayout({
                   {item.icon}
                 </span>
                 {item.label}
-              </a>
+              </Link>
             )
           })}
         </div>

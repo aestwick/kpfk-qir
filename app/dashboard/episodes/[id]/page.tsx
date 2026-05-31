@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
+import { BackLink } from '@/app/components/back-link'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import type { SeekToFn } from '@/app/components/episode-media'
 
@@ -628,10 +630,10 @@ export default function EpisodeDetailPage() {
       <Breadcrumbs episodeName={episode.show_name ?? `Episode ${episode.id}`} />
 
       <div className="flex items-center gap-3">
-        <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; Episodes</a>
-        <a href={`/dashboard/shows/${encodeURIComponent(episode.show_key)}`} className="text-2xl font-bold hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
+        <BackLink href="/dashboard/episodes" label="Episodes" />
+        <Link href={`/dashboard/shows/${encodeURIComponent(episode.show_key)}`} className="text-2xl font-bold hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
           {episode.show_name ?? `Episode ${episode.id}`}
-        </a>
+        </Link>
         <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[episode.status] ?? 'bg-gray-100 dark:bg-warm-700'}`}>
           {episode.status}
         </span>

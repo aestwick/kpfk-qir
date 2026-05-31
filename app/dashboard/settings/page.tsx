@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
@@ -929,7 +930,7 @@ export default function SettingsPage() {
                       {errorEpisodes.map((ep) => (
                         <tr key={ep.id} className="hover:bg-gray-50 dark:hover:bg-warm-700/50">
                           <td className="px-2 py-1.5">
-                            <a href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
+                            <Link href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</Link>
                           </td>
                           <td className="px-2 py-1.5 max-w-[120px] truncate" title={ep.show_name ?? ep.show_key}>
                             {ep.show_name ?? ep.show_key}
@@ -979,7 +980,7 @@ export default function SettingsPage() {
                       {stuckEpisodes.map((ep) => (
                         <tr key={ep.id} className="hover:bg-gray-50 dark:hover:bg-warm-700/50">
                           <td className="px-2 py-1.5">
-                            <a href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
+                            <Link href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</Link>
                           </td>
                           <td className="px-2 py-1.5 max-w-[150px] truncate">{ep.show_name ?? ep.show_key}</td>
                           <td className="px-2 py-1.5">
@@ -1387,12 +1388,12 @@ export default function SettingsPage() {
                       />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <a
+                      <Link
                         href={`/dashboard/episodes?show=${encodeURIComponent(show.key)}`}
                         className="text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {show.episode_count}
-                      </a>
+                      </Link>
                     </td>
                   </tr>
                     ))}

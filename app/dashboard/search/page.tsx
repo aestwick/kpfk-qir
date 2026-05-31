@@ -7,6 +7,7 @@
 // entry point linked from the episodes page).
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
@@ -259,7 +260,7 @@ export default function SearchPage() {
               const seek = r.startMs != null ? `?seek=${(r.startMs / 1000).toFixed(1)}` : ''
               return (
                 <li key={r.episodeId} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-warm-700/50">
-                  <a href={`/dashboard/episodes/${r.episodeId}${seek}`} className="block">
+                  <Link href={`/dashboard/episodes/${r.episodeId}${seek}`} className="block">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="font-medium text-blue-700 dark:text-blue-400">{r.showName ?? `Episode ${r.episodeId}`}</span>
                       <span className="text-gray-400 dark:text-warm-500">·</span>
@@ -279,7 +280,7 @@ export default function SearchPage() {
                       className="text-sm text-gray-700 dark:text-warm-300 mt-1"
                       dangerouslySetInnerHTML={renderSnippet(r.snippet)}
                     />
-                  </a>
+                  </Link>
                 </li>
               )
             })}
