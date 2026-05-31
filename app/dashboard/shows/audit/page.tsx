@@ -85,7 +85,9 @@ const statusLabels: Record<string, string> = {
 }
 
 // Episodes the pipeline has stopped on — the audit offers retry/drop for these.
-const STUCK_STATUSES = new Set(['failed', 'dead', 'transcript_missing'])
+// Unscannable ones (unavailable/dead) are excluded from the audit's failure
+// count, but can still be retried in case their source audio became available.
+const RESOLVABLE_STATUSES = new Set(['failed', 'dead', 'transcript_missing', 'unavailable'])
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-100 text-red-700',
@@ -352,8 +354,15 @@ export default function ShowAuditPage() {
   ) ?? []
 
   const episodesNeedingWork = auditData?.processing.episodesNeedingWork ?? 0
-  const stuckCount = auditData
-    ? (auditData.statusCounts['failed'] ?? 0) + (auditData.statusCounts['dead'] ?? 0) + (auditData.statusCounts['transcript_missing'] ?? 0)
+  // Genuinely failed episodes the auditor can act on (retry or drop).
+  const failedCount = auditData
+    ? (auditData.statusCounts['failed'] ?? 0) + (auditData.statusCounts['transcript_missing'] ?? 0)
+    : 0
+  // Unscannable episodes (missing/404 audio, or given up on / dropped). These
+  // can't be processed, so they're excluded from the audit — NOT counted as
+  // failures and they never block a complete audit.
+  const unscannableCount = auditData
+    ? (auditData.statusCounts['unavailable'] ?? 0) + (auditData.statusCounts['dead'] ?? 0)
     : 0
 
   return (
@@ -621,13 +630,24 @@ export default function ShowAuditPage() {
             </div>
           )}
 
-          {/* Stuck episodes notice — these won't complete on their own */}
-          {stuckCount > 0 && (
+          {/* Failed episodes — actionable, these do represent incomplete audit work */}
+          {failedCount > 0 && (
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4">
               <p className="text-sm text-red-800 dark:text-red-300">
-                <strong>{stuckCount} episode{stuckCount !== 1 ? 's' : ''} stuck.</strong>{' '}
-                These have failed repeatedly and won&apos;t complete on their own. Expand an episode below to{' '}
-                <span className="font-medium">Retry</span> it with a fresh attempt or <span className="font-medium">Drop</span> it from the report.
+                <strong>{failedCount} episode{failedCount !== 1 ? 's' : ''} failed.</strong>{' '}
+                Expand an episode below to <span className="font-medium">Retry</span> it with a fresh attempt or{' '}
+                <span className="font-medium">Drop</span> it from the report.
+              </p>
+            </div>
+          )}
+
+          {/* Unscannable episodes — excluded from the audit, NOT counted as failures */}
+          {unscannableCount > 0 && (
+            <div className="bg-gray-50 dark:bg-warm-800 border border-gray-200 dark:border-warm-700 rounded-xl p-4">
+              <p className="text-sm text-gray-600 dark:text-warm-400">
+                <strong>{unscannableCount} episode{unscannableCount !== 1 ? 's' : ''} unscannable</strong>{' '}
+                (missing audio or dropped). These are excluded from the audit and don&apos;t count as failures.
+                Expand one to retry if its source audio is now available.
               </p>
             </div>
           )}
@@ -723,7 +743,7 @@ export default function ShowAuditPage() {
                           {ep.retry_count > 0 && <span className="ml-1 opacity-75">(retries: {ep.retry_count})</span>}
                         </div>
                       )}
-                      {STUCK_STATUSES.has(ep.status) && (
+                      {RESOLVABLE_STATUSES.has(ep.status) && (
                         <div className="flex flex-wrap items-center gap-2 pt-1">
                           <button
                             onClick={() => handleResolve(ep.id, 'retry')}
@@ -806,6 +826,11 @@ export default function ShowAuditPage() {
               {' '}&middot;{' '}
               {completedEpisodes.length} episode{completedEpisodes.length !== 1 ? 's' : ''}
             </p>
+            {unscannableCount > 0 && (
+              <p className="text-xs text-gray-400 dark:text-warm-500 mt-1">
+                {unscannableCount} episode{unscannableCount !== 1 ? 's' : ''} excluded as unscannable (missing audio or dropped).
+              </p>
+            )}
           </div>
 
           {/* Issue Categories */}
