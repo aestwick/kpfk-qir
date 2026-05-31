@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { isActiveReviewStatus } from '@/lib/compliance-status'
 
@@ -498,9 +499,9 @@ export default function ShowAuditPage() {
               <p className="text-sm text-orange-800 dark:text-orange-300">
                 <strong>Note:</strong> This date range is outside the current quarter. The processing pipeline
                 only picks up episodes from the current quarter. To process these episodes, use the{' '}
-                <a href="/dashboard/episodes" className="underline hover:no-underline">Episodes page</a>{' '}
+                <Link href="/dashboard/episodes" className="underline hover:no-underline">Episodes page</Link>{' '}
                 to re-transcribe or re-summarize individual episodes, or use the{' '}
-                <a href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</a>{' '}
+                <Link href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</Link>{' '}
                 to advance the pipeline.
               </p>
             </div>
@@ -549,7 +550,7 @@ export default function ShowAuditPage() {
               )}
               {pipelinePaused && pollCount > 0 && (
                 <p className="mt-2 text-sm font-semibold text-red-600 dark:text-red-400">
-                  Pipeline is paused! Unpause from the <a href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</a> for processing to begin.
+                  Pipeline is paused! Unpause from the <Link href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</Link> for processing to begin.
                 </p>
               )}
               {pollCount > 0 && (
@@ -690,12 +691,12 @@ export default function ShowAuditPage() {
                           Processing cost: ${ep.actual_cost.toFixed(4)}
                         </div>
                       )}
-                      <a
+                      <Link
                         href={`/dashboard/episodes/${ep.id}`}
                         className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400"
                       >
                         View full episode details &rarr;
-                      </a>
+                      </Link>
                     </div>
                   )}
                 </div>

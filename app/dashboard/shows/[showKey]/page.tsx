@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { useParams, useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
+import { BackLink } from '@/app/components/back-link'
 
 interface Episode {
   id: number
@@ -86,7 +88,7 @@ export default function ShowPage() {
       <Breadcrumbs episodeName={showName} />
 
       <div className="flex items-center gap-3">
-        <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700">&larr; Episodes</a>
+        <BackLink href="/dashboard/episodes" label="Episodes" />
         <h2 className="text-2xl font-bold">{showName}</h2>
         <span className="text-sm text-gray-400">({total} episodes)</span>
       </div>
@@ -131,7 +133,7 @@ export default function ShowPage() {
         ) : (
           <div className="divide-y divide-gray-100">
             {episodes.map((ep) => (
-              <a
+              <Link
                 key={ep.id}
                 href={`/dashboard/episodes/${ep.id}`}
                 className="px-5 py-3.5 flex items-center gap-4 hover:bg-gray-50 transition-colors"
@@ -153,7 +155,7 @@ export default function ShowPage() {
                     {ep.issue_category}
                   </span>
                 )}
-              </a>
+              </Link>
             ))}
           </div>
         )}

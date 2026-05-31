@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonBlock } from '@/app/components/skeleton'
@@ -303,7 +304,7 @@ export default function ActivityPage() {
               </h3>
               <div className="bg-white rounded-lg shadow divide-y dark:bg-surface-raised dark:shadow-card-dark dark:divide-warm-700">
                 {dayEntries.map((entry, i) => (
-                  <a
+                  <Link
                     key={`${entry.id}-${i}`}
                     href={`/dashboard/episodes/${entry.id}`}
                     className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors dark:hover:bg-warm-700/50"
@@ -321,7 +322,7 @@ export default function ActivityPage() {
                       {entry.headline ?? ''}
                     </span>
                     {renderMeta(entry)}
-                  </a>
+                  </Link>
                 ))}
               </div>
             </div>

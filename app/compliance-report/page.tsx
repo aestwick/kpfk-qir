@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
 import { notFound } from 'next/navigation'
 import PrintButton from './print-button'
@@ -254,12 +255,12 @@ export default async function ComplianceReportPage({
         {/* Toolbar */}
         <div className="no-print mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <a
+            <Link
               href="/dashboard/compliance"
               className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
             >
               &larr; Back to Compliance
-            </a>
+            </Link>
           </div>
           <PrintButton />
         </div>

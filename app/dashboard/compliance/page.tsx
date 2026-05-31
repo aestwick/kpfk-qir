@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonCards, SkeletonTableRows } from '@/app/components/skeleton'
@@ -556,7 +557,7 @@ export default function CompliancePage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
         <div className="flex items-center gap-2">
-          <a
+          <Link
             href="/dashboard/compliance/grid"
             title="Open the offense-density grid — a heatmap of flags by show and day"
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border rounded-lg hover:bg-gray-50 dark:bg-surface-raised dark:text-warm-200 dark:border-warm-600 dark:hover:bg-warm-700/50"
@@ -568,7 +569,7 @@ export default function CompliancePage() {
               <rect x="14" y="14" width="7" height="7" rx="1" />
             </svg>
             Grid
-          </a>
+          </Link>
           <a
             href={`/compliance-report?${buildReportUrl()}`}
             target="_blank"
@@ -907,13 +908,13 @@ export default function CompliancePage() {
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <a
+                      <Link
                         href={episodeUrl}
                         onClick={(e) => e.stopPropagation()}
                         className="text-blue-600 hover:underline font-medium"
                       >
                         {flag.episode_log?.show_name ?? `Episode #${flag.episode_id}`}
-                      </a>
+                      </Link>
                       {flag.episode_log?.air_date && (
                         <p className="text-xs text-gray-400 dark:text-warm-500">{flag.episode_log.air_date}</p>
                       )}
@@ -933,12 +934,12 @@ export default function CompliancePage() {
                     </td>
                     <td className="px-4 py-3">
                       {flag.timestamp_seconds != null ? (
-                        <a
+                        <Link
                           href={`/dashboard/episodes/${flag.episode_id}?seek=${flag.timestamp_seconds}`}
                           className="text-blue-600 hover:underline font-mono text-xs"
                         >
                           {formatTimestamp(flag.timestamp_seconds)}
-                        </a>
+                        </Link>
                       ) : (
                         <span className="text-gray-400 dark:text-warm-500">--</span>
                       )}

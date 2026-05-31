@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -42,7 +43,7 @@ export function Breadcrumbs({ episodeName }: { episodeName?: string }) {
         <span key={crumb.href} className="flex items-center gap-1.5">
           {i > 0 && <span className="text-gray-300 dark:text-warm-600">/</span>}
           {i < crumbs.length - 1 ? (
-            <a href={crumb.href} className="hover:text-gray-600 dark:hover:text-warm-300 transition-colors">{crumb.label}</a>
+            <Link href={crumb.href} className="hover:text-gray-600 dark:hover:text-warm-300 transition-colors">{crumb.label}</Link>
           ) : (
             <span className="text-gray-600 dark:text-warm-300 font-medium">{crumb.label}</span>
           )}

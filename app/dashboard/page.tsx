@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
@@ -401,16 +402,16 @@ export default function DashboardOverview() {
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold text-warm-900 dark:text-warm-50">{data.quarter.label}</h2>
           {qirStatus && (
-            <a href="/dashboard/generate" className={`badge text-xs px-3 py-1 rounded-full border ${
+            <Link href="/dashboard/generate" className={`badge text-xs px-3 py-1 rounded-full border ${
               qirStatus.status === 'final' ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800/40 dark:text-emerald-300' : 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300'
             }`}>
               QIR: {qirStatus.status === 'final' ? 'Finalized' : 'Draft'} (v{qirStatus.version}, {qirStatus.entryCount} entries)
-            </a>
+            </Link>
           )}
           {!qirStatus && (
-            <a href="/dashboard/generate" className="badge text-xs px-3 py-1 rounded-full border border-warm-200 text-warm-400 dark:border-warm-600 dark:text-warm-500 hover:border-warm-400 transition-colors">
+            <Link href="/dashboard/generate" className="badge text-xs px-3 py-1 rounded-full border border-warm-200 text-warm-400 dark:border-warm-600 dark:text-warm-500 hover:border-warm-400 transition-colors">
               QIR: Not generated
-            </a>
+            </Link>
           )}
         </div>
 
@@ -424,14 +425,14 @@ export default function DashboardOverview() {
             ['failed', qtrCounts.failed ?? 0],
             ['unavailable', qtrCounts.unavailable ?? 0],
           ] as [string, number][]).map(([status, count]) => (
-            <a
+            <Link
               key={status}
               href={`/dashboard/episodes?status=${status}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
               className={`text-center p-3.5 rounded-xl border hover:shadow-card-hover transition-all duration-200 ${STATUS_CELL_BG[status] ?? 'bg-warm-50 border-warm-200'}`}
             >
               <p className="text-2xl font-bold text-warm-900 dark:text-warm-100 tabular-nums">{count}</p>
               <p className="text-2xs text-warm-500 mt-0.5">{STATUS_LABELS[status] ?? status}</p>
-            </a>
+            </Link>
           ))}
         </div>
 
@@ -531,7 +532,7 @@ export default function DashboardOverview() {
               </div>
               <div className="divide-y divide-warm-50 dark:divide-warm-700">
                 {group.items.map((item, i) => (
-                  <a
+                  <Link
                     key={`${item.id}-${i}`}
                     href={`/dashboard/episodes/${item.id}`}
                     className="log-entry"
@@ -552,7 +553,7 @@ export default function DashboardOverview() {
                       )}
                       {timeAgo(item.time)}
                     </span>
-                  </a>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -574,7 +575,7 @@ export default function DashboardOverview() {
               <div className="max-h-56 overflow-y-auto">
                 {failedEpisodes.length > 0 && failedEpisodes.map((ep) => (
                   <div key={ep.id} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 dark:border-warm-700 last:border-0 hover:bg-red-50/40 dark:hover:bg-red-900/20 transition-colors">
-                    <a href={`/dashboard/episodes/${ep.id}`} className="text-sm text-warm-700 dark:text-warm-300 truncate flex-1">{ep.show_name ?? `#${ep.id}`}</a>
+                    <Link href={`/dashboard/episodes/${ep.id}`} className="text-sm text-warm-700 dark:text-warm-300 truncate flex-1">{ep.show_name ?? `#${ep.id}`}</Link>
                     <span className="text-xs text-warm-400 shrink-0 tabular-nums">{ep.air_date ?? ''}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); retryEpisode(ep.id) }}
@@ -600,11 +601,11 @@ export default function DashboardOverview() {
                       </div>
                     )}
                     {qualityFlags.map((flag) => (
-                      <a key={flag.id} href={`/dashboard/episodes/${flag.id}`} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 last:border-0 hover:bg-amber-50/40 transition-colors">
+                      <Link key={flag.id} href={`/dashboard/episodes/${flag.id}`} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 last:border-0 hover:bg-amber-50/40 transition-colors">
                         <span className="badge bg-amber-100 text-amber-700 shrink-0">Quality</span>
                         <span className="text-sm text-warm-700 truncate flex-1">{flag.show_name ?? `#${flag.id}`}</span>
                         <span className="text-2xs text-warm-400 shrink-0 hidden md:inline">{flag.reason}</span>
-                      </a>
+                      </Link>
                     ))}
                   </>
                 )}
@@ -626,7 +627,7 @@ export default function DashboardOverview() {
               <div className="px-5 py-4">
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(complianceSummary).map(([type, { count, critical }]) => (
-                    <a
+                    <Link
                       key={type}
                       href={`/dashboard/compliance?type=${type}`}
                       className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${
@@ -634,7 +635,7 @@ export default function DashboardOverview() {
                       }`}
                     >
                       {count} {FLAG_LABELS[type] ?? type}
-                    </a>
+                    </Link>
                   ))}
                 </div>
               </div>
@@ -661,13 +662,13 @@ export default function DashboardOverview() {
               <p className="text-xs text-warm-500 mb-2.5">Active shows with no summarized episodes this quarter:</p>
               <div className="flex flex-wrap gap-1.5">
                 {coverageGaps.map((name) => (
-                  <a
+                  <Link
                     key={name}
                     href={`/dashboard/episodes?show=${encodeURIComponent(name)}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
                     className="text-xs px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/20 dark:border-amber-800/40 dark:text-amber-300 dark:hover:bg-amber-900/30 transition-colors"
                   >
                     {name}
-                  </a>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -695,7 +696,7 @@ export default function DashboardOverview() {
             </span>
           )}
         </div>
-        <a href="/dashboard/usage" className="text-xs text-warm-400 hover:text-warm-600 transition-colors">Details →</a>
+        <Link href="/dashboard/usage" className="text-xs text-warm-400 hover:text-warm-600 transition-colors">Details →</Link>
       </div>
 
       {/* ═══ BOTTOM ROW: Categories + Recent Episodes ═══ */}
@@ -709,7 +710,7 @@ export default function DashboardOverview() {
                 const max = categories[0]?.count ?? 1
                 const colors = ['bg-kpfk-red', 'bg-blue-500', 'bg-violet-500', 'bg-amber-500', 'bg-rose-500', 'bg-teal-500', 'bg-orange-500', 'bg-cyan-500']
                 return (
-                  <a
+                  <Link
                     key={c.name}
                     href={`/dashboard/episodes?category=${encodeURIComponent(c.name)}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
                     className="block hover:bg-warm-50 dark:hover:bg-warm-700/50 rounded-lg transition-colors -mx-1 px-1 py-0.5"
@@ -724,7 +725,7 @@ export default function DashboardOverview() {
                         style={{ width: `${max > 0 ? (c.count / max) * 100 : 0}%` }}
                       />
                     </div>
-                  </a>
+                  </Link>
                 )
               })}
             </div>
@@ -737,11 +738,11 @@ export default function DashboardOverview() {
         <div className="card overflow-hidden">
           <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
             <h3 className="section-header">Recent Episodes</h3>
-            <a href="/dashboard/episodes" className="text-xs text-kpfk-red hover:text-kpfk-red-dark transition-colors">View all →</a>
+            <Link href="/dashboard/episodes" className="text-xs text-kpfk-red hover:text-kpfk-red-dark transition-colors">View all →</Link>
           </div>
           <div className="divide-y divide-warm-50 dark:divide-warm-700 max-h-72 overflow-y-auto">
             {data.recentEpisodes.map((ep) => (
-              <a key={ep.id} href={`/dashboard/episodes/${ep.id}`} className="log-entry">
+              <Link key={ep.id} href={`/dashboard/episodes/${ep.id}`} className="log-entry">
                 <span className={`badge shrink-0 ${BADGE_COLORS[ep.status] ?? 'bg-warm-100'}`}>
                   {STATUS_LABELS[ep.status] ?? ep.status}
                 </span>
@@ -749,7 +750,7 @@ export default function DashboardOverview() {
                   <p className="text-sm text-warm-800 dark:text-warm-200 truncate">{ep.show_name ?? `#${ep.id}`}</p>
                 </div>
                 <span className="text-2xs text-warm-400 shrink-0 tabular-nums">{ep.air_date ?? timeAgo(ep.updated_at)}</span>
-              </a>
+              </Link>
             ))}
             {data.recentEpisodes.length === 0 && (
               <p className="px-5 py-6 text-sm text-warm-400">No episodes yet</p>
@@ -793,7 +794,7 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>
       <span>Last summarization: <span className={`font-medium ${summarizeInfo.color}`}>{summarizeInfo.label}</span></span>
       {lastFiled && (
-        <span>Last QIR filed: <a href={`/${lastFiled.year}/q${lastFiled.quarter}`} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
+        <span>Last QIR filed: <Link href={`/${lastFiled.year}/q${lastFiled.quarter}`} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</Link></span>
       )}
     </div>
   )

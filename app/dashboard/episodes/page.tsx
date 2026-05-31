@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
@@ -281,13 +282,13 @@ export default function EpisodesPage() {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Episodes</h2>
         <div className="flex gap-2">
-          <a
+          <Link
             href={`/dashboard/search${quarterFilter ? `?quarter=${encodeURIComponent(quarterFilter)}` : ''}`}
             className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200"
             title="Search inside transcript text across shows"
           >
             &#9906; Search Transcripts
-          </a>
+          </Link>
           <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 dark:bg-red-700">
             Retry Failed
           </button>
@@ -369,13 +370,13 @@ export default function EpisodesPage() {
                 }}
               >
                 <td className="px-4 py-3 max-w-[200px] truncate">
-                  <a
+                  <Link
                     href={`/dashboard/shows/${encodeURIComponent(ep.show_key)}`}
                     onClick={(e) => e.stopPropagation()}
                     className="hover:text-blue-600 hover:underline"
                   >
                     {ep.show_name ?? ep.id}
-                  </a>
+                  </Link>
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
