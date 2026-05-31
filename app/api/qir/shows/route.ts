@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
+import { resolveShowDisplayName, resolveShowGroup } from '@/lib/shows'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,17 +38,40 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Aggregate by show
-    const showMap = new Map<string, { show_key: string; show_name: string; episode_count: number }>()
+    // Look up this station's shows so we can resolve each episode's feed to its
+    // logical-show identity (show_group) and display name. Grouping is by the
+    // explicit group, never the name — names can differ across sibling feeds.
+    const { data: showKeyRows } = await supabase
+      .from('show_keys')
+      .select('key, show_name, feed_name, display_name, show_group')
+      .eq('station_id', stationId)
+
+    const keyMap = new Map((showKeyRows ?? []).map((r) => [r.key, r]))
+
+    // Aggregate by logical show (group). A single show can air on more than one
+    // feed, each with its own show_key, so we collapse sibling feeds under their
+    // shared group and combine counts. `show_keys` carries every underlying feed
+    // so generation can filter on them.
+    const showMap = new Map<
+      string,
+      { group: string; show_name: string; show_keys: string[]; episode_count: number }
+    >()
     for (const ep of episodes ?? []) {
-      const key = ep.show_key
-      const existing = showMap.get(key)
+      if (!ep.show_key) continue
+      const row = keyMap.get(ep.show_key)
+      const group = resolveShowGroup({ key: ep.show_key, show_group: row?.show_group ?? null })
+      const displayName = row ? resolveShowDisplayName(row) : ep.show_name ?? ep.show_key
+      const existing = showMap.get(group)
       if (existing) {
         existing.episode_count++
+        if (!existing.show_keys.includes(ep.show_key)) {
+          existing.show_keys.push(ep.show_key)
+        }
       } else {
-        showMap.set(key, {
-          show_key: key,
-          show_name: ep.show_name ?? key,
+        showMap.set(group, {
+          group,
+          show_name: displayName,
+          show_keys: [ep.show_key],
           episode_count: 1,
         })
       }

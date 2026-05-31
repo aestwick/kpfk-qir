@@ -133,7 +133,7 @@ supabase/migrations/
 **Key tables:**
 - `episode_log` — Core episode data + processing status + AI outputs (`station_id`-scoped)
 - `transcripts` — Full transcript text + VTT captions (1:1 with episode; scoped via episode)
-- `show_keys` — Show metadata (key, name, category, active; `station_id`-scoped, unique per `(station_id, key)`)
+- `show_keys` — Show metadata (key, name, category, active; `station_id`-scoped, unique per `(station_id, key)`). A single logical show can span **multiple feeds/keys** (e.g. a 6am + 9am airing). Grouping is by the explicit `show_group` column (`coalesce(show_group, key)`) — **never the name**, which can differ across feeds. The displayed name resolves as `display_name` (manual override) → `feed_name` (auto-derived from the RSS channel title at ingest) → `show_name` (legacy) → `key`; see `lib/shows.ts`.
 - `usage_log` — Every API call logged with cost (`station_id`-scoped)
 - `qir_settings` — **Global** key-value config (default layer under `station_settings`)
 - `qir_drafts` — Versioned QIR reports (draft/final; `station_id`-scoped)

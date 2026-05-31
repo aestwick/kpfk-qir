@@ -61,7 +61,7 @@ function toPacificDate(utcDateStr: string): {
 }
 
 async function processShow(
-  show: { key: string; show_name: string; category: string },
+  show: { key: string; show_name: string; category: string; feed_name?: string | null },
   station: { id: string; rssBaseUrl: string; mp3Prefix: string }
 ): Promise<number> {
   let newCount = 0
@@ -78,6 +78,28 @@ async function processShow(
 
     const xml = await response.text()
     const parsed = parser.parse(xml)
+
+    // Capture the feed's display name from the RSS channel <title>. This is the
+    // auto-derived name (display-only); a manual display_name override can win
+    // over it later. Best-effort: only write when it actually changed.
+    const rawChannelTitle = parsed?.rss?.channel?.title
+    const channelTitle =
+      typeof rawChannelTitle === 'object' && rawChannelTitle?.__cdata
+        ? String(rawChannelTitle.__cdata).trim()
+        : rawChannelTitle
+          ? String(rawChannelTitle).trim()
+          : null
+    if (channelTitle && channelTitle !== (show.feed_name ?? null)) {
+      const { error: feedNameErr } = await supabaseAdmin
+        .from('show_keys')
+        .update({ feed_name: channelTitle })
+        .eq('station_id', station.id)
+        .eq('key', show.key)
+      if (feedNameErr) {
+        console.warn(`[ingest] failed to update feed_name for ${show.key}: ${feedNameErr.message}`)
+      }
+    }
+
     const items = parsed?.rss?.channel?.item
 
     if (!items?.length) return 0

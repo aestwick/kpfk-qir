@@ -48,8 +48,12 @@ interface QirDraft {
 }
 
 interface AvailableShow {
-  show_key: string
+  /** Stable grouping identity (coalesce(show_group, key)). The merge/selection key. */
+  group: string
+  /** Resolved display name (override → feed name → legacy name → key). Display only. */
   show_name: string
+  /** Every underlying feed key for this logical show (a show may air on several). */
+  show_keys: string[]
   episode_count: number
 }
 
@@ -324,8 +328,9 @@ export default function GenerateQirPage() {
         const data = await res.json()
         const shows: AvailableShow[] = data.shows ?? []
         setAvailableShows(shows)
-        // Select all by default
-        setSelectedShows(new Set(shows.map(s => s.show_key)))
+        // Select all by default. Selection is keyed by logical-show group;
+        // the underlying feed keys are expanded at generation time.
+        setSelectedShows(new Set(shows.map(s => s.group)))
       }
     } finally {
       setShowsLoading(false)
@@ -374,7 +379,7 @@ export default function GenerateQirPage() {
   )
   const selectedEpisodeCount = useMemo(
     () => availableShows
-      .filter(s => selectedShows.has(s.show_key))
+      .filter(s => selectedShows.has(s.group))
       .reduce((sum, s) => sum + s.episode_count, 0),
     [availableShows, selectedShows]
   )
@@ -383,6 +388,11 @@ export default function GenerateQirPage() {
     setGenerating(true)
     try {
       const allSelected = selectedShows.size === availableShows.length
+      // Expand the selected logical shows into their underlying feed keys, since
+      // the worker filters episodes by show_key.
+      const includedShows = availableShows
+        .filter(s => selectedShows.has(s.group))
+        .flatMap(s => s.show_keys)
       const res = await authedFetch('/api/qir', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -390,7 +400,7 @@ export default function GenerateQirPage() {
           action: 'generate',
           year: selectedQuarter.year,
           quarter: selectedQuarter.quarter,
-          includedShows: allSelected ? undefined : Array.from(selectedShows),
+          includedShows: allSelected ? undefined : includedShows,
           guidance: guidance.trim() || undefined,
         }),
       })
@@ -478,20 +488,20 @@ export default function GenerateQirPage() {
   }
 
   function handleSelectAll() {
-    setSelectedShows(new Set(availableShows.map(s => s.show_key)))
+    setSelectedShows(new Set(availableShows.map(s => s.group)))
   }
 
   function handleDeselectAll() {
     setSelectedShows(new Set())
   }
 
-  function toggleShow(showKey: string) {
+  function toggleShow(group: string) {
     setSelectedShows(prev => {
       const next = new Set(prev)
-      if (next.has(showKey)) {
-        next.delete(showKey)
+      if (next.has(group)) {
+        next.delete(group)
       } else {
-        next.add(showKey)
+        next.add(group)
       }
       return next
     })
@@ -503,7 +513,13 @@ export default function GenerateQirPage() {
       setGuidance(activeDraft.settings_snapshot.guidance)
     }
     if (activeDraft?.settings_snapshot?.included_shows) {
-      setSelectedShows(new Set(activeDraft.settings_snapshot.included_shows))
+      // Stored snapshots hold feed keys; map them back to logical-show groups so
+      // the picker re-selects the right shows even when several keys share one.
+      const keys = new Set(activeDraft.settings_snapshot.included_shows)
+      const groups = availableShows
+        .filter(s => s.show_keys.some(k => keys.has(k)))
+        .map(s => s.group)
+      setSelectedShows(new Set(groups))
     }
     setShowGuidance(true)
     setShowPanelOpen(true)
@@ -608,21 +624,26 @@ export default function GenerateQirPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 max-h-[240px] overflow-y-auto">
                 {availableShows.map((show) => (
                   <label
-                    key={show.show_key}
+                    key={show.group}
                     className={`flex items-center gap-2 px-2.5 py-1.5 rounded cursor-pointer text-sm transition-colors ${
-                      selectedShows.has(show.show_key)
+                      selectedShows.has(show.group)
                         ? 'bg-blue-50 dark:bg-blue-900/20'
                         : 'hover:bg-gray-50 dark:hover:bg-warm-700/50'
                     }`}
                   >
                     <input
                       type="checkbox"
-                      checked={selectedShows.has(show.show_key)}
-                      onChange={() => toggleShow(show.show_key)}
+                      checked={selectedShows.has(show.group)}
+                      onChange={() => toggleShow(show.group)}
                       className="rounded border-gray-300 text-blue-600 dark:border-warm-600 dark:bg-warm-800"
                     />
                     <span className="truncate text-gray-800 dark:text-warm-200">
                       {show.show_name}
+                      {show.show_keys.length > 1 && (
+                        <span className="text-xs text-gray-400 dark:text-warm-500 ml-1">
+                          ({show.show_keys.length} feeds)
+                        </span>
+                      )}
                     </span>
                     <span className="text-xs text-gray-400 dark:text-warm-500 shrink-0">
                       ({show.episode_count})
