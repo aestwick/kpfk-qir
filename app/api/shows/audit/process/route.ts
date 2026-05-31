@@ -8,13 +8,17 @@ export const dynamic = 'force-dynamic'
  * POST /api/shows/audit/process
  * Body: { episode_ids: number[] }
  *
- * Prepares episodes for processing by resetting statuses, then triggers
- * batch worker jobs. Workers are batch processors — they pick up episodes
- * by status from the DB, so we just need to:
- * 1. Reset failed episodes to pending
- * 2. Trigger one batch job per stage that has work
+ * This is the compliance-facing "complete the data" action: it does NOT
+ * re-process episodes that are already done — it flags the incomplete ones as
+ * `priority` so the batch workers complete them ahead of the general backlog,
+ * and regardless of which quarter they aired in. Workers pick up episodes by
+ * status from the DB, so we just need to:
+ * 1. Flag every incomplete episode as priority
+ * 2. Reset failed episodes to pending (priority included) so they re-enter the pipeline
+ * 3. Trigger one batch job per stage that has work
  *
- * The workers will pick up the episodes on their own.
+ * The workers will pick up the prioritized episodes on their own and clear the
+ * flag once each reaches its terminal (compliance_checked) state.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -55,7 +59,23 @@ export async function POST(request: NextRequest) {
       else statuses.already_done++
     }
 
-    // Reset failed episodes to pending so workers will pick them up
+    // Flag every incomplete episode (anything not already fully processed) as
+    // priority so the workers complete them ahead of the backlog and regardless
+    // of quarter. Already-done episodes are left untouched — we never re-process.
+    const incompleteStatuses = new Set(['pending', 'failed', 'transcribed', 'summarized'])
+    const incompleteIds = (episodes ?? [])
+      .filter((ep) => incompleteStatuses.has(ep.status))
+      .map((ep) => ep.id)
+    if (incompleteIds.length > 0) {
+      await supabase
+        .from('episode_log')
+        .update({ priority: true })
+        .eq('station_id', stationId)
+        .in('id', incompleteIds)
+    }
+
+    // Reset failed episodes to pending so workers will pick them up (they keep
+    // the priority flag set above)
     const failedIds = (episodes ?? []).filter((ep) => ep.status === 'failed').map((ep) => ep.id)
     if (failedIds.length > 0) {
       await supabase
@@ -88,7 +108,7 @@ export async function POST(request: NextRequest) {
 
     const totalToProcess = needsTranscription + statuses.transcribed + statuses.summarized
     const message = totalToProcess > 0
-      ? `Processing ${totalToProcess} episodes: ${triggered.join(', ')}. Workers will auto-continue through stages.`
+      ? `Prioritized ${totalToProcess} episode${totalToProcess !== 1 ? 's' : ''} to complete: ${triggered.join(', ')}. Workers will run these ahead of the backlog and auto-continue through stages.`
       : 'All episodes are already fully processed!'
 
     return NextResponse.json({

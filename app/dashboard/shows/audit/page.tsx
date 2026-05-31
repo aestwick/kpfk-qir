@@ -332,7 +332,7 @@ export default function ShowAuditPage() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Show Audit</h2>
           <p className="text-sm text-gray-500 dark:text-warm-500 mt-1">
-            Audit specific shows for a date range &mdash; review, process, and generate reports
+            Audit specific shows for a date range &mdash; review existing data, prioritize what&apos;s missing, and generate reports
           </p>
         </div>
         {step !== 'select' && (
@@ -498,24 +498,21 @@ export default function ShowAuditPage() {
             )}
           </div>
 
-          {/* Past quarter warning */}
+          {/* Out-of-quarter note — these are still prioritized and completed */}
           {!auditData.isCurrentQuarter && episodesNeedingWork > 0 && (
             <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-xl p-4">
               <p className="text-sm text-orange-800 dark:text-orange-300">
-                <strong>Note:</strong> This date range is outside the current quarter. The processing pipeline
-                only picks up episodes from the current quarter. To process these episodes, use the{' '}
-                <a href="/dashboard/episodes" className="underline hover:no-underline">Episodes page</a>{' '}
-                to re-transcribe or re-summarize individual episodes, or use the{' '}
-                <a href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</a>{' '}
-                to advance the pipeline.
+                <strong>Note:</strong> This date range is outside the current quarter. These episodes are
+                normally skipped by the pipeline, but prioritizing them here flags them so the workers
+                complete their data regardless of when they aired.
               </p>
             </div>
           )}
 
-          {/* Cost estimate + Process button */}
-          {episodesNeedingWork > 0 && auditData.isCurrentQuarter && (
+          {/* Cost estimate + Prioritize button */}
+          {episodesNeedingWork > 0 && (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Processing Required</h3>
+              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Complete Missing Data</h3>
               {auditData.processing.estimatedCost && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mb-3">
                   {auditData.processing.estimatedCost.transcription > 0 && (
@@ -551,7 +548,7 @@ export default function ShowAuditPage() {
                   disabled={processing}
                   className="px-5 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
                 >
-                  {processing ? 'Queuing...' : 'Process All Episodes'}
+                  {processing ? 'Queuing...' : 'Prioritize & Complete'}
                 </button>
               </div>
               {processMessage && (

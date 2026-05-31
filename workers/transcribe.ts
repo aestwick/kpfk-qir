@@ -168,6 +168,8 @@ async function runTranscribeBatch(job: Job, stationId: string) {
 
   // Get candidate pending episodes from the window (including those with null
   // air_date that were created during it — older ingests didn't populate it).
+  // Audit-flagged `priority` episodes are also pulled in regardless of window, and
+  // ordered ahead of the backlog, so a compliance audit can complete any show's data.
   // NOTE: we deliberately do NOT `.limit(batchSize)` here. Excluded categories must
   // be dropped BEFORE the batch is sliced: with a small batch size, a run of
   // excluded-category episodes at the head of the created_at order (e.g. a backfill's
@@ -179,7 +181,8 @@ async function runTranscribeBatch(job: Job, stationId: string) {
     .select('id, category')
     .eq('station_id', stationId)
     .eq('status', 'pending')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .order('priority', { ascending: false })
     .order('created_at', { ascending: true })
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
@@ -348,8 +351,10 @@ async function runTranscribeBatch(job: Job, stationId: string) {
 
   // More claimable pending beyond this batch? Excluded-category episodes are NOT
   // counted — they intentionally stay `pending` and must not keep the chain alive
-  // (counting them was the other half of the backfill deadlock). The continue job
-  // re-queries fresh, so a slight over-estimate just costs one extra empty tick.
+  // (counting them was the other half of the backfill deadlock). Audit `priority`
+  // episodes are already part of `claimable` (the candidate query pulls them in),
+  // so this in-memory check covers them too. The continue job re-queries fresh, so
+  // a slight over-estimate just costs one extra empty tick.
   const remaining = claimable.length > claimIds.length
   if (remaining) {
     console.log(`[transcribe] ${claimable.length - claimIds.length} more claimable pending — will continue`)
