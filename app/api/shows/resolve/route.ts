@@ -1,32 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
-import { parseChannelMeta } from '@/lib/rss'
+import { resolveShowKeys } from '@/lib/shows-resolve'
 
 export const dynamic = 'force-dynamic'
 
-// Bound the work per request: each key is a live archive fetch, so cap the count
-// and resolve in small concurrent batches (mirrors the ingest worker's pacing).
+// Each key is a live archive fetch; cap the request (concurrency/timeout live in
+// the lib). Resolve a chunk, review, save, repeat for longer lists.
 const MAX_KEYS = 100
-const FETCH_CONCURRENCY = 5
-const FETCH_TIMEOUT_MS = 20000
-
-interface ResolveResult {
-  key: string
-  ok: boolean
-  feed_name: string | null
-  category: string | null
-  episodes: number
-  error?: string
-}
 
 /**
  * POST /api/shows/resolve — resolve show keys against the active station's
  * archive feeds. Body: { keys: string[] }.
  *
- * For each key, fetches `rss_base_url || key` and returns the channel title
- * (→ show name) + category + item count, so an operator can import shows with
- * just the keys (names/categories come from the live feed). This is a read-only
- * preview — it writes nothing; the reviewed rows are saved via POST /api/settings.
+ * For each key, returns the live feed's channel title (→ show name), category,
+ * and item count, so an operator can import shows with just the keys (the
+ * names/categories come from the feed). Read-only preview — it writes nothing;
+ * the reviewed rows are saved via POST /api/settings. Thin route: auth + validate
+ * + shape; the fetch/parse/concurrency lives in lib/shows-resolve.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -77,37 +67,8 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
-    // rss_base_url is the full prefix up to '?id=' (see migration 012); the key
-    // is appended, exactly as the ingest worker builds its feed URLs.
-    const base = station.rss_base_url
 
-    const resolveKey = async (key: string): Promise<ResolveResult> => {
-      const url = `${base}${key}`
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
-        if (!res.ok) {
-          return { key, ok: false, feed_name: null, category: null, episodes: 0, error: `feed returned ${res.status}` }
-        }
-        const xml = await res.text()
-        const meta = parseChannelMeta(xml)
-        // A reachable URL that isn't actually a feed (no title, no items) is "not found".
-        if (!meta.title && meta.itemCount === 0) {
-          return { key, ok: false, feed_name: null, category: null, episodes: 0, error: 'not a valid feed' }
-        }
-        return { key, ok: true, feed_name: meta.title, category: meta.category, episodes: meta.itemCount }
-      } catch (err) {
-        const msg = err instanceof Error
-          ? (err.name === 'TimeoutError' ? 'timed out' : err.message)
-          : 'fetch failed'
-        return { key, ok: false, feed_name: null, category: null, episodes: 0, error: msg }
-      }
-    }
-
-    const results: ResolveResult[] = []
-    for (let i = 0; i < keys.length; i += FETCH_CONCURRENCY) {
-      const batch = keys.slice(i, i + FETCH_CONCURRENCY)
-      results.push(...(await Promise.all(batch.map(resolveKey))))
-    }
+    const results = await resolveShowKeys(station.rss_base_url, keys)
 
     return NextResponse.json({
       results,
