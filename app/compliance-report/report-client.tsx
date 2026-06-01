@@ -145,11 +145,13 @@ function flatten(shows: ReportShow[]): FlatFlag[] {
 export default function ReportClient({
   stationSlug,
   quarter,
+  episodeId,
   initialShows,
   initialFilters,
 }: {
   stationSlug: string
   quarter: string
+  episodeId: number | null
   initialShows: ReportShow[]
   initialFilters: { types: string[]; severities: string[]; statuses: ReviewStatus[]; show: string }
 }) {
@@ -172,9 +174,10 @@ export default function ReportClient({
   const [notice, setNotice] = useState<string | null>(null)
 
   // On mount: if the viewer is signed in, unlock triage and pull the *full*
-  // flag set (all review statuses, quarter-scoped) so status filtering and
-  // suggestions work in-page. Anonymous/print viewers keep the server payload
-  // (active offenses only), so AI suggestions are never exposed publicly.
+  // flag set (all review statuses) so status filtering and suggestions work
+  // in-page. Scoped to the linked episode when present, otherwise the quarter.
+  // Anonymous/print viewers keep the server payload (active offenses only), so
+  // AI suggestions are never exposed publicly.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -185,7 +188,8 @@ export default function ReportClient({
         setCanTriage(true)
         userEmailRef.current = session.user?.email ?? null
         const params = new URLSearchParams({ status: REVIEW_STATUSES.join(',') })
-        if (quarter) params.set('quarter', quarter)
+        if (episodeId != null) params.set('episode_id', String(episodeId))
+        else if (quarter) params.set('quarter', quarter)
         const res = await authedFetch(`/api/compliance/report?${params.toString()}`, {
           headers: { 'x-station-slug': stationSlug },
         })
@@ -199,7 +203,7 @@ export default function ReportClient({
       }
     })()
     return () => { cancelled = true }
-  }, [quarter, stationSlug])
+  }, [quarter, stationSlug, episodeId])
 
   // Auto-dismiss the toast.
   useEffect(() => {
@@ -300,6 +304,18 @@ export default function ReportClient({
     setShowSearch('')
   }, [])
 
+  // Build a shareable URL that opens the report focused on one episode's flags.
+  const copyEpisodeLink = useCallback(async (epId: number) => {
+    const url = `${window.location.origin}/compliance-report?station=${encodeURIComponent(stationSlug)}&episode=${epId}`
+    try {
+      await navigator.clipboard.writeText(url)
+      setNotice('Episode link copied to clipboard')
+    } catch {
+      // Clipboard blocked (e.g. insecure context) — surface the URL to copy by hand.
+      setNotice(url)
+    }
+  }, [stationSlug])
+
   const ensureVtt = useCallback(async (episodeId: number): Promise<string> => {
     const cached = vttCache.current.get(episodeId)
     if (cached !== undefined) return cached
@@ -382,6 +398,15 @@ export default function ReportClient({
 
   return (
     <>
+      {episodeId != null && (
+        <div className="no-print mb-4 flex items-center justify-between text-sm px-3 py-2 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800/40">
+          <span>Viewing flags for a single episode.</span>
+          <a href={`/compliance-report?station=${encodeURIComponent(stationSlug)}`} className="font-medium underline hover:no-underline">
+            View full report →
+          </a>
+        </div>
+      )}
+
       {/* Toolbar / filters — never printed */}
       <section className="no-print mb-6 border dark:border-warm-700 rounded-lg p-4 space-y-3 bg-gray-50/60 dark:bg-warm-800/40">
         <div className="flex items-center justify-between">
@@ -483,15 +508,24 @@ export default function ReportClient({
           </div>
 
           {show.episodes.map((ep) => (
-            <div key={ep.episode_id} className="report-entry mb-5 ml-2">
-              <div className="mb-2">
-                <p className="font-semibold text-sm">
-                  {ep.air_date ?? 'Unknown date'}
-                  {ep.air_start && <span className="text-gray-500 dark:text-warm-400"> at {ep.air_start}</span>}
-                  {ep.duration && <span className="text-gray-500 dark:text-warm-400"> ({ep.duration} min)</span>}
-                </p>
-                {ep.headline && <p className="text-sm text-gray-600 dark:text-warm-400">{ep.headline}</p>}
-                {ep.host && <p className="text-xs text-gray-500 dark:text-warm-500">Host: {ep.host}</p>}
+            <div key={ep.episode_id} id={`ep-${ep.episode_id}`} className="report-entry mb-5 ml-2 scroll-mt-4">
+              <div className="mb-2 flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-sm">
+                    {ep.air_date ?? 'Unknown date'}
+                    {ep.air_start && <span className="text-gray-500 dark:text-warm-400"> at {ep.air_start}</span>}
+                    {ep.duration && <span className="text-gray-500 dark:text-warm-400"> ({ep.duration} min)</span>}
+                  </p>
+                  {ep.headline && <p className="text-sm text-gray-600 dark:text-warm-400">{ep.headline}</p>}
+                  {ep.host && <p className="text-xs text-gray-500 dark:text-warm-500">Host: {ep.host}</p>}
+                </div>
+                <button
+                  onClick={() => copyEpisodeLink(ep.episode_id)}
+                  title="Copy a shareable link to this episode's flags"
+                  className="no-print shrink-0 text-xs px-2 py-1 rounded border border-gray-300 dark:border-warm-600 text-gray-600 dark:text-warm-300 hover:bg-gray-100 dark:hover:bg-warm-700"
+                >
+                  🔗 Link
+                </button>
               </div>
 
               <div className="border dark:border-warm-700 rounded-lg overflow-hidden ml-2">

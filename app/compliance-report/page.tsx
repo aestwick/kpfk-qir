@@ -48,13 +48,15 @@ export default async function ComplianceReportPage({
   const flagType = (searchParams.type as string) ?? ''
   const severity = (searchParams.severity as string) ?? ''
   const quarter = (searchParams.quarter as string) ?? ''
-  // "unresolved=false" widens the *initial* server payload to every review
-  // status; the default keeps it to active offenses only (investigating +
-  // violation) so anonymous/print viewers never see raw AI suggestions. Signed-in
-  // staff get the full set client-side (see report-client.tsx).
-  const activeOnly = (searchParams.unresolved as string) !== 'false'
+  // "unresolved=false" only widens the *signed-in* client's default status
+  // filter (see report-client.tsx). The server payload is ALWAYS active
+  // offenses only (investigating + violation), so anonymous/print viewers never
+  // receive raw AI suggestions — regardless of any URL param.
+  const widenDefault = (searchParams.unresolved as string) === 'false'
   const showFilter = (searchParams.show as string) ?? ''
   const stationSlug = (searchParams.station as string) ?? ''
+  const episodeParam = (searchParams.episode as string) ?? ''
+  const episodeId = episodeParam ? parseInt(episodeParam) : NaN
 
   // Resolve the station this report is for (passed by the dashboard link).
   // No default — an unknown/missing station 404s rather than leaking cross-station.
@@ -63,7 +65,7 @@ export default async function ComplianceReportPage({
     notFound()
   }
 
-  const initialStatuses: ReviewStatus[] = activeOnly ? ACTIVE_REVIEW_STATUSES : [...REVIEW_STATUSES]
+  const initialStatuses: ReviewStatus[] = widenDefault ? [...REVIEW_STATUSES] : ACTIVE_REVIEW_STATUSES
 
   // Build query — scoped to the station via the inner episode_log join
   // (compliance_flags has no station_id column of its own).
@@ -75,8 +77,10 @@ export default async function ComplianceReportPage({
 
   if (flagType) query = query.eq('flag_type', flagType)
   if (severity) query = query.eq('severity', severity)
-  query = query.in('review_status', initialStatuses)
+  // Anonymous lock: the initial payload is always active offenses only.
+  query = query.in('review_status', ACTIVE_REVIEW_STATUSES)
   if (showFilter) query = query.ilike('episode_log.show_name', `%${showFilter}%`)
+  if (!isNaN(episodeId)) query = query.eq('episode_id', episodeId)
 
   if (quarter) {
     const [y, q] = quarter.split('-')
@@ -187,6 +191,7 @@ export default async function ComplianceReportPage({
         <ReportClient
           stationSlug={stationSlug}
           quarter={quarter}
+          episodeId={isNaN(episodeId) ? null : episodeId}
           initialShows={shows}
           initialFilters={{
             types: flagType ? [flagType] : [],

@@ -23,6 +23,8 @@ export async function GET(request: NextRequest) {
     const unresolvedOnly = searchParams.get('unresolved') === 'true'
     if (unresolvedOnly) statusFilter.push(...ACTIVE_REVIEW_STATUSES)
     const show = searchParams.get('show')
+    const episodeIdParam = searchParams.get('episode_id')
+    const episodeId = episodeIdParam ? parseInt(episodeIdParam) : NaN
 
     // Build query (scoped to station via the inner episode_log join)
     let query = supabase
@@ -35,6 +37,7 @@ export async function GET(request: NextRequest) {
     if (severity) query = query.eq('severity', severity)
     if (statusFilter.length) query = query.in('review_status', Array.from(new Set(statusFilter)))
     if (show) query = query.ilike('episode_log.show_name', `%${show}%`)
+    if (!isNaN(episodeId)) query = query.eq('episode_id', episodeId)
 
     // Filter by quarter via the joined episode_log
     if (quarter) {
