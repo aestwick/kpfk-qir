@@ -5,6 +5,7 @@ import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
+import { getQuarterOptions, getCurrentQuarter } from '@/lib/quarters'
 
 interface Episode {
   id: number
@@ -54,7 +55,11 @@ export default function EpisodesPage() {
 
   // Read initial state from URL params
   const statusFilter = searchParams.get('status') ?? ''
-  const quarterFilter = searchParams.get('quarter') ?? ''
+  // The quarter filter defaults to the current quarter. An absent param means
+  // "use the default"; the explicit `all` sentinel means "no quarter filter"
+  // (so it survives updateParams stripping empty values).
+  const quarterFilter = searchParams.get('quarter') ?? `${getCurrentQuarter().year}-Q${getCurrentQuarter().quarter}`
+  const quarterApiValue = quarterFilter === 'all' ? '' : quarterFilter
   const showFilterParam = searchParams.get('show') ?? ''
   const categoryFilterParam = searchParams.get('category') ?? ''
   const sort = searchParams.get('sort') ?? 'created_at'
@@ -138,7 +143,7 @@ export default function EpisodesPage() {
     setLoading(true)
     const params = new URLSearchParams({ page: String(page), limit: String(limit), sort, order })
     if (statusFilter) params.set('status', statusFilter)
-    if (quarterFilter) params.set('quarter', quarterFilter)
+    if (quarterApiValue) params.set('quarter', quarterApiValue)
     if (showFilter) params.set('show', showFilter)
     if (categoryFilter) params.set('category', categoryFilter)
 
@@ -149,7 +154,7 @@ export default function EpisodesPage() {
       setTotal(data.total ?? 0)
     }
     setLoading(false)
-  }, [page, statusFilter, quarterFilter, showFilter, categoryFilter, sort, order])
+  }, [page, statusFilter, quarterApiValue, showFilter, categoryFilter, sort, order])
 
   useEffect(() => { fetchEpisodes() }, [fetchEpisodes])
 
@@ -183,7 +188,7 @@ export default function EpisodesPage() {
   function handleExportCSV() {
     const params = new URLSearchParams({ format: 'csv', limit: '10000', page: '1', sort, order })
     if (statusFilter) params.set('status', statusFilter)
-    if (quarterFilter) params.set('quarter', quarterFilter)
+    if (quarterApiValue) params.set('quarter', quarterApiValue)
     if (showFilter) params.set('show', showFilter)
     if (categoryFilter) params.set('category', categoryFilter)
     window.open(`/api/episodes?${params}`, '_blank')
@@ -219,14 +224,11 @@ export default function EpisodesPage() {
 
   const totalPages = Math.ceil(total / limit)
 
-  // Generate quarter options
-  const quarterOptions: string[] = []
-  const now = new Date()
-  for (let y = now.getFullYear(); y >= now.getFullYear() - 2; y--) {
-    for (let q = 4; q >= 1; q--) {
-      quarterOptions.push(`${y}-Q${q}`)
-    }
-  }
+  // Quarter options (current quarter back two years, never future quarters).
+  const quarterOptions = getQuarterOptions().map((o) => ({
+    label: o.label,
+    value: `${o.year}-Q${o.quarter}`,
+  }))
 
   const [selectedRow, setSelectedRow] = useState(-1)
   const showFilterRef = useRef<HTMLInputElement>(null)
@@ -282,7 +284,7 @@ export default function EpisodesPage() {
         <h2 className="text-2xl font-bold">Episodes</h2>
         <div className="flex gap-2">
           <a
-            href={`/dashboard/search${quarterFilter ? `?quarter=${encodeURIComponent(quarterFilter)}` : ''}`}
+            href={`/dashboard/search${quarterApiValue ? `?quarter=${encodeURIComponent(quarterApiValue)}` : ''}`}
             className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200"
             title="Search inside transcript text across shows"
           >
@@ -306,9 +308,9 @@ export default function EpisodesPage() {
           ))}
         </select>
         <select value={quarterFilter} onChange={(e) => setQuarterFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
-          <option value="">All Quarters</option>
+          <option value="all">All Quarters</option>
           {quarterOptions.map((q) => (
-            <option key={q} value={q}>{q}</option>
+            <option key={q.value} value={q.value}>{q.label}</option>
           ))}
         </select>
         <input

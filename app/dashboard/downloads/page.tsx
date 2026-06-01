@@ -1,24 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-
-function getQuarterOptions() {
-  const options: { label: string; year: number; quarter: number }[] = []
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentQ = Math.floor(now.getMonth() / 3) + 1
-
-  for (let y = currentYear; y >= currentYear - 1; y--) {
-    const maxQ = y === currentYear ? currentQ : 4
-    for (let q = maxQ; q >= 1; q--) {
-      options.push({ label: `Q${q} ${y}`, year: y, quarter: q })
-    }
-  }
-  return options
-}
+import { getQuarterOptions } from '@/lib/quarters'
 
 export default function DownloadsPage() {
-  const quarterOptions = getQuarterOptions()
+  const quarterOptions = getQuarterOptions(1)
   const [selected, setSelected] = useState(quarterOptions[0])
 
   const downloads = [
