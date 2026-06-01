@@ -176,8 +176,9 @@ a **Download** button and a small unread badge; `failed` shows the error. This i
 poll-based and station-scoped — no websockets required.
 
 **Email.** Introduce a thin `lib/email.ts` with a single `sendEmail()` helper
-behind a provider chosen at build time (Resend/SES/SMTP — **decision needed**,
-see §11). The worker, on `ready`, emails `requested_by` (resolved via
+backed by **Resend** (`RESEND_API_KEY`, sender `BUNDLE_EMAIL_FROM` on the
+verified `qir.kpfk.org` domain; links built from the existing
+`NEXT_PUBLIC_BASE_URL`). The worker, on `ready`, emails `requested_by` (resolved via
 `auth.users`) with the station name, what was included, the file count/size, the
 **expiry**, and a link to `…/bundles/[id]/link` (the app mints a fresh signed URL
 on click — the email never embeds a long-lived signed URL, which would be a
@@ -213,8 +214,9 @@ On `app/dashboard/episodes/page.tsx`, the existing bulk-action bar gains
 
 ## 11. Open decisions
 
-- **Email provider**: Resend (simplest), AWS SES (cheap at volume), or plain
-  SMTP via nodemailer (no new vendor). Affects creds/env + `lib/email.ts`.
+- ~~**Email provider**~~: **Resolved — Resend.** Env: `RESEND_API_KEY` +
+  `BUNDLE_EMAIL_FROM`; domain `qir.kpfk.org` verified via SPF/DKIM/DMARC DNS
+  records; `lib/email.ts` wraps the Resend SDK.
 - **Streaming target**: archive straight to the Storage upload stream vs. temp
   file then upload — depends on whether the Supabase upload needs a known
   content length and the VPS disk budget.
