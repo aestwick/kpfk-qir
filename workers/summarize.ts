@@ -5,6 +5,7 @@ import { logSummarizationUsage, logEmbeddingUsage } from '../lib/usage'
 import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 interface SummaryResponse {
   headline: string
@@ -257,5 +258,14 @@ ${transcriptText}`
     console.log(`[summarize] ${remainingCount} more transcribed episodes — will continue`)
   }
 
+  if (summarized > 0) {
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.SUMMARIZE_COMPLETE,
+      operation: 'update',
+      stationId,
+      resourceType: 'episode',
+      metadata: { summarized, remaining },
+    })
+  }
   return { summarized, remaining }
 }

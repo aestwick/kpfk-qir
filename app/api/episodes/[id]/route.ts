@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
+import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
 export async function GET(
   request: NextRequest,
@@ -40,6 +41,32 @@ export async function GET(
 
     if (episodeResult.error || !episodeResult.data) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
+    // Selective read auditing (spec §6.1): log the episode-detail view, and a
+    // transcript.read when this view actually surfaced the transcript text.
+    const meta = requestMeta(request)
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.EPISODE_READ,
+      operation: 'read',
+      actorId: result.context.userId,
+      stationId,
+      resourceType: 'episode',
+      resourceId: episodeId,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
+    if (transcriptResult.data) {
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.TRANSCRIPT_READ,
+        operation: 'read',
+        actorId: result.context.userId,
+        stationId,
+        resourceType: 'transcript',
+        resourceId: episodeId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
     }
 
     return NextResponse.json({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 import { StationRole } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -66,6 +67,18 @@ export async function GET(request: NextRequest) {
       created_at: r.created_at,
       is_self: r.user_id === userId,
     }))
+
+    const meta = requestMeta(request)
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.MEMBERS_READ,
+      operation: 'read',
+      actorId: userId,
+      stationId,
+      resourceType: 'station_users',
+      metadata: { count: members.length },
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    })
 
     return NextResponse.json({ members })
   } catch (err) {

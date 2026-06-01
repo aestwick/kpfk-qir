@@ -9,6 +9,7 @@ import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { parseVtt } from '../lib/vtt'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -418,5 +419,14 @@ export async function processTranscribe(job: Job) {
     console.log(`[transcribe] ${remainingCount} more pending episodes — will continue`)
   }
 
+  if (transcribed > 0) {
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.TRANSCRIBE_COMPLETE,
+      operation: 'update',
+      stationId,
+      resourceType: 'episode',
+      metadata: { transcribed, remaining },
+    })
+  }
   return { transcribed, remaining }
 }

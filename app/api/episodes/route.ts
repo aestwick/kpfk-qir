@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
+import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,6 +69,17 @@ export async function GET(request: NextRequest) {
           }).join(',')
         ),
       ]
+      const meta = requestMeta(request)
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.EPISODES_EXPORT,
+        operation: 'export',
+        actorId: result.context.userId,
+        stationId,
+        resourceType: 'episode',
+        metadata: { format: 'csv', count: rows.length, filters: { status, show, category, quarter } },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
       return new Response(csvLines.join('\n'), {
         headers: {
           'Content-Type': 'text/csv',

@@ -167,6 +167,34 @@ export interface UsageLog {
   created_at: string
 }
 
+// One append-only audit_log row. Written by the audit_row_change() DB trigger
+// (data mutations) and lib/audit.ts#logAuditEvent (reads, auth, exports, system
+// events). Readable by super-admins only. See ideas/AUDIT_LOG_SPEC.md and
+// migration 028. Action/operation vocabularies live in lib/audit.ts.
+export interface AuditLog {
+  id: number
+  station_id: string | null
+  actor_id: string | null
+  actor_type: 'user' | 'system' | 'anonymous'
+  action: string
+  resource_type: string | null
+  resource_id: string | null
+  operation: 'insert' | 'update' | 'delete' | 'read' | 'login' | 'logout' | 'export' | 'login_failed' | 'station_switch'
+  old_data: Record<string, unknown> | null
+  new_data: Record<string, unknown> | null
+  changed_fields: string[] | null
+  metadata: Record<string, unknown>
+  ip_address: string | null
+  user_agent: string | null
+  created_at: string
+}
+
+// An audit_log row enriched for the dashboard: the actor's email resolved from
+// auth.users (the table stores only UUIDs). Returned by GET /api/audit.
+export interface AuditLogWithActor extends AuditLog {
+  actor_email: string | null
+}
+
 export interface QirSetting {
   id: number
   key: string

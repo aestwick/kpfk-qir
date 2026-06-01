@@ -1,10 +1,15 @@
 import { supabaseAdmin } from '@/lib/supabase'
+import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 import PrintButton from '@/app/components/print-button'
+import { logAuditEvent, AUDIT_ACTIONS } from '@/lib/audit'
 import type { Metadata } from 'next'
 
-// Revalidate finalized reports once per day — they rarely change
-export const revalidate = 86400
+// This page reads request headers (below) to audit each public view, which opts
+// it into per-request dynamic rendering. Finalized reports rarely change, so the
+// underlying data is otherwise stable; we accept dynamic rendering to record
+// every (including anonymous) report view per the audit spec.
+export const dynamic = 'force-dynamic'
 
 async function resolveStation(slug: string): Promise<{ id: string; name: string } | null> {
   const { data } = await supabaseAdmin
@@ -93,6 +98,22 @@ export default async function PublicQirPage({
   if (!draft) {
     notFound()
   }
+
+  // Audit the (often anonymous) public report view. Fire-and-forget; no JWT here
+  // so the actor is recorded as 'anonymous'. IP/UA come from the request headers.
+  const h = headers()
+  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() ?? h.get('x-real-ip') ?? null
+  void logAuditEvent({
+    action: AUDIT_ACTIONS.REPORT_READ,
+    operation: 'read',
+    anonymous: true,
+    stationId: station.id,
+    resourceType: 'qir_draft',
+    resourceId: draft.id,
+    metadata: { station: params.station, year, quarter },
+    ip,
+    userAgent: h.get('user-agent'),
+  })
 
   const entries = (draft.curated_entries ?? []) as QirEntry[]
   const grouped = groupByCategory(entries)
