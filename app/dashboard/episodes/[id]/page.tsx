@@ -6,6 +6,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
+import { resolveOrigin } from '@/lib/nav'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import type { SeekToFn } from '@/app/components/episode-media'
 import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
@@ -329,6 +330,7 @@ export default function EpisodeDetailPage() {
   const params = useParams()
   const searchParams = useSearchParams()
   const id = params.id as string
+  const from = searchParams.get('from')
   const seekParam = searchParams.get('seek')
   const parsedSeek = seekParam != null ? parseFloat(seekParam) : NaN
   const initialSeek = isFinite(parsedSeek) && parsedSeek >= 0 ? parsedSeek : undefined
@@ -617,12 +619,16 @@ export default function EpisodeDetailPage() {
     { label: 'Created', value: new Date(episode.created_at).toLocaleDateString() },
   ]
 
+  // Resolve where the user came from (Episodes list, a Show page, Compliance,
+  // etc.) so the back link and breadcrumb return there — not always Episodes.
+  const origin = resolveOrigin(from, { name: episode.show_name, key: episode.show_key })
+
   return (
     <div className="space-y-6">
-      <Breadcrumbs episodeName={episode.show_name ?? `Episode ${episode.id}`} />
+      <Breadcrumbs episodeName={episode.show_name ?? `Episode ${episode.id}`} origin={origin} />
 
       <div className="flex items-center gap-3">
-        <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; Episodes</a>
+        <a href={origin.href} className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; {origin.label}</a>
         <a href={`/dashboard/shows/${encodeURIComponent(episode.show_key)}`} className="text-2xl font-bold hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
           {episode.show_name ?? `Episode ${episode.id}`}
         </a>

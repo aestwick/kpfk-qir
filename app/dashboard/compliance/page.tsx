@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
-import { useSearchParams, useRouter } from 'next/navigation'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonCards, SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
+import { withFrom, locationFrom } from '@/lib/nav'
 import { useToast } from '@/app/components/toast'
 import { DAY_NAMES_SHORT } from '@/lib/compliance-grid'
 import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
@@ -123,6 +124,7 @@ function slotLabel(dow: string, airStart: string): string {
 export default function CompliancePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
+  const pathname = usePathname()
   const { toast } = useToast()
 
   // Filters from URL
@@ -929,7 +931,7 @@ export default function CompliancePage() {
                     <td className="px-4 py-3">
                       {flag.timestamp_seconds != null ? (
                         <a
-                          href={`/dashboard/episodes/${flag.episode_id}?seek=${flag.timestamp_seconds}`}
+                          href={withFrom(`/dashboard/episodes/${flag.episode_id}?seek=${flag.timestamp_seconds}`, locationFrom(pathname, searchParams.toString()))}
                           className="text-blue-600 hover:underline font-mono text-xs"
                         >
                           {formatTimestamp(flag.timestamp_seconds)}

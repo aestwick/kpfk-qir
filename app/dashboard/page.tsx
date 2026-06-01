@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
+import { episodeHref } from '@/lib/nav'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
@@ -533,7 +534,7 @@ export default function DashboardOverview() {
                 {group.items.map((item, i) => (
                   <a
                     key={`${item.id}-${i}`}
-                    href={`/dashboard/episodes/${item.id}`}
+                    href={episodeHref(item.id, '/dashboard')}
                     className="log-entry"
                   >
                     <span className="text-xs text-warm-400 w-20 shrink-0 font-mono tabular-nums">{fmtTime(item.time)}</span>
@@ -574,7 +575,7 @@ export default function DashboardOverview() {
               <div className="max-h-56 overflow-y-auto">
                 {failedEpisodes.length > 0 && failedEpisodes.map((ep) => (
                   <div key={ep.id} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 dark:border-warm-700 last:border-0 hover:bg-red-50/40 dark:hover:bg-red-900/20 transition-colors">
-                    <a href={`/dashboard/episodes/${ep.id}`} className="text-sm text-warm-700 dark:text-warm-300 truncate flex-1">{ep.show_name ?? `#${ep.id}`}</a>
+                    <a href={episodeHref(ep.id, '/dashboard')} className="text-sm text-warm-700 dark:text-warm-300 truncate flex-1">{ep.show_name ?? `#${ep.id}`}</a>
                     <span className="text-xs text-warm-400 shrink-0 tabular-nums">{ep.air_date ?? ''}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); retryEpisode(ep.id) }}
@@ -600,7 +601,7 @@ export default function DashboardOverview() {
                       </div>
                     )}
                     {qualityFlags.map((flag) => (
-                      <a key={flag.id} href={`/dashboard/episodes/${flag.id}`} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 last:border-0 hover:bg-amber-50/40 transition-colors">
+                      <a key={flag.id} href={episodeHref(flag.id, '/dashboard')} className="flex items-center gap-3 px-5 py-2.5 border-b border-warm-50 last:border-0 hover:bg-amber-50/40 transition-colors">
                         <span className="badge bg-amber-100 text-amber-700 shrink-0">Quality</span>
                         <span className="text-sm text-warm-700 truncate flex-1">{flag.show_name ?? `#${flag.id}`}</span>
                         <span className="text-2xs text-warm-400 shrink-0 hidden md:inline">{flag.reason}</span>
@@ -741,7 +742,7 @@ export default function DashboardOverview() {
           </div>
           <div className="divide-y divide-warm-50 dark:divide-warm-700 max-h-72 overflow-y-auto">
             {data.recentEpisodes.map((ep) => (
-              <a key={ep.id} href={`/dashboard/episodes/${ep.id}`} className="log-entry">
+              <a key={ep.id} href={episodeHref(ep.id, '/dashboard')} className="log-entry">
                 <span className={`badge shrink-0 ${BADGE_COLORS[ep.status] ?? 'bg-warm-100'}`}>
                   {STATUS_LABELS[ep.status] ?? ep.status}
                 </span>

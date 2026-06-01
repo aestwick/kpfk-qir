@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { SkeletonBlock } from '@/app/components/skeleton'
+import { episodeHref } from '@/lib/nav'
 
 interface ActivityEntry {
   id: number
@@ -305,7 +306,7 @@ export default function ActivityPage() {
                 {dayEntries.map((entry, i) => (
                   <a
                     key={`${entry.id}-${i}`}
-                    href={`/dashboard/episodes/${entry.id}`}
+                    href={episodeHref(entry.id, '/dashboard/activity')}
                     className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors dark:hover:bg-warm-700/50"
                   >
                     <span className="text-xs text-gray-400 w-16 shrink-0 text-right dark:text-warm-500">

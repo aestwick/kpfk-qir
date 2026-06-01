@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
 import { resolveGroupDisplayName, resolveShowGroup, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import type { StationMember, StationRole } from '@/lib/types'
+import { episodeHref } from '@/lib/nav'
 
 /* ─── lazy-loaded corrections component ─── */
 const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-corrections').then(m => ({ default: m.TranscriptCorrections })), {
@@ -948,7 +949,7 @@ export default function SettingsPage() {
                       {errorEpisodes.map((ep) => (
                         <tr key={ep.id} className="hover:bg-gray-50 dark:hover:bg-warm-700/50">
                           <td className="px-2 py-1.5">
-                            <a href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
+                            <a href={episodeHref(ep.id, '/dashboard/settings')} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
                           </td>
                           <td className="px-2 py-1.5 max-w-[120px] truncate" title={ep.show_name ?? ep.show_key}>
                             {ep.show_name ?? ep.show_key}
@@ -998,7 +999,7 @@ export default function SettingsPage() {
                       {stuckEpisodes.map((ep) => (
                         <tr key={ep.id} className="hover:bg-gray-50 dark:hover:bg-warm-700/50">
                           <td className="px-2 py-1.5">
-                            <a href={`/dashboard/episodes/${ep.id}`} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
+                            <a href={episodeHref(ep.id, '/dashboard/settings')} className="text-blue-600 hover:underline dark:text-blue-400">{ep.id}</a>
                           </td>
                           <td className="px-2 py-1.5 max-w-[150px] truncate">{ep.show_name ?? ep.show_key}</td>
                           <td className="px-2 py-1.5">
