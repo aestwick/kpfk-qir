@@ -919,14 +919,21 @@ export default function EpisodeDetailPage() {
             <button
               onClick={handleTranslate}
               disabled={translating}
-              className={`px-3 py-1 ${viewLang === 'english' ? 'bg-blue-600 text-white dark:bg-blue-700' : 'bg-white dark:bg-warm-800 text-gray-700 dark:text-warm-300 hover:bg-gray-50 dark:hover:bg-warm-700'} disabled:opacity-50`}
+              className={`px-3 py-1 inline-flex items-center gap-1.5 ${viewLang === 'english' ? 'bg-blue-600 text-white dark:bg-blue-700' : 'bg-white dark:bg-warm-800 text-gray-700 dark:text-warm-300 hover:bg-gray-50 dark:hover:bg-warm-700'} disabled:opacity-50`}
             >
-              {translating ? 'Translating...' : 'English'}
+              {translating && (
+                <span className="inline-block h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" aria-hidden />
+              )}
+              {translating ? 'Translating…' : 'English'}
             </button>
           </div>
-          {viewLang === 'english' && transcript.english_transcript && (
+          {translating ? (
+            <span className="text-[11px] text-gray-500 dark:text-warm-400">
+              Translating the full episode — this can take a minute or two. You can keep working; it’ll be saved when done.
+            </span>
+          ) : viewLang === 'english' && transcript.english_transcript ? (
             <span className="text-[10px] text-gray-400 dark:text-warm-500">AI-translated</span>
-          )}
+          ) : null}
         </div>
       )}
 
