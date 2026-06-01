@@ -1,0 +1,34 @@
+// Shared quarter helpers. Single source of truth so dropdowns stay consistent
+// and never offer a quarter that hasn't happened yet (e.g. Q4 2026 on June 1).
+
+export interface QuarterOption {
+  /** Human label, e.g. "Q1 2025". */
+  label: string
+  year: number
+  /** 1–4. */
+  quarter: number
+}
+
+/** Current calendar quarter (1–4) and year for `now` (defaults to today). */
+export function getCurrentQuarter(now: Date = new Date()): { year: number; quarter: number } {
+  return { year: now.getFullYear(), quarter: Math.floor(now.getMonth() / 3) + 1 }
+}
+
+/**
+ * Quarter options from the current quarter backwards, newest first.
+ * Never includes future quarters.
+ *
+ * @param yearsBack how many full prior years of history to include (default 2)
+ */
+export function getQuarterOptions(yearsBack = 2, now: Date = new Date()): QuarterOption[] {
+  const { year: currentYear, quarter: currentQuarter } = getCurrentQuarter(now)
+  const options: QuarterOption[] = []
+  for (let y = currentYear; y >= currentYear - yearsBack; y--) {
+    // The current year only runs up to the current quarter; prior years are full.
+    const maxQ = y === currentYear ? currentQuarter : 4
+    for (let q = maxQ; q >= 1; q--) {
+      options.push({ label: `Q${q} ${y}`, year: y, quarter: q })
+    }
+  }
+  return options
+}

@@ -9,6 +9,7 @@ import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { useToast } from '@/app/components/toast'
 import { DAY_NAMES_SHORT } from '@/lib/compliance-grid'
 import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
+import { getQuarterOptions as getQuarterRange } from '@/lib/quarters'
 
 interface ComplianceFlag {
   id: number
@@ -75,16 +76,10 @@ const STATUS_ACTIONS: ReviewStatus[] = ['investigating', 'violation', 'dismissed
 const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency'] as const
 const SEVERITIES = ['info', 'warning', 'critical']
 
+// Quarter filter options. Value is `YYYY-Q` (split on `-` below into year/quarter
+// for the API). Sourced from the shared helper so no future quarter is ever shown.
 function getQuarterOptions(): { label: string; value: string }[] {
-  const now = new Date()
-  const options: { label: string; value: string }[] = []
-  for (let i = 0; i < 4; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i * 3, 1)
-    const q = Math.floor(d.getMonth() / 3) + 1
-    const y = d.getFullYear()
-    options.push({ label: `Q${q} ${y}`, value: `${y}-${q}` })
-  }
-  return options
+  return getQuarterRange(1).map((o) => ({ label: o.label, value: `${o.year}-${o.quarter}` }))
 }
 
 const severityColors: Record<string, string> = {

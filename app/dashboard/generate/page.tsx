@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import { getQuarterOptions } from '@/lib/quarters'
 import dynamic from 'next/dynamic'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
@@ -76,21 +77,6 @@ const DEFAULT_CATEGORIES = [
   'Environment / Climate', 'Government / Politics', 'Health',
   'International Affairs / War & Peace', 'Arts & Culture',
 ]
-
-function getQuarterOptions() {
-  const options: { label: string; year: number; quarter: number }[] = []
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  const currentQ = Math.floor(now.getMonth() / 3) + 1
-
-  for (let y = currentYear; y >= currentYear - 1; y--) {
-    const maxQ = y === currentYear ? currentQ : 4
-    for (let q = maxQ; q >= 1; q--) {
-      options.push({ label: `Q${q} ${y}`, year: y, quarter: q })
-    }
-  }
-  return options
-}
 
 function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
   const grouped: Record<string, QirEntry[]> = {}
@@ -294,7 +280,7 @@ function getRatingBarColor(score: number, max: number): string {
 }
 
 export default function GenerateQirPage() {
-  const quarterOptions = getQuarterOptions()
+  const quarterOptions = getQuarterOptions(1)
   const [selectedQuarter, setSelectedQuarter] = useState(quarterOptions[0])
   const [drafts, setDrafts] = useState<QirDraft[]>([])
   const [activeDraft, setActiveDraft] = useState<QirDraft | null>(null)

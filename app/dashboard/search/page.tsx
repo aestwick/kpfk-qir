@@ -10,6 +10,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
+import { getQuarterOptions, getCurrentQuarter } from '@/lib/quarters'
 
 interface SearchResult {
   episodeId: number
@@ -60,7 +61,10 @@ export default function SearchPage() {
 
   const qParam = searchParams.get('q') ?? ''
   const showKeyParam = searchParams.get('show_key') ?? ''
-  const quarterParam = searchParams.get('quarter') ?? ''
+  // Defaults to the current quarter; the explicit `all` sentinel (distinct from
+  // an absent param) means "search every quarter" and survives updateParams.
+  const quarterParam = searchParams.get('quarter') ?? `${getCurrentQuarter().year}-Q${getCurrentQuarter().quarter}`
+  const quarterApiValue = quarterParam === 'all' ? '' : quarterParam
   const modeParam = searchParams.get('mode') === 'semantic' ? 'semantic' : 'lexical'
   const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
   const limit = 20
@@ -127,7 +131,7 @@ export default function SearchPage() {
     setLoading(true)
     const params = new URLSearchParams({ q: qParam, page: String(page), limit: String(limit) })
     if (showKeyParam) params.set('show_key', showKeyParam)
-    if (quarterParam) params.set('quarter', quarterParam)
+    if (quarterApiValue) params.set('quarter', quarterApiValue)
     if (modeParam === 'semantic') params.set('mode', 'semantic')
     const res = await authedFetch(`/api/transcript-search?${params}`)
     if (res.ok) {
@@ -142,7 +146,7 @@ export default function SearchPage() {
     }
     setSearched(true)
     setLoading(false)
-  }, [qParam, showKeyParam, quarterParam, modeParam, page])
+  }, [qParam, showKeyParam, quarterApiValue, modeParam, page])
 
   useEffect(() => { runSearch() }, [runSearch])
 
@@ -150,12 +154,12 @@ export default function SearchPage() {
 
   const totalPages = Math.ceil(total / limit)
 
-  // Quarter options (current + last two years), matching the episodes page.
-  const quarterOptions: string[] = []
-  const now = new Date()
-  for (let y = now.getFullYear(); y >= now.getFullYear() - 2; y--) {
-    for (let q = 4; q >= 1; q--) quarterOptions.push(`${y}-Q${q}`)
-  }
+  // Quarter options (current quarter back two years, never future), matching
+  // the episodes page.
+  const quarterOptions = getQuarterOptions().map((o) => ({
+    label: o.label,
+    value: `${o.year}-Q${o.quarter}`,
+  }))
 
   const episodeCount = new Set(results.map((r) => r.episodeId)).size
 
@@ -199,9 +203,9 @@ export default function SearchPage() {
           onChange={(e) => updateParams({ quarter: e.target.value, page: '' })}
           className="border rounded px-2 py-2 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         >
-          <option value="">All Quarters</option>
+          <option value="all">All Quarters</option>
           {quarterOptions.map((q) => (
-            <option key={q} value={q}>{q}</option>
+            <option key={q.value} value={q.value}>{q.label}</option>
           ))}
         </select>
 
