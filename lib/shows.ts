@@ -74,6 +74,19 @@ export function resolveShowGroup(row: Pick<ShowNameFields, 'key' | 'show_group'>
   return row.show_group?.trim() || row.key
 }
 
+/** ISO 639-1 code assumed when a show has no explicit primary language. */
+export const DEFAULT_SHOW_LANGUAGE = 'en'
+
+/**
+ * A show's effective primary language as an ISO 639-1 code. Soft-defaults to
+ * English: staff only record a primary_language for shows that air in another
+ * language, so a null/blank value means "English unless specced otherwise".
+ * Stored values stay null — the default is applied only at read time.
+ */
+export function resolveShowLanguage(row: { primary_language?: string | null }): string {
+  return row.primary_language?.trim().toLowerCase() || DEFAULT_SHOW_LANGUAGE
+}
+
 /**
  * Canonical display name for a logical show made of one or more feeds. Resolution:
  *   1. An explicit display_name override on any feed (a curated override wins).
