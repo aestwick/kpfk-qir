@@ -7,13 +7,9 @@ interface DraftRow {
   show_name: string
   key: string
   category: string          // iTunes feed category, e.g. "News & Politics"
-  primary_language: string  // ISO 639-1; blank = soft default English (stored null)
 }
 
-// Left blank by default: an unset language is a soft default to English (the row
-// is stored with primary_language null and resolves to English at read time), so
-// staff only pick a language for shows that air in something other than English.
-const EMPTY_ROW: DraftRow = { show_name: '', key: '', category: '', primary_language: '' }
+const EMPTY_ROW: DraftRow = { show_name: '', key: '', category: '' }
 
 // Classic iTunes / Apple Podcasts top-level categories (the taxonomy KPFK's
 // archive feeds use, e.g. <itunes:category text="News & Politics"/>). Free text
@@ -25,29 +21,12 @@ const ITUNES_CATEGORIES = [
   'Society & Culture', 'Sports & Recreation', 'Technology', 'TV & Film',
 ]
 
-// Languages offered in the dropdown (KPFK / Pacifica programming).
-const LANGUAGE_OPTIONS: { code: string; label: string }[] = [
-  { code: 'en', label: 'English' },
-  { code: 'es', label: 'Spanish' },
-  { code: 'fr', label: 'French' },
-  { code: 'hy', label: 'Armenian' },
-  { code: 'ko', label: 'Korean' },
-  { code: 'zh', label: 'Chinese' },
-  { code: 'fa', label: 'Persian' },
-  { code: 'ru', label: 'Russian' },
-  { code: 'ja', label: 'Japanese' },
-  { code: 'ar', label: 'Arabic' },
-  { code: 'pt', label: 'Portuguese' },
-  { code: 'tl', label: 'Tagalog' },
-]
-
 function isHeaderRow(cells: string[]): boolean {
-  return cells.some((c) => /^(show ?name|name|show ?key|key|category|cat|primary ?language|language|lang)$/i.test(c.trim()))
+  return cells.some((c) => /^(show ?name|name|show ?key|key|category|cat)$/i.test(c.trim()))
 }
 
 // Parse a pasted table. Splits on tab (preferred — spreadsheet copy) or comma,
-// one row per line. Column order: name, key, category, language. A missing or
-// blank language column is left blank — a soft default to English.
+// one row per line. Column order: name, key, category.
 function parsePaste(text: string): DraftRow[] {
   const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, '')).filter((l) => l.trim() !== '')
   const rows = lines.map((line) => (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim()))
@@ -56,12 +35,10 @@ function parsePaste(text: string): DraftRow[] {
     show_name: cells[0] ?? '',
     key: cells[1] ?? '',
     category: cells[2] ?? '',
-    primary_language: (cells[3] ?? '').trim(),
   }))
 }
 
 // A row is "empty" for grid bookkeeping if it has no name, key, or category.
-// Language is ignored here — a blank language is a valid soft default (English).
 const rowIsEmpty = (r: DraftRow) => !r.show_name.trim() && !r.key.trim() && !r.category.trim()
 const rowIsValid = (r: DraftRow) => !!r.show_name.trim() && !!r.key.trim()
 
@@ -111,7 +88,7 @@ export function BulkShowEntry({
   function loadPaste() {
     const parsed = parsePaste(pasteText)
     if (parsed.length === 0) {
-      toast('error', 'Nothing to load — paste rows of: name, key, category, language')
+      toast('error', 'Nothing to load — paste rows of: name, key, category')
       return
     }
     loadParsed(parsed)
@@ -171,7 +148,7 @@ export function BulkShowEntry({
       {/* Paste loader */}
       <div className="space-y-1.5">
         <label className="text-xs text-gray-500 dark:text-warm-400">
-          Paste from a spreadsheet (columns: name, key, category, language — tab or comma separated). Language defaults to English.
+          Paste from a spreadsheet (columns: name, key, category — tab or comma separated).
         </label>
         <div className="flex gap-2">
           <textarea
@@ -210,7 +187,6 @@ export function BulkShowEntry({
               <th className="text-left px-2 py-1.5 font-medium">Name</th>
               <th className="text-left px-2 py-1.5 font-medium">Key</th>
               <th className="text-left px-2 py-1.5 font-medium">Category</th>
-              <th className="text-left px-2 py-1.5 font-medium">Language</th>
               <th className="px-2 py-1.5 w-24"></th>
               <th className="px-2 py-1.5 w-8"></th>
             </tr>
@@ -248,30 +224,6 @@ export function BulkShowEntry({
                       placeholder="e.g. News & Politics"
                       className="w-full border dark:border-warm-600 rounded px-2 py-1 text-sm dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
                     />
-                  </td>
-                  <td className="px-1 py-1">
-                    <div className="flex items-center gap-1">
-                      <select
-                        value={row.primary_language}
-                        onChange={(e) => updateCell(i, 'primary_language', e.target.value)}
-                        className="flex-1 border dark:border-warm-600 rounded px-2 py-1 text-sm dark:bg-warm-800 dark:text-warm-100"
-                      >
-                        <option value="">English (default)</option>
-                        {LANGUAGE_OPTIONS.map((l) => (
-                          <option key={l.code} value={l.code}>{l.label} ({l.code})</option>
-                        ))}
-                      </select>
-                      {row.primary_language && (
-                        <button
-                          type="button"
-                          onClick={() => updateCell(i, 'primary_language', '')}
-                          className="text-gray-400 hover:text-red-600 dark:hover:text-red-400 px-1"
-                          title="Clear language"
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
                   </td>
                   <td className="px-1 py-1 text-center">
                     {incomplete ? (

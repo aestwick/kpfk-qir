@@ -84,6 +84,9 @@ export interface ShowKey {
   display_name: string | null
   category: string | null
   default_category: string | null
+  /** @deprecated Dormant column. Episode language is auto-detected by Whisper
+   *  (transcripts.language) and translation auto-detects the source; no longer
+   *  set or read by the app. Kept to match the existing DB column. */
   primary_language: string | null
   active: boolean
   email: string | null

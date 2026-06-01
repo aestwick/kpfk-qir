@@ -74,7 +74,7 @@ export async function POST(
             {
               role: 'system',
               content:
-                'You are a professional translator. Translate the following text from Spanish to English. Preserve paragraph breaks. Output ONLY the translated text, nothing else.',
+                'You are a professional translator. Detect the language of the following text and translate it into English. If it is already English, return it unchanged. Preserve paragraph breaks. Output ONLY the translated text, nothing else.',
             },
             { role: 'user', content: chunk },
           ],
@@ -109,7 +109,7 @@ export async function POST(
                 {
                   role: 'system',
                   content:
-                    'Translate each numbered line from Spanish to English. Keep the [N] numbering prefix on each line. Output ONLY the translated numbered lines, nothing else.',
+                    'Translate each numbered line into English (detect the source language; leave English lines unchanged). Keep the [N] numbering prefix on each line. Output ONLY the translated numbered lines, nothing else.',
                 },
                 { role: 'user', content: numbered },
               ],

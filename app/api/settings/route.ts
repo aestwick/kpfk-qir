@@ -116,7 +116,7 @@ export async function PUT(request: NextRequest) {
 }
 
 // POST /api/settings — bulk-create show_keys for the active station.
-// Body: { resource: 'shows', shows: [{ key, show_name, default_category?, primary_language? }] }
+// Body: { resource: 'shows', shows: [{ key, show_name, default_category? }] }
 // Upserts on (station_id, key): existing keys are updated, new keys inserted.
 export async function POST(request: NextRequest) {
   try {
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
     // Normalize + validate. A row needs a key and a name; everything else is optional.
     // De-dupe by key within the payload (last write wins) so a doubled paste row
     // doesn't trip the upsert's "cannot affect row a second time" error.
-    const byKey = new Map<string, { station_id: string; key: string; show_name: string; category: string | null; primary_language: string | null; active: boolean }>()
+    const byKey = new Map<string, { station_id: string; key: string; show_name: string; category: string | null; active: boolean }>()
     const skipped: { row: number; reason: string }[] = []
 
     input.forEach((raw: Record<string, unknown>, i: number) => {
@@ -153,9 +153,7 @@ export async function POST(request: NextRequest) {
       // category = iTunes feed category (e.g. "News & Politics"), stored on show_keys.category.
       const category = raw.category != null && String(raw.category).trim() !== ''
         ? String(raw.category).trim() : null
-      const primary_language = raw.primary_language != null && String(raw.primary_language).trim() !== ''
-        ? String(raw.primary_language).trim().toLowerCase() : null
-      byKey.set(key, { station_id: stationId, key, show_name, category, primary_language, active: true })
+      byKey.set(key, { station_id: stationId, key, show_name, category, active: true })
     })
 
     const rows = Array.from(byKey.values())
@@ -193,7 +191,7 @@ export async function PATCH(request: NextRequest) {
     if (resource === 'show') {
       if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
-      const allowedFields = ['show_name', 'category', 'default_category', 'primary_language', 'active', 'email', 'show_group', 'display_name']
+      const allowedFields = ['show_name', 'category', 'default_category', 'active', 'email', 'show_group', 'display_name']
       const safeUpdates: Record<string, unknown> = {}
       for (const [key, value] of Object.entries(updates)) {
         if (allowedFields.includes(key)) {

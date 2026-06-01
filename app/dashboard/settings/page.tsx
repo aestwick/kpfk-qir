@@ -7,7 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
-import { resolveGroupDisplayName, resolveShowGroup, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
+import { resolveGroupDisplayName, resolveShowGroup } from '@/lib/shows'
 import type { StationMember, StationRole } from '@/lib/types'
 
 /* ─── lazy-loaded corrections component ─── */
@@ -48,7 +48,6 @@ interface Show {
   display_name: string | null
   category: string | null
   default_category: string | null
-  primary_language: string | null
   active: boolean
   email: string | null
   created_at: string
@@ -609,7 +608,6 @@ export default function SettingsPage() {
     else if (field === 'show_group') setEditingShowValue(show.show_group ?? '')
     else if (field === 'category') setEditingShowValue(show.category ?? '')
     else if (field === 'default_category') setEditingShowValue(show.default_category ?? '')
-    else if (field === 'primary_language') setEditingShowValue(show.primary_language ?? '')
     setTimeout(() => showEditRef.current?.focus(), 0)
   }
 
@@ -629,11 +627,9 @@ export default function SettingsPage() {
     setSavingShow(showId)
     const value = field === 'show_name'
       ? editingShowValue.trim()
-      : field === 'primary_language'
-        ? (editingShowValue.trim().toLowerCase() || null)
-        : field === 'display_name' || field === 'show_group'
-          ? (editingShowValue.trim() || null)
-          : (editingShowValue || null)
+      : field === 'display_name' || field === 'show_group'
+        ? (editingShowValue.trim() || null)
+        : (editingShowValue || null)
     try {
       const res = await authedFetch('/api/settings', {
         method: 'PATCH',
@@ -1237,7 +1233,6 @@ export default function SettingsPage() {
                   <th className="text-left px-3 py-2 font-medium" title="Grouping identity. Give two feeds the same group to merge them into one logical show in the QIR picker and report. Blank = standalone (the key is its own group).">Group</th>
                   <th className="text-left px-3 py-2 font-medium" title="iTunes feed category from the RSS (e.g. News & Politics)">Category</th>
                   <th className="text-left px-3 py-2 font-medium" title="FCC issue category applied to summaries">Default Category</th>
-                  <th className="text-left px-3 py-2 font-medium">Language</th>
                   <th className="text-center px-3 py-2 font-medium">Active</th>
                   <th className="text-center px-3 py-2 font-medium" title="Exclude this feed (show key) from ingest. Only this key is dropped — other airings of the same show keep running.">Exclude</th>
                   <th className="text-right px-3 py-2 font-medium">Episodes</th>
@@ -1245,7 +1240,7 @@ export default function SettingsPage() {
               </thead>
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
+                  <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
                 ) : groupedShows.map((group) => (
@@ -1388,41 +1383,6 @@ export default function SettingsPage() {
                           title="Click to edit"
                         >
                           {show.default_category || <span className="text-gray-300 italic dark:text-warm-500">None</span>}
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      {editingShow?.id === show.id && editingShow.field === 'primary_language' ? (
-                        <input
-                          ref={showEditRef as React.RefObject<HTMLInputElement>}
-                          type="text"
-                          value={editingShowValue}
-                          onChange={(e) => setEditingShowValue(e.target.value)}
-                          onBlur={() => saveShowEdit(show.id)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') saveShowEdit(show.id)
-                            if (e.key === 'Escape') {
-                              showEditCancelled.current = true
-                              ;(e.target as HTMLInputElement).blur()
-                            }
-                          }}
-                          placeholder="e.g. en"
-                          className="border rounded px-2 py-0.5 text-sm w-20 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
-                        />
-                      ) : (
-                        <button
-                          onClick={() => startShowEdit(show, 'primary_language')}
-                          className="text-left hover:text-blue-600 cursor-pointer text-gray-600 dark:text-warm-400"
-                          title="Click to edit"
-                        >
-                          {show.primary_language || (
-                            <span
-                              className="text-gray-300 italic dark:text-warm-500"
-                              title="No language set — defaults to English"
-                            >
-                              {DEFAULT_SHOW_LANGUAGE}
-                            </span>
-                          )}
                         </button>
                       )}
                     </td>

@@ -583,6 +583,22 @@ export default function EpisodeDetailPage() {
   const showTranscript = viewLang === 'english' && transcript?.english_transcript ? transcript.english_transcript : transcript?.transcript
   const showVtt = viewLang === 'english' && transcript?.english_vtt ? transcript.english_vtt : transcript?.vtt
 
+  // Auto-translate non-English episodes on view: fire once when the transcript
+  // loads. If it was already translated we just switch to the English view;
+  // otherwise we kick off the translation (cached server-side after one run).
+  const autoTranslateRef = useRef(false)
+  useEffect(() => {
+    if (autoTranslateRef.current) return
+    if (!transcript || !isNonEnglish || !transcript.transcript) return
+    autoTranslateRef.current = true
+    if (transcript.english_transcript) {
+      setViewLang('english')
+    } else if (!translating) {
+      handleTranslate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transcript, isNonEnglish])
+
   if (loading) return (
     <div className="space-y-6">
       <div className="h-8 bg-gray-200 dark:bg-warm-700 rounded w-64 animate-pulse" />
