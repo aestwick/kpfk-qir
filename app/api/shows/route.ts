@@ -24,15 +24,23 @@ export async function GET(request: NextRequest) {
 
     if (activeOnly) query = query.eq('active', true)
 
-    const { data, error } = await query
+    const [{ data, error }, { data: station }] = await Promise.all([
+      query,
+      supabase
+        .from('stations')
+        .select('show_name_strip_prefixes')
+        .eq('id', stationId)
+        .maybeSingle(),
+    ])
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const stripPrefixes = station?.show_name_strip_prefixes ?? null
 
     // Additively expose the resolved display name + grouping identity alongside
     // the raw row, so listings can show a clean name without breaking existing
     // consumers that still read show_name.
     const shows = (data ?? []).map((row) => ({
       ...row,
-      display: resolveShowDisplayName(row),
+      display: resolveShowDisplayName(row, stripPrefixes),
       group: resolveShowGroup(row),
     }))
 

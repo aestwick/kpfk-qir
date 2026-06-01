@@ -39,7 +39,15 @@ export async function GET(request: NextRequest) {
         episode_count: countMap.get(show.key) ?? 0,
       }))
 
-      return NextResponse.json({ shows })
+      // The station's strip prefixes let the client tidy auto-derived names
+      // (e.g. drop "KPFK -") exactly as the server does.
+      const { data: station } = await supabase
+        .from('stations')
+        .select('show_name_strip_prefixes')
+        .eq('id', stationId)
+        .maybeSingle()
+
+      return NextResponse.json({ shows, stripPrefixes: station?.show_name_strip_prefixes ?? null })
     }
 
     // Default: return the EFFECTIVE settings for the active station — global
