@@ -34,6 +34,20 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
   dismissed: 'Dismissed',
 }
 
+// Human labels for the compliance check types raised by workers/compliance.ts.
+export const FLAG_TYPE_LABELS: Record<string, string> = {
+  profanity: 'Profanity',
+  station_id_missing: 'Station ID Missing',
+  technical: 'Technical Issue',
+  payola_plugola: 'Payola/Plugola',
+  sponsor_id: 'Sponsor ID Missing',
+  indecency: 'Indecency',
+}
+
+export function flagTypeLabel(type: string): string {
+  return FLAG_TYPE_LABELS[type] ?? type
+}
+
 // Tailwind badge classes per status (light + dark).
 export const REVIEW_STATUS_BADGE: Record<ReviewStatus, string> = {
   suggested: 'bg-gray-100 text-gray-600 dark:bg-warm-700 dark:text-warm-300',

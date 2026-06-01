@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     // Build query (scoped to station via the inner episode_log join)
     let query = supabase
       .from('compliance_flags')
-      .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host, status, station_id)')
+      .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host, status, station_id, mp3_url)')
       .eq('episode_log.station_id', stationId)
       .order('created_at', { ascending: false })
 
@@ -61,6 +61,7 @@ export async function GET(request: NextRequest) {
       duration: number | null
       headline: string | null
       host: string | null
+      mp3_url: string | null
       flags: typeof flags
     }
 
@@ -108,6 +109,7 @@ export async function GET(request: NextRequest) {
           duration: ep.duration,
           headline: ep.headline,
           host: ep.host,
+          mp3_url: ep.mp3_url ?? null,
           flags: [],
         })
       }
