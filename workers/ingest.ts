@@ -5,6 +5,7 @@ import { getExcludedCategories, getExcludedShowKeys, isPipelinePaused } from '..
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -299,5 +300,15 @@ export async function processIngest(job: Job) {
   }
 
   console.log(`[ingest] done — ${totalNew} new episodes ingested`)
+  // System audit event (only when work happened, to keep the trail readable).
+  if (totalNew > 0) {
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.INGEST_COMPLETE,
+      operation: 'insert',
+      stationId,
+      resourceType: 'episode',
+      metadata: { newEpisodes: totalNew },
+    })
+  }
   return { newEpisodes: totalNew }
 }

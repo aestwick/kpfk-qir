@@ -67,6 +67,9 @@ const icons = {
   ),
 }
 
+// `superAdminOnly` items are hidden unless the signed-in user is a super-admin
+// (the page itself also hard-gates via the 403 from /api/audit — nav hiding
+// alone is never the only guard).
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: icons.overview },
   { href: '/dashboard/episodes', label: 'Episodes', icon: icons.episodes },
@@ -76,6 +79,7 @@ const navItems = [
   { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
   { href: '/dashboard/usage', label: 'Usage', icon: icons.usage },
   { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.audit },
+  { href: '/dashboard/audit', label: 'Audit Log', icon: icons.audit, superAdminOnly: true },
   { href: '/dashboard/generate', label: 'Generate QIR', icon: icons.generate },
   { href: '/dashboard/downloads', label: 'Downloads', icon: icons.downloads },
   { href: '/dashboard/settings', label: 'Settings', icon: icons.settings },
@@ -88,6 +92,7 @@ export default function DashboardLayout({
 }) {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [userEmail, setUserEmail] = useState('')
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
 
@@ -104,6 +109,15 @@ export default function DashboardLayout({
       }
       setAuthed(true)
       setUserEmail(session.user.email ?? '')
+      // Resolve super-admin status to gate the Audit Log nav entry. Reads the
+      // user's own super_admins row (allowed by RLS, same as the station
+      // switcher). The audit page itself still hard-gates on the API 403.
+      supabase
+        .from('super_admins')
+        .select('user_id')
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+        .then(({ data }) => setIsSuperAdmin(!!data))
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -117,6 +131,15 @@ export default function DashboardLayout({
 
   async function handleLogout() {
     const supabase = createBrowserClient()
+    // Record the logout while the session token is still valid, then sign out.
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) {
+      await fetch('/api/audit/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'auth.logout' }),
+      }).catch(() => {})
+    }
     await supabase.auth.signOut()
     window.location.href = '/login'
   }
@@ -189,7 +212,7 @@ export default function DashboardLayout({
 
         {/* Navigation */}
         <div className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {navItems.map((item) => {
+          {navItems.filter((item) => !item.superAdminOnly || isSuperAdmin).map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             return (
               <a

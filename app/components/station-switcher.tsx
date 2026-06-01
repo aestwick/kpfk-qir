@@ -74,9 +74,25 @@ export function StationSwitcher() {
     return () => { cancelled = true }
   }, [])
 
-  function onChange(slug: string) {
+  async function onChange(slug: string) {
+    const from = active
     writeCookie(STATION_COOKIE, slug)
     setActive(slug)
+    // Audit the switch before reloading. Attach the session token and the new
+    // active station so the event is attributed and station-scoped. Best-effort.
+    try {
+      const supabase = createBrowserClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        await fetch('/api/audit/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ action: 'auth.station_switch', stationSlug: slug, metadata: { from, to: slug } }),
+        })
+      }
+    } catch {
+      // Never block the switch on an audit write.
+    }
     // Reload so every page refetches scoped to the newly active station.
     window.location.reload()
   }

@@ -59,6 +59,7 @@ lib/
   queue.ts          — BullMQ queue instances (ingest, transcribe, summarize, generate-qir)
   settings.ts       — Settings cache (60s TTL) reading from qir_settings table
   usage.ts          — Cost logging helpers (Groq per-second, OpenAI per-token)
+  audit.ts          — Append-only audit log helper + the event registry (see Audit Logging)
   types.ts          — TypeScript interfaces for all database tables
   qir-format.ts     — Report formatting and date range helpers
 ```
@@ -79,6 +80,8 @@ app/api/
   settings/route.ts         — GET all / PUT upsert setting
   corrections/route.ts      — CRUD for transcript corrections
   usage/route.ts            — GET cost analytics with date range
+  audit/route.ts            — GET audit log (super-admin only, paginated, filterable)
+  audit/event/route.ts      — POST client-reported auth/station events (allowlisted)
 ```
 
 ### Dashboard Pages (all `'use client'`)
@@ -92,6 +95,7 @@ app/dashboard/
   jobs/page.tsx             — Queue status monitoring
   generate/page.tsx         — QIR draft builder: generate, curate, edit entries, finalize
   usage/page.tsx            — Cost tracking with date range
+  audit/page.tsx            — Audit log viewer (super-admin only; trailing window, diff view)
   settings/page.tsx         — App config + transcript corrections CRUD
   downloads/page.tsx        — Batch export hub
 ```
@@ -102,7 +106,7 @@ app/dashboard/
 app/
   page.tsx                  — Redirects to /dashboard
   login/page.tsx            — Supabase email/password auth
-  [year]/q[quarter]/page.tsx — Public finalized QIR (server-rendered, print-friendly)
+  [station]/[year]/q[quarter]/page.tsx — Public finalized QIR (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
 ```
 
 ### Shared Components
@@ -164,6 +168,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 **Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.
 
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
+
+**Audit logging** is hybrid and append-only (`audit_log`, migration 028; super-admin-only at `/dashboard/audit`). DB triggers (`audit_row_change()`) capture *every* mutation on tenant tables — user-attributed via `auth.uid()`, or `system` for worker/service-role writes. App-layer `lib/audit.ts#logAuditEvent` captures what triggers can't: reads/views, auth events, exports/downloads, and worker stage-completion events. Retention is **permanent** (no TTL/cron cleanup); the dashboard shows a trailing 30-day window with a "full history retained" banner. **When you add a new app-layer event type, register it in `lib/audit.ts` — `AUDIT_OPERATIONS` (must also match the DB `operation` CHECK) and `AUDIT_ACTIONS` are the single source of truth; client-postable events go in `CLIENT_AUDIT_EVENTS`. When you add a new tenant table, add it to the trigger loop in migration 028.** Heavy strings (>2000 chars) are redacted to `<redacted: N chars>` markers at capture so the permanent table stays lean.
 
 ## Multi-Station (Multi-Tenant) Model
 
