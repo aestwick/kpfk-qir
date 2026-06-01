@@ -6,6 +6,7 @@ import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { getQuarterOptions, getCurrentQuarter } from '@/lib/quarters'
+import { episodeHref, locationFrom } from '@/lib/nav'
 
 interface Episode {
   id: number
@@ -66,6 +67,9 @@ export default function EpisodesPage() {
   const order = searchParams.get('order') ?? 'desc'
   const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
   const limit = 50
+
+  // Remember this filtered view so episode detail can link back to it exactly.
+  const from = locationFrom(pathname, searchParams.toString())
 
   // Local state for text inputs (decoupled from URL for responsive typing)
   const [showFilterLocal, setShowFilterLocal] = useState(showFilterParam)
@@ -261,14 +265,14 @@ export default function EpisodesPage() {
       } else if (e.key === 'k') {
         setSelectedRow((r) => Math.max(r - 1, 0))
       } else if (e.key === 'Enter' && selectedRow >= 0 && selectedRow < episodes.length) {
-        router.push(`/dashboard/episodes/${episodes[selectedRow].id}`)
+        router.push(episodeHref(episodes[selectedRow].id, from))
       } else if (e.key === 'r' && !e.metaKey && !e.ctrlKey) {
         setConfirmOpen(true)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [episodes, selectedRow, router])
+  }, [episodes, selectedRow, router, from])
 
   // Reset selected row when episodes change
   useEffect(() => { setSelectedRow(-1) }, [episodes])
@@ -367,7 +371,7 @@ export default function EpisodesPage() {
                   // Don't navigate if clicking on the category cell editing area
                   const target = e.target as HTMLElement
                   if (target.closest('[data-category-cell]')) return
-                  router.push(`/dashboard/episodes/${ep.id}`)
+                  router.push(episodeHref(ep.id, from))
                 }}
               >
                 <td className="px-4 py-3 max-w-[200px] truncate">

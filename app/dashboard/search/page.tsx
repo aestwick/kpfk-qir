@@ -11,6 +11,7 @@ import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 import { getQuarterOptions, getCurrentQuarter } from '@/lib/quarters'
+import { withFrom, locationFrom } from '@/lib/nav'
 
 interface SearchResult {
   episodeId: number
@@ -263,7 +264,7 @@ export default function SearchPage() {
               const seek = r.startMs != null ? `?seek=${(r.startMs / 1000).toFixed(1)}` : ''
               return (
                 <li key={r.episodeId} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-warm-700/50">
-                  <a href={`/dashboard/episodes/${r.episodeId}${seek}`} className="block">
+                  <a href={withFrom(`/dashboard/episodes/${r.episodeId}${seek}`, locationFrom(pathname, searchParams.toString()))} className="block">
                     <div className="flex items-center gap-2 text-sm">
                       <span className="font-medium text-blue-700 dark:text-blue-400">{r.showName ?? `Episode ${r.episodeId}`}</span>
                       <span className="text-gray-400 dark:text-warm-500">·</span>

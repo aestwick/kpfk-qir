@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { isActiveReviewStatus } from '@/lib/compliance-status'
+import { episodeHref } from '@/lib/nav'
 
 interface Show {
   key: string
@@ -691,7 +692,7 @@ export default function ShowAuditPage() {
                         </div>
                       )}
                       <a
-                        href={`/dashboard/episodes/${ep.id}`}
+                        href={episodeHref(ep.id, '/dashboard/shows/audit')}
                         className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400"
                       >
                         View full episode details &rarr;

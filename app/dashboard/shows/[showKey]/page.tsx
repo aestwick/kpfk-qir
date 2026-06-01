@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { useParams, useRouter } from 'next/navigation'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
+import { episodeHref } from '@/lib/nav'
 
 interface Episode {
   id: number
@@ -133,7 +134,7 @@ export default function ShowPage() {
             {episodes.map((ep) => (
               <a
                 key={ep.id}
-                href={`/dashboard/episodes/${ep.id}`}
+                href={episodeHref(ep.id, `/dashboard/shows/${encodeURIComponent(showKey)}`)}
                 className="px-5 py-3.5 flex items-center gap-4 hover:bg-gray-50 transition-colors"
               >
                 <span className="text-sm text-gray-500 w-24 shrink-0 tabular-nums">
