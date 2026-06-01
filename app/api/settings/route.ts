@@ -185,7 +185,7 @@ export async function PATCH(request: NextRequest) {
     if (resource === 'show') {
       if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 })
 
-      const allowedFields = ['show_name', 'category', 'default_category', 'primary_language', 'active', 'email']
+      const allowedFields = ['show_name', 'category', 'default_category', 'primary_language', 'active', 'email', 'show_group', 'display_name']
       const safeUpdates: Record<string, unknown> = {}
       for (const [key, value] of Object.entries(updates)) {
         if (allowedFields.includes(key)) {

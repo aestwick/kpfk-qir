@@ -7,6 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
+import { resolveGroupDisplayName, resolveShowGroup } from '@/lib/shows'
 import type { StationMember, StationRole } from '@/lib/types'
 
 /* ─── lazy-loaded corrections component ─── */
@@ -42,6 +43,9 @@ interface Show {
   id: number
   key: string
   show_name: string
+  show_group: string | null
+  feed_name: string | null
+  display_name: string | null
   category: string | null
   default_category: string | null
   primary_language: string | null
@@ -597,6 +601,8 @@ export default function SettingsPage() {
   function startShowEdit(show: Show, field: string) {
     setEditingShow({ id: show.id, field })
     if (field === 'show_name') setEditingShowValue(show.show_name)
+    else if (field === 'display_name') setEditingShowValue(show.display_name ?? '')
+    else if (field === 'show_group') setEditingShowValue(show.show_group ?? '')
     else if (field === 'category') setEditingShowValue(show.category ?? '')
     else if (field === 'default_category') setEditingShowValue(show.default_category ?? '')
     else if (field === 'primary_language') setEditingShowValue(show.primary_language ?? '')
@@ -621,7 +627,9 @@ export default function SettingsPage() {
       ? editingShowValue.trim()
       : field === 'primary_language'
         ? (editingShowValue.trim().toLowerCase() || null)
-        : (editingShowValue || null)
+        : field === 'display_name' || field === 'show_group'
+          ? (editingShowValue.trim() || null)
+          : (editingShowValue || null)
     try {
       const res = await authedFetch('/api/settings', {
         method: 'PATCH',
@@ -722,25 +730,32 @@ export default function SettingsPage() {
   }
 
   // ── Filtered shows ──
-  const filteredShows = shows.filter(s =>
-    !showSearch || s.show_name.toLowerCase().includes(showSearch.toLowerCase()) || s.key.toLowerCase().includes(showSearch.toLowerCase())
-  )
+  const filteredShows = shows.filter(s => {
+    if (!showSearch) return true
+    const q = showSearch.toLowerCase()
+    return [s.show_name, s.display_name, s.feed_name, s.key, s.show_group]
+      .some((v) => v?.toLowerCase().includes(q))
+  })
 
-  // Group feeds that share a show_name into one logical show, so a multi-key
-  // program (e.g. a 6-hour show split across 6 keys) reads as a single show with
-  // its keys listed under it. Keys stay individually controllable (active,
-  // exclude, category) — only the Name is collapsed across the group.
+  // Group feeds by their explicit show_group (coalesce(show_group, key)) into one
+  // logical show, so a multi-key program (e.g. a 6am + 9am airing) reads as a
+  // single show with its keys listed under it. Grouping is by the group field,
+  // never the name — names can differ across feeds. Keys stay individually
+  // controllable (name override, group, active, exclude, category).
   const groupedShows = (() => {
-    const sorted = [...filteredShows].sort(
-      (a, b) => a.show_name.localeCompare(b.show_name) || a.key.localeCompare(b.key)
-    )
-    const groups: { name: string; shows: Show[] }[] = []
-    for (const s of sorted) {
-      const last = groups[groups.length - 1]
-      if (last && last.name === s.show_name) last.shows.push(s)
-      else groups.push({ name: s.show_name, shows: [s] })
+    const byGroup = new Map<string, Show[]>()
+    for (const s of filteredShows) {
+      const g = resolveShowGroup(s)
+      const list = byGroup.get(g) ?? []
+      list.push(s)
+      byGroup.set(g, list)
     }
-    return groups
+    const groups = Array.from(byGroup.entries()).map(([group, feeds]) => ({
+      group,
+      shows: [...feeds].sort((a, b) => a.key.localeCompare(b.key)),
+      name: resolveGroupDisplayName(feeds),
+    }))
+    return groups.sort((a, b) => a.name.localeCompare(b.name) || a.group.localeCompare(b.group))
   })()
 
   if (loading) return (
@@ -1214,7 +1229,8 @@ export default function SettingsPage() {
               <thead className="bg-gray-50 border-b dark:bg-warm-700 dark:border-warm-600">
                 <tr>
                   <th className="text-left px-3 py-2 font-medium">Key</th>
-                  <th className="text-left px-3 py-2 font-medium">Name</th>
+                  <th className="text-left px-3 py-2 font-medium" title="Displayed name. Override (display_name) wins over the RSS-derived feed name. Edits the representative feed for the group.">Name</th>
+                  <th className="text-left px-3 py-2 font-medium" title="Grouping identity. Give two feeds the same group to merge them into one logical show in the QIR picker and report. Blank = standalone (the key is its own group).">Group</th>
                   <th className="text-left px-3 py-2 font-medium" title="iTunes feed category from the RSS (e.g. News & Politics)">Category</th>
                   <th className="text-left px-3 py-2 font-medium" title="FCC issue category applied to summaries">Default Category</th>
                   <th className="text-left px-3 py-2 font-medium">Language</th>
@@ -1225,7 +1241,7 @@ export default function SettingsPage() {
               </thead>
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
+                  <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
                     {showSearch ? 'No shows match your search' : 'No shows found'}
                   </td></tr>
                 ) : groupedShows.map((group) => (
@@ -1235,7 +1251,7 @@ export default function SettingsPage() {
                     <td className="px-3 py-2 font-mono text-xs text-gray-500 dark:text-warm-400">{show.key}</td>
                     {idx === 0 && (
                     <td className="px-3 py-2 align-top" rowSpan={group.shows.length}>
-                      {editingShow?.id === show.id && editingShow.field === 'show_name' ? (
+                      {editingShow?.id === show.id && editingShow.field === 'display_name' ? (
                         <input
                           ref={showEditRef as React.RefObject<HTMLInputElement>}
                           type="text"
@@ -1249,22 +1265,57 @@ export default function SettingsPage() {
                               ;(e.target as HTMLInputElement).blur()
                             }
                           }}
+                          placeholder={show.feed_name ?? show.show_name}
                           className="border rounded px-2 py-0.5 text-sm w-full dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                         />
                       ) : (
                         <button
-                          onClick={() => startShowEdit(show, 'show_name')}
+                          onClick={() => startShowEdit(show, 'display_name')}
                           className="text-left hover:text-blue-600 hover:underline cursor-pointer dark:text-warm-100"
-                          title="Click to edit"
+                          title="Click to edit the display name (override)"
                         >
-                          {show.show_name}
+                          {group.name}
                           {group.shows.length > 1 && (
-                            <span className="ml-1 text-xs text-gray-400 dark:text-warm-500">({group.shows.length} keys)</span>
+                            <span className="ml-1 text-xs text-gray-400 dark:text-warm-500">({group.shows.length} feeds)</span>
+                          )}
+                          {/* Show the RSS-derived feed name when it isn't already what we're displaying. */}
+                          {show.feed_name && show.feed_name !== group.name && (
+                            <span className="block text-xs text-gray-400 dark:text-warm-500">RSS: {show.feed_name}</span>
                           )}
                         </button>
                       )}
                     </td>
                     )}
+                    <td className="px-3 py-2">
+                      {editingShow?.id === show.id && editingShow.field === 'show_group' ? (
+                        <input
+                          ref={showEditRef as React.RefObject<HTMLInputElement>}
+                          type="text"
+                          value={editingShowValue}
+                          onChange={(e) => setEditingShowValue(e.target.value)}
+                          onBlur={() => saveShowEdit(show.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveShowEdit(show.id)
+                            if (e.key === 'Escape') {
+                              showEditCancelled.current = true
+                              ;(e.target as HTMLInputElement).blur()
+                            }
+                          }}
+                          placeholder={show.key}
+                          className="border rounded px-2 py-0.5 text-sm w-28 font-mono dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                        />
+                      ) : (
+                        <button
+                          onClick={() => startShowEdit(show, 'show_group')}
+                          className="text-left hover:text-blue-600 cursor-pointer font-mono text-xs"
+                          title="Click to edit. Set the same group on multiple feeds to merge them into one logical show."
+                        >
+                          {show.show_group
+                            ? <span className="text-gray-700 dark:text-warm-200">{show.show_group}</span>
+                            : <span className="text-gray-300 italic dark:text-warm-500">{show.key}</span>}
+                        </button>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       {editingShow?.id === show.id && editingShow.field === 'category' ? (
                         <input

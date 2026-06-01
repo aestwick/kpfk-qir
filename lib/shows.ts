@@ -42,3 +42,17 @@ export function resolveShowDisplayName(row: ShowNameFields): string {
 export function resolveShowGroup(row: Pick<ShowNameFields, 'key' | 'show_group'>): string {
   return row.show_group?.trim() || row.key
 }
+
+/**
+ * Canonical display name for a logical show made of one or more feeds. Feeds in
+ * a group can carry different name spellings, so we pick a single representative:
+ * the first feed's resolved display name (feeds are expected to be passed in a
+ * stable order). Returns 'Unknown Show' for an empty group.
+ */
+export function resolveGroupDisplayName(feeds: ShowNameFields[]): string {
+  // Prefer the first feed that has an explicit override, then any feed's resolved
+  // name, so a single curated display_name wins for the whole group.
+  const overridden = feeds.find((f) => f.display_name?.trim())
+  if (overridden) return resolveShowDisplayName(overridden)
+  return feeds.length ? resolveShowDisplayName(feeds[0]) : 'Unknown Show'
+}
