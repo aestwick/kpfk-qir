@@ -288,9 +288,9 @@ export default function EpisodesPage() {
           <a
             href={`/dashboard/search${quarterApiValue ? `?quarter=${encodeURIComponent(quarterApiValue)}` : ''}`}
             className="px-3 py-1.5 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300 dark:bg-warm-700 dark:text-warm-200"
-            title="Search inside transcript text across shows"
+            title="Search transcripts, summaries, episodes, and shows"
           >
-            &#9906; Search Transcripts
+            &#9906; Search
           </a>
           <button onClick={() => setConfirmOpen(true)} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700 dark:bg-red-700">
             Retry Failed
