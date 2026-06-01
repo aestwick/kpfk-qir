@@ -2,8 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+// Translating a full hour-long episode is many model calls; allow headroom
+// before the platform kills the request (the work is also cached after one run).
+export const maxDuration = 300
+
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
+
+const TRANSLATE_MODEL = 'gpt-4o-mini'
+// Parallel model calls per request. The previous version did the whole VTT
+// sequentially (an hour episode took ~7 min); fanning out the transcript chunks
+// and cue batches brings that under a minute for the same ~2¢ cost.
+const CONCURRENCY = 6
+const TRANSCRIPT_CHUNK_CHARS = 3500
+const VTT_BATCH_SIZE = 100
+
+type Usage = { prompt_tokens: number; completion_tokens: number }
 
 export async function POST(
   request: NextRequest,
@@ -47,74 +62,68 @@ export async function POST(
     }
 
     const openai = new OpenAI({ apiKey: openaiKey })
+    const usage: Usage = { prompt_tokens: 0, completion_tokens: 0 }
 
-    // Translate the full transcript
-    const transcriptResponse = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a professional translator. Translate the following text from Spanish to English. Preserve paragraph breaks. Output ONLY the translated text, nothing else.',
-        },
-        { role: 'user', content: transcript.transcript },
-      ],
-      temperature: 0.3,
+    // --- Transcript: split into paragraph-aligned chunks, translate in parallel ---
+    const chunks = chunkByParagraph(transcript.transcript, TRANSCRIPT_CHUNK_CHARS)
+    const translatedChunks = await mapLimit(chunks, CONCURRENCY, async (chunk) => {
+      const resp = await withRetry(() =>
+        openai.chat.completions.create({
+          model: TRANSLATE_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a professional translator. Translate the following text from Spanish to English. Preserve paragraph breaks. Output ONLY the translated text, nothing else.',
+            },
+            { role: 'user', content: chunk },
+          ],
+          temperature: 0.3,
+        })
+      )
+      accumulate(usage, resp.usage)
+      return resp.choices[0]?.message?.content ?? ''
     })
 
-    const englishTranscript = transcriptResponse.choices[0]?.message?.content
+    const englishTranscript = translatedChunks.join('\n\n').trim()
     if (!englishTranscript) {
       return NextResponse.json({ error: 'Translation failed — empty response' }, { status: 500 })
     }
 
-    // Translate VTT cues if available
+    // --- VTT cues: translate batches of 100 in parallel, then rebuild ---
     let englishVtt: string | null = null
-    let vttUsage: { prompt_tokens: number; completion_tokens: number } | null = null
-
     if (transcript.vtt) {
-      // Extract cue texts from VTT, translate in batches, and rebuild
       const cueLines = extractVttCueTexts(transcript.vtt)
-
       if (cueLines.length > 0) {
-        // Batch cue texts into chunks of ~100 to stay within context limits
-        const batchSize = 100
-        const translatedCues: string[] = []
+        const batchStarts: number[] = []
+        for (let i = 0; i < cueLines.length; i += VTT_BATCH_SIZE) batchStarts.push(i)
+        const translatedCues: string[] = new Array(cueLines.length)
 
-        for (let i = 0; i < cueLines.length; i += batchSize) {
-          const batch = cueLines.slice(i, i + batchSize)
-          const numbered = batch.map((text, idx) => `[${i + idx}] ${text}`).join('\n')
-
-          const vttResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: 'Translate each numbered line from Spanish to English. Keep the [N] numbering prefix on each line. Output ONLY the translated numbered lines, nothing else.',
-              },
-              { role: 'user', content: numbered },
-            ],
-            temperature: 0.3,
-          })
-
-          const translated = vttResponse.choices[0]?.message?.content ?? ''
-          // Parse out the numbered translations
-          const lines = translated.split('\n').filter((l) => l.trim())
-          for (const line of lines) {
+        await mapLimit(batchStarts, CONCURRENCY, async (start) => {
+          const batch = cueLines.slice(start, start + VTT_BATCH_SIZE)
+          const numbered = batch.map((text, idx) => `[${start + idx}] ${text}`).join('\n')
+          const resp = await withRetry(() =>
+            openai.chat.completions.create({
+              model: TRANSLATE_MODEL,
+              messages: [
+                {
+                  role: 'system',
+                  content:
+                    'Translate each numbered line from Spanish to English. Keep the [N] numbering prefix on each line. Output ONLY the translated numbered lines, nothing else.',
+                },
+                { role: 'user', content: numbered },
+              ],
+              temperature: 0.3,
+            })
+          )
+          accumulate(usage, resp.usage)
+          const translated = resp.choices[0]?.message?.content ?? ''
+          for (const line of translated.split('\n')) {
             const match = line.match(/^\[(\d+)\]\s*(.*)/)
-            if (match) {
-              translatedCues[parseInt(match[1])] = match[2]
-            }
+            if (match) translatedCues[parseInt(match[1], 10)] = match[2]
           }
+        })
 
-          if (vttResponse.usage) {
-            if (!vttUsage) {
-              vttUsage = { prompt_tokens: 0, completion_tokens: 0 }
-            }
-            vttUsage.prompt_tokens += vttResponse.usage.prompt_tokens
-            vttUsage.completion_tokens += vttResponse.usage.completion_tokens
-          }
-        }
-
-        // Rebuild VTT with translated cue texts
         englishVtt = rebuildVttWithTranslations(transcript.vtt, translatedCues)
       }
     }
@@ -128,21 +137,17 @@ export async function POST(
       })
       .eq('episode_id', episodeId)
 
-    // Log usage
-    const transcriptUsage = transcriptResponse.usage
-    const totalInput = (transcriptUsage?.prompt_tokens ?? 0) + (vttUsage?.prompt_tokens ?? 0)
-    const totalOutput = (transcriptUsage?.completion_tokens ?? 0) + (vttUsage?.completion_tokens ?? 0)
-
+    // Log usage (single row for the whole translation)
+    const totalInput = usage.prompt_tokens
+    const totalOutput = usage.completion_tokens
     if (totalInput > 0) {
       const estimatedCost =
-        totalInput * OPENAI_INPUT_COST_PER_TOKEN +
-        totalOutput * OPENAI_OUTPUT_COST_PER_TOKEN
-
+        totalInput * OPENAI_INPUT_COST_PER_TOKEN + totalOutput * OPENAI_OUTPUT_COST_PER_TOKEN
       await supabase.from('usage_log').insert({
         station_id: stationId,
         episode_id: episodeId,
         service: 'openai',
-        model: 'gpt-4o-mini',
+        model: TRANSLATE_MODEL,
         operation: 'summarize', // reuse existing operation type for cost tracking
         input_tokens: totalInput,
         output_tokens: totalOutput,
@@ -161,6 +166,68 @@ export async function POST(
     console.error('POST /api/episodes/[id]/translate failed:', err)
     return NextResponse.json({ error: 'Translation failed' }, { status: 500 })
   }
+}
+
+/** Add a chat-completion's token usage into the running total. */
+function accumulate(into: Usage, u?: { prompt_tokens?: number; completion_tokens?: number } | null) {
+  if (!u) return
+  into.prompt_tokens += u.prompt_tokens ?? 0
+  into.completion_tokens += u.completion_tokens ?? 0
+}
+
+/** Retry transient failures (429 rate limits, 5xx) with exponential backoff.
+ *  Non-retryable client errors (4xx other than 429) throw immediately. */
+async function withRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      const status = (err as { status?: number })?.status
+      if (status && status !== 429 && status < 500) throw err
+      if (attempt === retries) break
+      await new Promise((r) => setTimeout(r, 500 * 2 ** attempt))
+    }
+  }
+  throw lastErr
+}
+
+/** Run `fn` over `items` with at most `limit` in flight at once, preserving
+ *  result order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function worker() {
+    for (;;) {
+      const idx = next++
+      if (idx >= items.length) return
+      results[idx] = await fn(items[idx], idx)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) || 1 }, () => worker()))
+  return results
+}
+
+/** Split text into chunks no larger than ~maxChars, breaking only on paragraph
+ *  boundaries so a chunk never cuts mid-sentence. */
+function chunkByParagraph(text: string, maxChars: number): string[] {
+  const paragraphs = text.split(/\n{2,}/)
+  const chunks: string[] = []
+  let current = ''
+  for (const p of paragraphs) {
+    if (current && current.length + p.length + 2 > maxChars) {
+      chunks.push(current)
+      current = ''
+    }
+    current = current ? `${current}\n\n${p}` : p
+  }
+  if (current) chunks.push(current)
+  return chunks.length ? chunks : [text]
 }
 
 /** Extract just the text content from each VTT cue */
