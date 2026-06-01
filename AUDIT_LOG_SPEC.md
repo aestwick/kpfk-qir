@@ -1,9 +1,11 @@
 # Audit Log — Implementation Spec
 
 Status: **approved for build** (this is a spec; no code shipped yet).
-Owner decisions captured: **hybrid capture** (DB triggers + app-layer helper),
-log **data mutations + auth events + reads/views + exports/downloads**, view
-access **super-admins only** with a dashboard UI.
+Owner decisions captured: **hybrid capture** (DB triggers + app-layer helper);
+log **data mutations + auth events + reads/views + exports/downloads**; view
+access **super-admins only** with a dashboard UI; **permanent retention — never
+auto-delete** (DB is the complete record, UI shows a trailing window clearly
+labeled). All open questions are resolved in §11 — no further sign-off needed.
 
 Target branch: `claude/great-clarke-I8QDw`.
 
@@ -93,7 +95,33 @@ that have **no** `station_id` column but are episode-scoped (`transcripts`,
 `compliance_flags`), resolve it via the `episode_id`. Tables with neither
 (`stations`, `super_admins`, `qir_settings`) record `station_id = null`.
 
+**Heavy-field redaction (RESOLVED — keep everything forever, so keep it lean):**
+because we never auto-delete (section 11), the captured row images must not bloat
+with large blobs (transcript text, VTT, embeddings). A redactor truncates any
+top-level string value longer than 2000 chars to a marker that **clearly
+indicates what was redacted and its original size** — so reviewers see "what's
+what" without storing megabytes per row.
+
 ```sql
+-- Replace oversized string values with a length-marked placeholder so the audit
+-- image stays small and self-describing. Applied to old/new before insert.
+create or replace function public.audit_redact(j jsonb)
+returns jsonb
+language sql
+immutable
+as $$
+  select case when j is null then null else (
+    select coalesce(jsonb_object_agg(
+             key,
+             case
+               when jsonb_typeof(value) = 'string' and length(value #>> '{}') > 2000
+                 then to_jsonb('<redacted: ' || length(value #>> '{}') || ' chars>')
+               else value
+             end), '{}'::jsonb)
+    from jsonb_each(j)
+  ) end;
+$$;
+
 create or replace function public.audit_row_change()
 returns trigger
 language plpgsql
@@ -141,9 +169,9 @@ begin
      tg_table_name,
      v_resource,
      lower(tg_op),
-     v_old,
-     v_new,
-     v_changed);
+     public.audit_redact(v_old),   -- heavy strings replaced with length markers
+     public.audit_redact(v_new),
+     v_changed);                    -- computed from raw images, before redaction
 
   return coalesce(new, old);
 end;
@@ -293,11 +321,18 @@ Add a `logAuditEvent({ operation: 'read', ... })` after a successful fetch in:
 - Transcript/VTT fetch path (episode detail loads transcript) — action `transcript.read`.
 - `app/api/members/route.ts` — GET (who viewed the member list). action `members.read`.
 - Public/finalized report view: `app/[station]/[year]/q[quarter]/page.tsx`
-  (server component) — action `report.read`, `actor_type` may be `anonymous`
-  for public viewers (no JWT). Pull IP/UA from `headers()`.
+  (server component) — action `report.read`. **RESOLVED: log these, including
+  anonymous public viewers** (no JWT → `actor_type = 'anonymous'`). Pull IP/UA
+  from `headers()`. The UI badges these distinctly as "Public/Anonymous" so it's
+  clear what's what. Note: anonymous internet/bot traffic can inflate this stream;
+  if it gets noisy, a follow-up can skip obvious bot user-agents — but we do NOT
+  drop the rows from the DB (long retention, no auto-delete).
 
 Do **not** instrument the paginated `episodes` list, dashboard stats, counts, or
-job polling — too noisy, low value. (Revisit if broader read coverage is wanted.)
+job polling — too noisy, low value. **The audit UI must show a short legend
+stating that read coverage is selective** (which resource views are tracked) so a
+reviewer doesn't mistake "no read row" for "never viewed." (Revisit if broader
+read coverage is wanted.)
 
 ### 6.2 Exports / downloads
 
@@ -347,7 +382,11 @@ recommended for a readable system trail.
   super-admins, so this is defense in depth.
 - Query params: `page`, `pageSize` (cap ~100), `actorId`, `action`,
   `resourceType`, `operation`, `stationId`, `from`, `to` (date range), free-text
-  `q` (ILIKE on action/resource_id). Order `created_at desc`.
+  `q` (ILIKE on action/resource_id). Order `created_at desc`. **When no `from` is
+  supplied, default to `now() - interval '30 days'`** (the trailing window); the
+  client can clear/widen it to reach the full retained history. Always return the
+  unfiltered-by-window **total count** for the active filters so the UI can show
+  "X of Y".
 - Return rows + total count for pagination.
 - Resolve `actor_id` → email via `supabaseAdmin` against `auth.users` (same
   pattern as `app/api/members/route.ts`), since the table stores only UUIDs.
@@ -357,10 +396,24 @@ recommended for a readable system trail.
 ## 8. UI — `app/dashboard/audit/page.tsx` (super-admin only)
 
 - `'use client'`, fetch via `authedFetch('/api/audit?...')`.
+- **Trailing window by default (RESOLVED):** the page loads a recent window
+  (default **last 30 days**, paginated) — the DB keeps everything forever, the UI
+  just doesn't render all of history at once. A header banner states clearly:
+  *"Showing recent activity (last 30 days). Full history is retained — widen the
+  date range to go further back."* Show the **total matching count** next to the
+  current page so it's obvious how much exists beyond the window.
 - Filter bar: actor (email dropdown), action, resource type, operation, station,
-  date range. Paginated table: time, actor (email or "system"), action,
-  resource (`type #id`), station. Expandable row → old→new diff (highlight
-  `changed_fields`) + metadata + IP/UA.
+  date range (the lever to reach older entries). Paginated table: time, actor
+  (email, "System", or "Public/Anonymous" badge), action, resource (`type #id`),
+  station. Expandable row → old→new diff (highlight `changed_fields`) + metadata
+  + IP/UA.
+- **De-emphasize timestamp-only diffs (RESOLVED):** when `changed_fields` is just
+  `['updated_at']` (or only timestamp columns), render the row collapsed with a
+  muted "metadata-only update" tag rather than a prominent diff, so substantive
+  changes stand out. The data is still stored in full — this is display only.
+- **Redaction indicator:** values shown as `<redacted: N chars>` (from
+  `audit_redact`) render with a small "truncated for size" hint so reviewers know
+  the field had a large value, not an empty one.
 - Use existing `app/components/skeleton.tsx` and `empty-state.tsx`.
 - **Nav gating**: add a `{ href: '/dashboard/audit', label: 'Audit Log' }` entry
   in `app/dashboard/layout.tsx`, rendered **only when the current user is a
@@ -405,23 +458,43 @@ captured by triggers) and 5 fills in reads/auth/exports.
 - [ ] Episode-detail and report views produce `read` rows; list/poll endpoints do
       NOT (noise check).
 - [ ] `audit_log` rows cannot be UPDATEd or DELETEd by any client (append-only).
+- [ ] An update to a `transcripts` row stores `<redacted: N chars>` for the
+      transcript/VTT text (not the full blob), while `changed_fields` still
+      correctly lists those keys.
+- [ ] No retention/cleanup job exists anywhere (migration, cron, worker) — history
+      is permanent.
+- [ ] The dashboard defaults to the last 30 days, shows the "full history
+      retained" banner and a total count, and de-emphasizes `updated_at`-only
+      diffs; widening the date range surfaces older rows.
+- [ ] A public (logged-out) report view records an `anonymous` `report.read` row.
 
 ---
 
-## 11. Trade-offs / follow-ups (call out to owner)
+## 11. Resolved decisions (owner-confirmed)
 
-- **Reads are selective**, not every SELECT (Postgres can't trigger on reads;
-  full read logging would balloon the table). Broaden later if needed.
+All previously-open questions are now settled — build to these, no further sign-off
+needed:
+
+- **Retention: keep everything forever. NO auto-delete, NO pruning, NO archival
+  job.** The DB is the permanent system of record (suits the FCC/compliance
+  context). Do not add any TTL, cron cleanup, or partition-drop.
+- **UI is trailing, DB is complete.** The dashboard defaults to the **last 30
+  days** (paginated) and the read API defaults `from = now() - 30 days` when
+  unspecified. A banner makes clear full history is retained and reachable by
+  widening the date range; the total count is always shown. The UI never implies
+  data was deleted — only that it's outside the current window.
+- **Reads stay selective** (Postgres can't trigger on SELECT). We instrument
+  meaningful resource views only; the UI shows a legend listing what read coverage
+  exists so "no read row" is never misread as "never viewed."
+- **Public/anonymous report reads ARE logged**, badged "Public/Anonymous" in the
+  UI. If anonymous/bot volume becomes noisy, a later tweak may skip obvious bot
+  user-agents at capture time — but rows are never deleted afterward.
 - **Worker writes log as generic `system`** via triggers; app-layer system events
-  add specifics. There's no per-worker user identity to attribute.
-- **Volume/retention**: no pruning yet. Consider a retention policy (archive or
-  delete `created_at < now() - interval '18 months'`) as a fast follow; FCC-style
-  compliance contexts often want long retention, so confirm before pruning.
-- **`changed_fields` includes `updated_at`** on most updates — accurate but noisy;
-  UI can de-emphasize.
-- **Public report reads** are `anonymous` (no JWT); decide if you want to log
-  those at all or only authenticated views.
-- **PII in `old_data`/`new_data`**: the log stores full row images (incl. emails,
-  transcripts could be large). Super-admin-only RLS mitigates exposure; consider
-  excluding very large columns (e.g. `transcripts.transcript`) from the captured
-  image if size becomes a problem (the trigger can strip heavy keys before insert).
+  (section 6.4) add the specifics. No per-worker user identity exists to attribute.
+- **`changed_fields` is captured in full** (including `updated_at`); the UI
+  **de-emphasizes** timestamp-only diffs (display only — nothing is dropped).
+- **Heavy-field PII/size is handled at capture**, not by deletion: `audit_redact`
+  (section 3.3) truncates string values >2000 chars to a `<redacted: N chars>`
+  marker so the permanent table stays lean and self-describing. Super-admin-only
+  RLS still gates all access. If a specific large field must be retained in full
+  later, raise the threshold or whitelist that key — but the default is lean.
