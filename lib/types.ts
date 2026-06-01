@@ -10,6 +10,8 @@ export interface Station {
   rss_base_url: string | null
   mp3_filename_prefix: string | null
   station_id_patterns: string[] | null
+  /** Prefixes stripped from auto-derived show display names (e.g. ["KPFK -"]). Display-only. */
+  show_name_strip_prefixes: string[] | null
   created_at: string
 }
 

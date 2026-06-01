@@ -137,6 +137,8 @@ export default function SettingsPage() {
 
   // Shows tab state
   const [shows, setShows] = useState<Show[]>([])
+  // Per-station prefixes stripped from auto-derived show names (e.g. "KPFK -").
+  const [stripPrefixes, setStripPrefixes] = useState<string[] | null>(null)
   const [showSearch, setShowSearch] = useState('')
   const [editingShow, setEditingShow] = useState<{ id: number; field: string } | null>(null)
   const [editingShowValue, setEditingShowValue] = useState('')
@@ -237,6 +239,7 @@ export default function SettingsPage() {
     if (showsRes.ok) {
       const data = await showsRes.json()
       setShows(data.shows ?? [])
+      setStripPrefixes(data.stripPrefixes ?? null)
     }
     setLoading(false)
   }, [])
@@ -249,6 +252,7 @@ export default function SettingsPage() {
     if (res.ok) {
       const data = await res.json()
       setShows(data.shows ?? [])
+      setStripPrefixes(data.stripPrefixes ?? null)
     }
   }, [])
 
@@ -753,7 +757,7 @@ export default function SettingsPage() {
     const groups = Array.from(byGroup.entries()).map(([group, feeds]) => ({
       group,
       shows: [...feeds].sort((a, b) => a.key.localeCompare(b.key)),
-      name: resolveGroupDisplayName(feeds),
+      name: resolveGroupDisplayName(feeds, stripPrefixes),
     }))
     return groups.sort((a, b) => a.name.localeCompare(b.name) || a.group.localeCompare(b.group))
   })()

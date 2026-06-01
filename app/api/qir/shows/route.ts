@@ -41,10 +41,19 @@ export async function GET(request: NextRequest) {
     // Look up this station's shows so we can resolve each episode's feed to its
     // logical-show identity (show_group) and display name. Grouping is by the
     // explicit group, never the name — names can differ across sibling feeds.
-    const { data: showKeyRows } = await supabase
-      .from('show_keys')
-      .select('key, show_name, feed_name, display_name, show_group')
-      .eq('station_id', stationId)
+    // The station's strip prefixes tidy auto-derived names (e.g. drop "KPFK -").
+    const [{ data: showKeyRows }, { data: station }] = await Promise.all([
+      supabase
+        .from('show_keys')
+        .select('key, show_name, feed_name, display_name, show_group')
+        .eq('station_id', stationId),
+      supabase
+        .from('stations')
+        .select('show_name_strip_prefixes')
+        .eq('id', stationId)
+        .maybeSingle(),
+    ])
+    const stripPrefixes = station?.show_name_strip_prefixes ?? null
 
     const keyMap = new Map((showKeyRows ?? []).map((r) => [r.key, r]))
 
@@ -80,7 +89,7 @@ export async function GET(request: NextRequest) {
           ReturnType<typeof keyMap.get>
         >[]
         const show_name = feeds.length
-          ? resolveGroupDisplayName(feeds)
+          ? resolveGroupDisplayName(feeds, stripPrefixes)
           : s.show_keys[0]
         return { group: s.group, show_name, show_keys: s.show_keys, episode_count: s.episode_count }
       })

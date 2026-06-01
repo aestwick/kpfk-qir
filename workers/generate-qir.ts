@@ -95,10 +95,11 @@ export async function processGenerateQir(job: Job) {
     list.push(r)
     feedsByGroup.set(group, list)
   }
+  const stripPrefixes = station.show_name_strip_prefixes ?? null
   const displayNameByKey = new Map<string, string>()
   for (const r of showKeyRows ?? []) {
     const group = resolveShowGroup(r)
-    displayNameByKey.set(r.key, resolveGroupDisplayName(feedsByGroup.get(group) ?? [r]))
+    displayNameByKey.set(r.key, resolveGroupDisplayName(feedsByGroup.get(group) ?? [r], stripPrefixes))
   }
 
   // Convert to QIR entries, overriding the snapshot name with the resolved one.
