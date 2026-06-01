@@ -7,7 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
-import { resolveGroupDisplayName, resolveShowGroup } from '@/lib/shows'
+import { resolveGroupDisplayName, resolveShowGroup, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import type { StationMember, StationRole } from '@/lib/types'
 
 /* ─── lazy-loaded corrections component ─── */
@@ -1415,7 +1415,14 @@ export default function SettingsPage() {
                           className="text-left hover:text-blue-600 cursor-pointer text-gray-600 dark:text-warm-400"
                           title="Click to edit"
                         >
-                          {show.primary_language || <span className="text-gray-300 italic dark:text-warm-500">—</span>}
+                          {show.primary_language || (
+                            <span
+                              className="text-gray-300 italic dark:text-warm-500"
+                              title="No language set — defaults to English"
+                            >
+                              {DEFAULT_SHOW_LANGUAGE}
+                            </span>
+                          )}
                         </button>
                       )}
                     </td>

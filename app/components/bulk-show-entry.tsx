@@ -7,11 +7,13 @@ interface DraftRow {
   show_name: string
   key: string
   category: string          // iTunes feed category, e.g. "News & Politics"
-  primary_language: string  // ISO 639-1, defaults to 'en'
+  primary_language: string  // ISO 639-1; blank = soft default English (stored null)
 }
 
-const DEFAULT_LANGUAGE = 'en'
-const EMPTY_ROW: DraftRow = { show_name: '', key: '', category: '', primary_language: DEFAULT_LANGUAGE }
+// Left blank by default: an unset language is a soft default to English (the row
+// is stored with primary_language null and resolves to English at read time), so
+// staff only pick a language for shows that air in something other than English.
+const EMPTY_ROW: DraftRow = { show_name: '', key: '', category: '', primary_language: '' }
 
 // Classic iTunes / Apple Podcasts top-level categories (the taxonomy KPFK's
 // archive feeds use, e.g. <itunes:category text="News & Politics"/>). Free text
@@ -45,7 +47,7 @@ function isHeaderRow(cells: string[]): boolean {
 
 // Parse a pasted table. Splits on tab (preferred — spreadsheet copy) or comma,
 // one row per line. Column order: name, key, category, language. A missing or
-// blank language column defaults to English.
+// blank language column is left blank — a soft default to English.
 function parsePaste(text: string): DraftRow[] {
   const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, '')).filter((l) => l.trim() !== '')
   const rows = lines.map((line) => (line.includes('\t') ? line.split('\t') : line.split(',')).map((c) => c.trim()))
@@ -54,12 +56,12 @@ function parsePaste(text: string): DraftRow[] {
     show_name: cells[0] ?? '',
     key: cells[1] ?? '',
     category: cells[2] ?? '',
-    primary_language: (cells[3] ?? '').trim() || DEFAULT_LANGUAGE,
+    primary_language: (cells[3] ?? '').trim(),
   }))
 }
 
 // A row is "empty" for grid bookkeeping if it has no name, key, or category.
-// Language is ignored here because every fresh row carries the default 'en'.
+// Language is ignored here — a blank language is a valid soft default (English).
 const rowIsEmpty = (r: DraftRow) => !r.show_name.trim() && !r.key.trim() && !r.category.trim()
 const rowIsValid = (r: DraftRow) => !!r.show_name.trim() && !!r.key.trim()
 
@@ -254,7 +256,7 @@ export function BulkShowEntry({
                         onChange={(e) => updateCell(i, 'primary_language', e.target.value)}
                         className="flex-1 border dark:border-warm-600 rounded px-2 py-1 text-sm dark:bg-warm-800 dark:text-warm-100"
                       >
-                        <option value="">—</option>
+                        <option value="">English (default)</option>
                         {LANGUAGE_OPTIONS.map((l) => (
                           <option key={l.code} value={l.code}>{l.label} ({l.code})</option>
                         ))}
