@@ -60,7 +60,9 @@ export default function EpisodesPage() {
   // (so it survives updateParams stripping empty values).
   const quarterFilter = searchParams.get('quarter') ?? `${getCurrentQuarter().year}-Q${getCurrentQuarter().quarter}`
   const quarterApiValue = quarterFilter === 'all' ? '' : quarterFilter
-  const showFilterParam = searchParams.get('show') ?? ''
+  // Free-text query across the episode's fields (show, headline, summary,
+  // host, guest). Kept as `q`; the legacy `show` param still works via the API.
+  const queryParam = searchParams.get('q') ?? ''
   const categoryFilterParam = searchParams.get('category') ?? ''
   const sort = searchParams.get('sort') ?? 'created_at'
   const order = searchParams.get('order') ?? 'desc'
@@ -68,13 +70,13 @@ export default function EpisodesPage() {
   const limit = 50
 
   // Local state for text inputs (decoupled from URL for responsive typing)
-  const [showFilterLocal, setShowFilterLocal] = useState(showFilterParam)
+  const [queryLocal, setQueryLocal] = useState(queryParam)
 
   // Sync local state when URL params change externally (e.g. browser back/forward)
-  useEffect(() => { setShowFilterLocal(showFilterParam) }, [showFilterParam])
+  useEffect(() => { setQueryLocal(queryParam) }, [queryParam])
 
   // Use URL param values for API calls (these are the "committed" filter values)
-  const showFilter = showFilterParam
+  const queryFilter = queryParam
   const categoryFilter = categoryFilterParam
 
   const updateParamsRef = useRef(searchParams)
@@ -98,13 +100,13 @@ export default function EpisodesPage() {
   function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
 
   // Debounce text filter updates to URL
-  const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const queryDebounceRef = useRef<ReturnType<typeof setTimeout>>()
 
-  function setShowFilter(v: string) {
-    setShowFilterLocal(v)
-    clearTimeout(showDebounceRef.current)
-    showDebounceRef.current = setTimeout(() => {
-      updateParams({ show: v, page: '' })
+  function setQueryFilter(v: string) {
+    setQueryLocal(v)
+    clearTimeout(queryDebounceRef.current)
+    queryDebounceRef.current = setTimeout(() => {
+      updateParams({ q: v, page: '' })
     }, 350)
   }
 
@@ -144,7 +146,7 @@ export default function EpisodesPage() {
     const params = new URLSearchParams({ page: String(page), limit: String(limit), sort, order })
     if (statusFilter) params.set('status', statusFilter)
     if (quarterApiValue) params.set('quarter', quarterApiValue)
-    if (showFilter) params.set('show', showFilter)
+    if (queryFilter) params.set('q', queryFilter)
     if (categoryFilter) params.set('category', categoryFilter)
 
     const res = await authedFetch(`/api/episodes?${params}`)
@@ -154,7 +156,7 @@ export default function EpisodesPage() {
       setTotal(data.total ?? 0)
     }
     setLoading(false)
-  }, [page, statusFilter, quarterApiValue, showFilter, categoryFilter, sort, order])
+  }, [page, statusFilter, quarterApiValue, queryFilter, categoryFilter, sort, order])
 
   useEffect(() => { fetchEpisodes() }, [fetchEpisodes])
 
@@ -189,7 +191,7 @@ export default function EpisodesPage() {
     const params = new URLSearchParams({ format: 'csv', limit: '10000', page: '1', sort, order })
     if (statusFilter) params.set('status', statusFilter)
     if (quarterApiValue) params.set('quarter', quarterApiValue)
-    if (showFilter) params.set('show', showFilter)
+    if (queryFilter) params.set('q', queryFilter)
     if (categoryFilter) params.set('category', categoryFilter)
     window.open(`/api/episodes?${params}`, '_blank')
   }
@@ -316,10 +318,10 @@ export default function EpisodesPage() {
         <input
           ref={showFilterRef}
           type="text"
-          placeholder="Filter by show name... (press /)"
-          value={showFilterLocal}
-          onChange={(e) => setShowFilter(e.target.value)}
-          className="border rounded px-2 py-1.5 text-sm w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+          placeholder="Search show, headline, summary, host, guest… (press /)"
+          value={queryLocal}
+          onChange={(e) => setQueryFilter(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm w-72 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         />
         <select
           value={categoryFilter}

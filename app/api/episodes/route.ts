@@ -13,6 +13,9 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
     const show = searchParams.get('show')
+    // Free-text query: matches across the episode's own fields (show name,
+    // headline, summary, host, guest), not just the show name.
+    const q = searchParams.get('q')
     const category = searchParams.get('category')
     const quarter = searchParams.get('quarter') // e.g. "2025-Q1"
     const sort = searchParams.get('sort') ?? 'created_at'
@@ -33,6 +36,17 @@ export async function GET(request: NextRequest) {
     const showKey = searchParams.get('show_key')
     if (showKey) query = query.eq('show_key', showKey)
     else if (show) query = query.ilike('show_name', `%${show}%`)
+    if (q) {
+      // Strip characters that would break PostgREST's or() grammar (commas,
+      // parens, quotes split the filter list), then OR an ilike across fields.
+      const term = q.replace(/[,()"]/g, ' ').trim()
+      if (term) {
+        const like = `%${term}%`
+        query = query.or(
+          `show_name.ilike.${like},headline.ilike.${like},summary.ilike.${like},host.ilike.${like},guest.ilike.${like}`
+        )
+      }
+    }
     if (category) query = query.eq('issue_category', category)
 
     if (quarter) {
