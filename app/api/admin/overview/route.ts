@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     // All stations (service-role; this is an admin cross-tenant view).
     const { data: stations, error: stationsErr } = await supabaseAdmin
       .from('stations')
-      .select('id, slug, name')
+      .select('id, slug, name, tier')
       .order('name')
     if (stationsErr) throw stationsErr
     const stationList = stations ?? []
@@ -91,21 +91,34 @@ export async function GET(request: NextRequest) {
               .eq('station_id', s.id)
               .gte('air_date', start)
               .lte('air_date', end)
-          const [pending, transcribed, summarized, checked, failed, total] = await Promise.all([
+          const [pending, transcribed, summarized, checked, failed, total, lastAdv] = await Promise.all([
             base().eq('status', 'pending'),
             base().eq('status', 'transcribed'),
             base().eq('status', 'summarized'),
             base().eq('status', 'compliance_checked'),
             base().eq('status', 'failed'),
             base(),
+            // Most recent stage advance (any quarter) — the staleness signal for
+            // the glance view's "last advanced" clock and the KPFK-dark check.
+            supabaseAdmin
+              .from('episode_log')
+              .select('updated_at')
+              .eq('station_id', s.id)
+              .in('status', ['transcribed', 'summarized', 'compliance_checked'])
+              .order('updated_at', { ascending: false })
+              .limit(1)
+              .maybeSingle(),
           ])
           return {
-            pending: pending.count ?? 0,
-            transcribed: transcribed.count ?? 0,
-            summarized: summarized.count ?? 0,
-            compliance_checked: checked.count ?? 0,
-            failed: failed.count ?? 0,
-            total: total.count ?? 0,
+            counts: {
+              pending: pending.count ?? 0,
+              transcribed: transcribed.count ?? 0,
+              summarized: summarized.count ?? 0,
+              compliance_checked: checked.count ?? 0,
+              failed: failed.count ?? 0,
+              total: total.count ?? 0,
+            },
+            lastAdvancedAt: (lastAdv.data?.updated_at as string | undefined) ?? null,
           }
         })
       ),
@@ -152,18 +165,24 @@ export async function GET(request: NextRequest) {
       activityByStation.set(j.stationId, a)
     }
 
-    const stationsOut = stationList.map((s, i) => {
-      const paused = stationPauseStates[i]
-      return {
-        id: s.id,
-        slug: s.slug,
-        name: s.name,
-        paused,
-        effectivePaused: globalPaused || paused,
-        episodes: episodeCounts[i],
-        activity: activityByStation.get(s.id) ?? { active: 0, waiting: 0, failed: 0 },
-      }
-    })
+    // Tier order = sharing order: production first, then paying, demo, test.
+    const TIER_RANK: Record<string, number> = { production: 0, paying: 1, demo: 2, test: 3 }
+    const stationsOut = stationList
+      .map((s, i) => {
+        const paused = stationPauseStates[i]
+        return {
+          id: s.id,
+          slug: s.slug,
+          name: s.name,
+          tier: (s.tier as string | null) ?? 'test',
+          paused,
+          effectivePaused: globalPaused || paused,
+          episodes: episodeCounts[i].counts,
+          lastAdvancedAt: episodeCounts[i].lastAdvancedAt,
+          activity: activityByStation.get(s.id) ?? { active: 0, waiting: 0, failed: 0 },
+        }
+      })
+      .sort((a, b) => (TIER_RANK[a.tier] ?? 9) - (TIER_RANK[b.tier] ?? 9) || a.name.localeCompare(b.name))
 
     const queues: Record<string, unknown> = {}
     for (const q of queueData) queues[q.name] = q.counts
@@ -265,26 +284,32 @@ export async function POST(request: NextRequest) {
     }
 
     // -- Retry / clear failed jobs, optionally scoped to one station --
+    // Sweeps ALL queues by default (failures land wherever a stage broke); pass
+    // body.queue to narrow to one.
     if (action === 'retry_failed' || action === 'clear_failed') {
-      const queue = QUEUES[body.queue as QueueName]
-      if (!queue) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
+      const only = body.queue as QueueName | undefined
+      if (only && !QUEUES[only]) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
+      const targets: QueueName[] = only ? [only] : (Object.keys(QUEUES) as QueueName[])
       const stationId = body.stationId as string | undefined
-      const failed = await queue.getFailed(0, 1000)
-      const scoped = stationId ? failed.filter((j: any) => j.data?.stationId === stationId) : failed
 
       let count = 0
-      for (const job of scoped) {
-        try {
-          if (action === 'retry_failed') await job.retry()
-          else await job.remove()
-          count++
-        } catch {
-          // Job may have been removed or already retried — skip.
+      for (const name of targets) {
+        const failed = await QUEUES[name].getFailed(0, 1000)
+        const scoped = stationId ? failed.filter((j: any) => j.data?.stationId === stationId) : failed
+        for (const job of scoped) {
+          try {
+            if (action === 'retry_failed') await job.retry()
+            else await job.remove()
+            count++
+          } catch {
+            // Job may have been removed or already retried — skip.
+          }
         }
       }
       const verb = action === 'retry_failed' ? 'Retried' : 'Cleared'
       const scope = stationId ? ' for station' : ''
-      return NextResponse.json({ ok: true, message: `${verb} ${count} failed ${body.queue} job(s)${scope}` })
+      const where = only ? ` ${only}` : ''
+      return NextResponse.json({ ok: true, message: `${verb} ${count} failed${where} job(s)${scope}` })
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
