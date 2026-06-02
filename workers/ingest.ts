@@ -224,21 +224,31 @@ async function processShow(
 }
 
 export async function processIngest(job: Job) {
-  if (await isPipelinePaused()) {
-    console.log('[ingest] pipeline paused — skipping')
+  const stationId = job.data?.stationId as string | undefined
+
+  // Global master pause (and, for a station-level job, that station's own pause)
+  // stops work here. The cron fan-out tick has no stationId, so this is the
+  // global check; the per-station gate for the fan-out happens in the loop below.
+  if (await isPipelinePaused(stationId)) {
+    console.log(`[ingest] paused${stationId ? ` for station ${stationId}` : ' (global)'} — skipping`)
     return { newEpisodes: 0, skipped: true }
   }
 
-  const stationId = job.data?.stationId as string | undefined
-
-  // Cron/startup tick (no stationId): fan out one ingest job per station.
+  // Cron/startup tick (no stationId): fan out one ingest job per station, but
+  // skip any station that is individually paused so the rest keep flowing.
   if (!stationId) {
     const ids = await listStationIds()
+    let dispatched = 0
     for (const id of ids) {
+      if (await isPipelinePaused(id)) {
+        console.log(`[ingest] station ${id} paused — skipping dispatch`)
+        continue
+      }
       await ingestQueue.add('ingest-station', { stationId: id })
+      dispatched++
     }
-    console.log(`[ingest] dispatched ingest for ${ids.length} station(s)`)
-    return { dispatched: ids.length }
+    console.log(`[ingest] dispatched ingest for ${dispatched} of ${ids.length} station(s)`)
+    return { dispatched }
   }
 
   const station = await getStation(stationId)

@@ -180,14 +180,15 @@ async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
 }
 
 export async function processTranscribe(job: Job) {
-  if (await isPipelinePaused()) {
-    console.log('[transcribe] pipeline paused — skipping')
-    return { transcribed: 0, remaining: false, skipped: true }
-  }
   // Workers run with the service-role client (RLS bypassed), so the station_id
   // filter below is the ONLY guard against processing another station's episodes.
   const stationId = job.data?.stationId as string | undefined
   if (!stationId) throw new Error('[transcribe] stationId is required in job data')
+  // Skip if the pipeline is paused globally OR just for this station.
+  if (await isPipelinePaused(stationId)) {
+    console.log(`[transcribe] paused for station ${stationId} — skipping`)
+    return { transcribed: 0, remaining: false, skipped: true }
+  }
   console.log(`[transcribe] starting batch for station ${stationId}...`)
 
   const excludedCategories = await getExcludedCategories(stationId)

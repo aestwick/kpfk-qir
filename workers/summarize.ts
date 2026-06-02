@@ -27,18 +27,18 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
 }
 
 export async function processSummarize(job: Job) {
-  if (await isPipelinePaused()) {
-    console.log('[summarize] pipeline paused — skipping')
+  // Service-role client bypasses RLS, so the station_id filter is the only guard.
+  const stationId = job.data?.stationId as string | undefined
+  if (!stationId) throw new Error('[summarize] stationId is required in job data')
+  // Skip if the pipeline is paused globally OR just for this station.
+  if (await isPipelinePaused(stationId)) {
+    console.log(`[summarize] paused for station ${stationId} — skipping`)
     return { summarized: 0, remaining: false, skipped: true }
   }
   console.log('[summarize] starting batch...')
 
   const openaiKey = process.env.OPENAI_API_KEY
   if (!openaiKey) throw new Error('OPENAI_API_KEY not set')
-
-  // Service-role client bypasses RLS, so the station_id filter is the only guard.
-  const stationId = job.data?.stationId as string | undefined
-  if (!stationId) throw new Error('[summarize] stationId is required in job data')
 
   const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
   const excludedCategories = await getExcludedCategories(stationId)
