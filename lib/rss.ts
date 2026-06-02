@@ -49,20 +49,24 @@ export function parseChannelMeta(xml: string): FeedChannelMeta {
 
   const title = rssText(channel.title)
 
-  // Prefer <itunes:category text="…">, fall back to a plain <category>. Either may
-  // be an array (multiple categories); take the first. The itunes variant carries
-  // its label in the `text` attribute (@_text); a plain <category> in its text node.
+  // The archive carries TWO category signals: a plain channel-level <category>
+  // holding the station's own classification (e.g. "Español", "Music" — the exact
+  // values the ingest excluded_categories list matches), and an <itunes:category
+  // text="…"> with the generic Apple taxonomy ("News & Politics"). Prefer the
+  // plain one — it's the station-meaningful value exclusion keys on — and fall
+  // back to itunes only when there's no plain <category>. Either may be an array
+  // (multiple categories); take the first. itunes carries its label in @_text.
   let category: string | null = null
-  const itunes = channel['itunes:category']
-  const firstItunes = Array.isArray(itunes) ? itunes[0] : itunes
-  if (firstItunes != null) {
-    category = rssText((firstItunes as Record<string, unknown>)['@_text']) ?? rssText(firstItunes)
+  const plain = channel.category
+  const firstPlain = Array.isArray(plain) ? plain[0] : plain
+  if (firstPlain != null) {
+    category = rssText((firstPlain as Record<string, unknown>)['@_text']) ?? rssText(firstPlain)
   }
   if (!category) {
-    const plain = channel.category
-    const firstPlain = Array.isArray(plain) ? plain[0] : plain
-    if (firstPlain != null) {
-      category = rssText((firstPlain as Record<string, unknown>)['@_text']) ?? rssText(firstPlain)
+    const itunes = channel['itunes:category']
+    const firstItunes = Array.isArray(itunes) ? itunes[0] : itunes
+    if (firstItunes != null) {
+      category = rssText((firstItunes as Record<string, unknown>)['@_text']) ?? rssText(firstItunes)
     }
   }
 
