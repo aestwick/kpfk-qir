@@ -82,6 +82,9 @@ app/api/
   usage/route.ts            — GET cost analytics with date range
   audit/route.ts            — GET audit log (super-admin only, paginated, filterable)
   audit/event/route.ts      — POST client-reported auth/station events (allowlisted)
+  admin/overview/route.ts   — GET all-station pipeline overview / POST master controls
+                              (super-admin only: pause_all, pause/resume_station,
+                              advance, retry/clear failed; see Pipeline Pause)
 ```
 
 ### Dashboard Pages (all `'use client'`)
@@ -92,7 +95,9 @@ app/dashboard/
   page.tsx                  — Overview: pipeline viz, stats, cost analytics, activity feed
   episodes/page.tsx         — Episode table with filters, sort, bulk actions, CSV export
   episodes/[id]/page.tsx    — Episode detail: audio player, transcript, edit summary
-  jobs/page.tsx             — Queue status monitoring
+  jobs/page.tsx             — Queue status monitoring (active station)
+  master/page.tsx           — Master Control (super-admin only): all-station pipeline
+                              activity + per-station pause/resume, run-now, retry/clear
   generate/page.tsx         — QIR draft builder: generate, curate, edit entries, finalize
   usage/page.tsx            — Cost tracking with date range
   audit/page.tsx            — Audit log viewer (super-admin only; trailing window, diff view)
@@ -160,6 +165,8 @@ package.json            — Scripts: dev, build, workers, start:all
 Failures at any stage set `status = 'failed'` with `error_message` and increment `retry_count`.
 
 **Worker chaining:** Ingest completion auto-triggers transcription (if new episodes found). Transcription completion auto-triggers summarization (if episodes transcribed). QIR generation is manual only.
+
+**Pipeline pause is layered** (`lib/settings.ts#isPipelinePaused(stationId?)`). A **global** master flag (`qir_settings.pipeline_paused`) pauses everything — it's the only signal that can BullMQ-`pause()` the *shared* worker pool wholesale (`workers/index.ts#syncPipelineMode`). Each station may *additionally* be paused on its own via `station_settings(station_id,'pipeline_paused')`; since the shared pool can't be paused per station, per-station pause is enforced one level up — the ingest dispatcher skips paused stations on fan-out, the auto-chain hooks skip them, and each stage processor (`transcribe`/`summarize`/`compliance`) early-skips a job whose station is paused. Effective state = `global OR station`. The Jobs page (active station) drives the global flag; the super-admin **Master Control** (`/dashboard/master` ↔ `api/admin/overview`) drives per-station pause/resume, run-now, and failed-job retry/clear across all stations. `isStationPaused(stationId)` reads a station's own flag in isolation (for the master view). Both pause reads are uncached (control signal).
 
 **Settings are in the database**, not env vars. Categories, batch sizes, models, prompts — all editable from the dashboard without redeploying.
 

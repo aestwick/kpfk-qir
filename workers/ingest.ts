@@ -224,14 +224,19 @@ async function processShow(
 }
 
 export async function processIngest(job: Job) {
+  const stationId = job.data?.stationId as string | undefined
+
+  // Soft pause keeps ingest running — only the GLOBAL master pause stops it. A
+  // per-station-paused station still RECEIVES new episodes (they queue as pending
+  // and serve as the liveness signal); the expensive stages, gated per-station
+  // downstream — the ingest→transcribe kick and each processor — hold them.
   if (await isPipelinePaused()) {
-    console.log('[ingest] pipeline paused — skipping')
+    console.log('[ingest] paused (global) — skipping')
     return { newEpisodes: 0, skipped: true }
   }
 
-  const stationId = job.data?.stationId as string | undefined
-
-  // Cron/startup tick (no stationId): fan out one ingest job per station.
+  // Cron/startup tick (no stationId): fan out one ingest job per station. Paused
+  // stations are NOT skipped — ingest must keep flowing during soft pause.
   if (!stationId) {
     const ids = await listStationIds()
     for (const id of ids) {

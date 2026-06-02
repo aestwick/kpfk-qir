@@ -86,7 +86,7 @@ ingestWorker.on('completed', async (job) => {
   // through summarize → compliance. Skipped while the pipeline is paused (the
   // station-level job carries stationId; the cron fan-out tick does not).
   const stationId = job.data?.stationId
-  if (newCount > 0 && stationId && !(await isPipelinePaused())) {
+  if (newCount > 0 && stationId && !(await isPipelinePaused(stationId))) {
     console.log('[ingest] auto-chain → transcribe')
     await transcribeQueue.add('chain-transcribe', { stationId, source: 'chain', chain: true }, { priority: await jobPriority(stationId) })
   }
@@ -117,7 +117,7 @@ transcribeWorker.on('completed', async (job) => {
   }
   // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
   // Skipped while paused so a resumed pipeline doesn't fan out stale work.
-  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused())) {
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
     console.log(`[transcribe] ${job.data.source} auto-chain → summarize`)
     await summarizeQueue.add('chain-summarize', { stationId, source: job.data.source, chain: true }, { priority })
   }
@@ -149,7 +149,7 @@ summarizeWorker.on('completed', async (job) => {
   // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).
   // This is the final automated stage — episodes get compliance-checked without a
   // manual trigger. Skipped while paused.
-  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused())) {
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
     console.log(`[summarize] ${job.data.source} auto-chain → compliance`)
     await complianceQueue.add('chain-compliance', { stationId, source: job.data.source }, { priority })
   }
@@ -258,11 +258,15 @@ let currentlyPaused = false
 
 async function syncPipelinePause() {
   try {
+    // GLOBAL master pause only (no stationId) — this is the one signal that can
+    // BullMQ-pause the shared worker pool wholesale. Per-station pause can't pause
+    // the shared pool, so it's enforced inside the dispatcher/chain/processors via
+    // isPipelinePaused(stationId); it never reaches here.
     const paused = await isPipelinePaused()
     if (paused === currentlyPaused) return
     currentlyPaused = paused
     if (paused) {
-      console.log('[workers] pipeline PAUSED — all workers will skip new jobs')
+      console.log('[workers] pipeline PAUSED (global) — all workers will skip new jobs')
       await Promise.all([
         ingestWorker.pause(),
         transcribeWorker.pause(),

@@ -181,14 +181,16 @@ async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
 }
 
 export async function processTranscribe(job: Job) {
-  if (await isPipelinePaused()) {
-    console.log('[transcribe] pipeline paused — skipping')
-    return { transcribed: 0, remaining: false, skipped: true }
-  }
   // Workers run with the service-role client (RLS bypassed), so the station_id
   // filter below is the ONLY guard against processing another station's episodes.
   const stationId = job.data?.stationId as string | undefined
   if (!stationId) throw new Error('[transcribe] stationId is required in job data')
+  // Soft pause (global OR this station): expensive stages stop, ingest keeps
+  // running. Checked before the lock so a paused station never takes a lock.
+  if (await isPipelinePaused(stationId)) {
+    console.log(`[transcribe] paused for station ${stationId} — skipping`)
+    return { transcribed: 0, remaining: false, skipped: true }
+  }
 
   // One chain per (station, transcribe): with transcribe concurrency ≥ 2, this
   // lock stops a single station from occupying both slots. If another chain for
