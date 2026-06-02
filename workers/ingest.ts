@@ -3,6 +3,7 @@ import { XMLParser } from 'fast-xml-parser'
 import { supabaseAdmin } from '../lib/supabase'
 import { getExcludedCategories, getExcludedShowKeys, isPipelinePaused } from '../lib/settings'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
+import { rssText } from '../lib/rss'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
@@ -83,13 +84,7 @@ async function processShow(
     // Capture the feed's display name from the RSS channel <title>. This is the
     // auto-derived name (display-only); a manual display_name override can win
     // over it later. Best-effort: only write when it actually changed.
-    const rawChannelTitle = parsed?.rss?.channel?.title
-    const channelTitle =
-      typeof rawChannelTitle === 'object' && rawChannelTitle?.__cdata
-        ? String(rawChannelTitle.__cdata).trim()
-        : rawChannelTitle
-          ? String(rawChannelTitle).trim()
-          : null
+    const channelTitle = rssText(parsed?.rss?.channel?.title)
     if (channelTitle && channelTitle !== (show.feed_name ?? null)) {
       const { error: feedNameErr } = await supabaseAdmin
         .from('show_keys')
@@ -111,10 +106,7 @@ async function processShow(
 
       if (!mp3Url) continue
 
-      const rawTitle = item.title
-      const title = typeof rawTitle === 'object' && rawTitle?.__cdata
-        ? String(rawTitle.__cdata).trim()
-        : rawTitle ? String(rawTitle).trim() : null
+      const title = rssText(item.title)
 
       const pubDate = item.pubDate || null
       const itunesDuration =

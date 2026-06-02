@@ -79,6 +79,8 @@ export function BulkShowEntry({
   const [rows, setRows] = useState<DraftRow[]>([{ ...EMPTY_ROW }])
   const [pasteText, setPasteText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [keysText, setKeysText] = useState('')
+  const [resolving, setResolving] = useState(false)
 
   const existingSet = useMemo(() => new Set(existingKeys.map((k) => k.trim().toLowerCase())), [existingKeys])
 
@@ -116,6 +118,53 @@ export function BulkShowEntry({
     }
     loadParsed(parsed)
     setPasteText('')
+  }
+
+  // Resolve a list of bare show keys against the station's archive feeds, filling
+  // in name + category from each live feed. Keys that don't resolve are still added
+  // (key only) so they show as "incomplete" rather than vanishing silently.
+  async function lookupKeys() {
+    const keys = keysText
+      .split(/\r?\n/)
+      .flatMap((l) => l.split(','))
+      .map((k) => k.trim())
+      .filter(Boolean)
+    if (keys.length === 0) {
+      toast('error', 'Paste at least one show key (one per line)')
+      return
+    }
+    setResolving(true)
+    try {
+      const res = await authedFetch('/api/shows/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keys }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast('error', data.error ?? 'Lookup failed')
+        return
+      }
+      const resolved: DraftRow[] = (data.results ?? []).map(
+        (r: { key: string; feed_name: string | null; category: string | null }) => ({
+          show_name: r.feed_name ?? '',
+          key: r.key,
+          category: r.category ?? '',
+          primary_language: '',
+        })
+      )
+      loadParsed(resolved)
+      const found = data.summary?.found ?? 0
+      const failed = data.summary?.failed ?? 0
+      toast(
+        failed ? 'error' : 'success',
+        `Looked up ${found} feed${found === 1 ? '' : 's'}${failed ? `, ${failed} not found (left blank — review or remove)` : ''}`
+      )
+      setKeysText('')
+    } catch {
+      toast('error', 'Network error')
+    }
+    setResolving(false)
   }
 
   async function save() {
@@ -161,7 +210,7 @@ export function BulkShowEntry({
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium">Add shows — type and press Tab to move across, or paste a table</p>
         <button
-          onClick={() => { setOpen(false); setRows([{ ...EMPTY_ROW }]); setPasteText('') }}
+          onClick={() => { setOpen(false); setRows([{ ...EMPTY_ROW }]); setPasteText(''); setKeysText('') }}
           className="text-xs text-gray-500 hover:text-gray-900 dark:text-warm-400 dark:hover:text-warm-200"
         >
           Close
@@ -198,6 +247,29 @@ export function BulkShowEntry({
             className="px-3 py-1.5 text-sm self-start bg-blue-600 dark:bg-blue-700 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-40"
           >
             Load
+          </button>
+        </div>
+      </div>
+
+      {/* Keys-only lookup: fetch name + category from the station's archive feeds */}
+      <div className="space-y-1.5">
+        <label className="text-xs text-gray-500 dark:text-warm-400">
+          Have only the keys? Paste them (one per line) and look up each name + category from the station&apos;s archive feeds.
+        </label>
+        <div className="flex gap-2">
+          <textarea
+            value={keysText}
+            onChange={(e) => setKeysText(e.target.value)}
+            placeholder={'dn9\nuprising\nalterradioar'}
+            rows={2}
+            className="flex-1 border dark:border-warm-600 rounded px-2 py-1.5 text-sm font-mono dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
+          />
+          <button
+            onClick={lookupKeys}
+            disabled={!keysText.trim() || resolving}
+            className="px-3 py-1.5 text-sm self-start bg-blue-600 dark:bg-blue-700 text-white rounded hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-40 whitespace-nowrap"
+          >
+            {resolving ? 'Looking up…' : 'Look up'}
           </button>
         </div>
       </div>

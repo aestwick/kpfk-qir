@@ -185,7 +185,7 @@ The app is multi-tenant: **one codebase, one database, one deployment** serving 
 ### Provisioning a new station (SQL/admin, no UI yet)
 
 1. **Create the station:** `insert into stations (slug, name, timezone, rss_base_url, mp3_filename_prefix, station_id_patterns) values ('wxyz', 'WXYZ, City', 'America/New_York', 'https://archive.example.org/getrss.php?id=', 'wxyz', array['wxyz','101.5']);` — `rss_base_url` is the full prefix up to `?id=` (the show key is appended); leave it null until known (ingest skips the station, visibly, until set).
-2. **Add shows:** insert `show_keys` rows with that `station_id`.
+2. **Add shows:** insert `show_keys` rows with that `station_id`, **or** use the dashboard (Settings → Shows → "Add shows"). The bulk-entry panel takes a pasted spreadsheet (name, key, category, language) and also has a **"Look up" by key** mode: paste bare show keys and it resolves each name + category from the station's live archive feeds via `POST /api/shows/resolve` (read-only preview; fails visibly if `rss_base_url` is unset). Ingest only pulls **active** `show_keys`, so a station with feed config but no shows pulls nothing.
 3. **Grant access:** `insert into station_users (station_id, user_id, role) values (<station>, <auth.users.id>, 'admin');` (or add to `super_admins` for all-station access).
 4. **Optional overrides:** insert `station_settings` rows (e.g. a station-specific `summarization_prompt`/`compliance_prompt`) — otherwise the global `qir_settings` defaults apply.
 5. Workers pick the station up automatically on the next ingest cron tick.
@@ -205,7 +205,7 @@ See `IMPROVEMENTS.md` for the prioritized improvement plan. Key items:
 
 - **P0 (before going live):** Missing DB indexes, no OpenAI retry logic, no BullMQ job timeouts
 - **P1 (next sprint):** Separate workers from web server, Docker resource limits, fix N+1 queries
-- **Multi-station follow-ups:** the `get_episode_counts_by_show` RPC is not station-aware (can over-count episodes for show keys shared across stations) — needs a migration adding a `station_id` arg. The 4 non-KPFK stations need `rss_base_url`/`mp3_filename_prefix` set before their ingest works.
+- **Multi-station follow-ups:** the `get_episode_counts_by_show` RPC is not station-aware (can over-count episodes for show keys shared across stations) — needs a migration adding a `station_id` arg. KPFA/WPFW/KPFT have `rss_base_url`/`mp3_filename_prefix` set (migration 020) but still need `show_keys` rows before ingest pulls anything; WBAI is deferred (its archive uses a different URL format — left NULL, skipped by ingest).
 - **No tests** — the three targeted integration tests (RLS isolation, settings fallback, worker claim scoping) require a throwaway Postgres and are still pending.
 
 ## Environment
