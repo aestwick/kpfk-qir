@@ -176,9 +176,10 @@ a **Download** button and a small unread badge; `failed` shows the error. This i
 poll-based and station-scoped — no websockets required.
 
 **Email.** Introduce a thin `lib/email.ts` with a single `sendEmail()` helper
-backed by **Resend** (`RESEND_API_KEY`, sender `BUNDLE_EMAIL_FROM` on the
-verified `qir.kpfk.org` domain; links built from the existing
-`NEXT_PUBLIC_BASE_URL`). The worker, on `ready`, emails `requested_by` (resolved via
+backed by **Resend** (`RESEND_API_KEY`, sender `BUNDLE_EMAIL_FROM` reusing the
+station's existing Resend-verified `no-reply@` donation sender — no new domain
+verification needed; links built from the existing `NEXT_PUBLIC_BASE_URL`). The
+worker, on `ready`, emails `requested_by` (resolved via
 `auth.users`) with the station name, what was included, the file count/size, the
 **expiry**, and a link to `…/bundles/[id]/link` (the app mints a fresh signed URL
 on click — the email never embeds a long-lived signed URL, which would be a
@@ -214,9 +215,10 @@ On `app/dashboard/episodes/page.tsx`, the existing bulk-action bar gains
 
 ## 11. Open decisions
 
-- ~~**Email provider**~~: **Resolved — Resend.** Env: `RESEND_API_KEY` +
-  `BUNDLE_EMAIL_FROM`; domain `qir.kpfk.org` verified via SPF/DKIM/DMARC DNS
-  records; `lib/email.ts` wraps the Resend SDK.
+- ~~**Email provider**~~: **Resolved — Resend.** Env: `RESEND_API_KEY` (own
+  sending-only key) + `BUNDLE_EMAIL_FROM` reusing the station's existing
+  Resend-verified `no-reply@` donation sender, so **no new DNS / domain
+  verification** is required. `lib/email.ts` wraps the Resend SDK.
 - **Streaming target**: archive straight to the Storage upload stream vs. temp
   file then upload — depends on whether the Supabase upload needs a known
   content length and the VPS disk budget.
