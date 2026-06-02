@@ -179,7 +179,12 @@ The app is multi-tenant: **one codebase, one database, one deployment** serving 
 ### Provisioning a new station (SQL/admin, no UI yet)
 
 1. **Create the station:** `insert into stations (slug, name, timezone, rss_base_url, mp3_filename_prefix, station_id_patterns) values ('wxyz', 'WXYZ, City', 'America/New_York', 'https://archive.example.org/getrss.php?id=', 'wxyz', array['wxyz','101.5']);` — `rss_base_url` is the full prefix up to `?id=` (the show key is appended); leave it null until known (ingest skips the station, visibly, until set).
-2. **Add shows:** insert `show_keys` rows with that `station_id`, **or** use the dashboard (Settings → Shows → "Add shows"). The bulk-entry panel takes a pasted spreadsheet (name, key, category, language) and also has a **"Look up" by key** mode: paste bare show keys and it resolves each name + category from the station's live archive feeds via `POST /api/shows/resolve` (read-only preview; fails visibly if `rss_base_url` is unset). Ingest only pulls **active** `show_keys`, so a station with feed config but no shows pulls nothing.
+2. **Add shows:** insert `show_keys` rows with that `station_id`, **or** use the dashboard (Settings → Shows → "Add shows"). Three import paths, all landing in the same review grid → save (`POST /api/settings`, `resource:'shows'`):
+   - **"Discover from archive"** (`GET /api/shows/discover`) — one click enumerates the station's **entire** program list by scraping the `<option value="key">Name</option>` dropdown on the archive home page (`new URL(rss_base_url).origin`). Verified identical markup across KPFK/KPFA/WPFW/KPFT. Pick from a checklist; the selected keys flow through resolve (below).
+   - **"Look up" by key** (`POST /api/shows/resolve`) — paste bare show keys; resolves each name + category from the live per-show feed.
+   - **Paste a spreadsheet** (name, key, category, language) for fully manual entry.
+
+   Resolve/discover are read-only previews and fail visibly if `rss_base_url` is unset. Category comes from each feed's plain `<category>` (e.g. "Español"/"Music"), which is what the ingest exclusion list matches — not the generic `<itunes:category>`. Ingest only pulls **active** `show_keys`, so a station with feed config but no shows pulls nothing.
 3. **Grant access:** `insert into station_users (station_id, user_id, role) values (<station>, <auth.users.id>, 'admin');` (or add to `super_admins` for all-station access).
 4. **Optional overrides:** insert `station_settings` rows (e.g. a station-specific `summarization_prompt`/`compliance_prompt`) — otherwise the global `qir_settings` defaults apply.
 5. Workers pick the station up automatically on the next ingest cron tick.
