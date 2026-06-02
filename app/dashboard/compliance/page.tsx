@@ -315,6 +315,31 @@ export default function CompliancePage() {
     fetchFlags()
   }, [fetchFlags])
 
+  // Preserve scroll position across navigation (e.g. opening an episode and
+  // coming back). Keyed by the active filter query so a different filter view
+  // doesn't inherit a stale position. Persisted to sessionStorage as the user
+  // scrolls, and restored once the list has rendered on the next mount.
+  const scrollKey = `compliance-scroll:${searchParams.toString()}`
+  useEffect(() => {
+    const onScroll = () => {
+      try { sessionStorage.setItem(scrollKey, String(window.scrollY)) } catch { /* ignore */ }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [scrollKey])
+
+  useEffect(() => {
+    if (loading) return
+    let saved: string | null = null
+    try { saved = sessionStorage.getItem(scrollKey) } catch { /* ignore */ }
+    if (saved) {
+      // Wait for the freshly-loaded rows to paint before restoring.
+      requestAnimationFrame(() => window.scrollTo(0, parseInt(saved!, 10)))
+    }
+    // Restore once, after the initial load completes for this mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading])
+
   // Toggle selection
   function toggleSelect(id: number) {
     setSelected((prev) => {
@@ -333,9 +358,54 @@ export default function CompliancePage() {
     }
   }
 
+  // Revert a single flag back to a prior status (used by the toast Undo).
+  async function undoFlagStatus(id: number, prevStatus: ReviewStatus) {
+    try {
+      const res = await authedFetch('/api/compliance', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, review_status: prevStatus, resolved_by: 'dashboard' }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      toast('success', `Reverted to ${REVIEW_STATUS_LABELS[prevStatus]}`)
+      await Promise.all([fetchFlags(), fetchStats()])
+    } catch (err) {
+      console.error('Failed to undo flag status:', err)
+      toast('error', 'Failed to undo')
+    }
+  }
+
+  // Revert a bulk status change. The API sets one status per call, so the prior
+  // statuses are grouped and reverted in batches.
+  async function undoBulkStatus(prevById: Map<number, ReviewStatus>) {
+    const byStatus = new Map<ReviewStatus, number[]>()
+    prevById.forEach((st, id) => {
+      const arr = byStatus.get(st) ?? []
+      arr.push(id)
+      byStatus.set(st, arr)
+    })
+    try {
+      for (const [st, ids] of Array.from(byStatus.entries())) {
+        const res = await authedFetch('/api/compliance', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, review_status: st, resolved_by: 'dashboard' }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      }
+      toast('success', `Reverted ${prevById.size} flag${prevById.size > 1 ? 's' : ''}`)
+      await Promise.all([fetchFlags(), fetchStats()])
+    } catch (err) {
+      console.error('Failed to undo bulk update:', err)
+      toast('error', 'Failed to undo')
+    }
+  }
+
   // Set a single flag's review status
   async function setFlagStatus(id: number, status: ReviewStatus, notes: string) {
     if (actionLoading) return
+    // Capture the prior status so the action can be undone from the toast.
+    const prevStatus = flags.find((f) => f.id === id)?.review_status
     setActionLoading(true)
     try {
       const res = await authedFetch('/api/compliance', {
@@ -344,7 +414,13 @@ export default function CompliancePage() {
         body: JSON.stringify({ id, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      toast('success', `Marked ${REVIEW_STATUS_LABELS[status]}`)
+      toast(
+        'success',
+        `Marked ${REVIEW_STATUS_LABELS[status]}`,
+        prevStatus && prevStatus !== status
+          ? { label: 'Undo', onClick: () => undoFlagStatus(id, prevStatus) }
+          : undefined,
+      )
       setStatusTarget(null)
       setResolveNotes('')
       await Promise.all([fetchFlags(), fetchStats()])
@@ -362,13 +438,23 @@ export default function CompliancePage() {
     setActionLoading(true)
     try {
       const ids = Array.from(selected)
+      // Snapshot prior statuses so the bulk change can be undone from the toast.
+      const prevById = new Map<number, ReviewStatus>(
+        flags.filter((f) => selected.has(f.id)).map((f) => [f.id, f.review_status]),
+      )
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, review_status: status, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      toast('success', `Marked ${ids.length} flag${ids.length > 1 ? 's' : ''} ${REVIEW_STATUS_LABELS[status]}`)
+      toast(
+        'success',
+        `Marked ${ids.length} flag${ids.length > 1 ? 's' : ''} ${REVIEW_STATUS_LABELS[status]}`,
+        prevById.size > 0
+          ? { label: 'Undo', onClick: () => undoBulkStatus(prevById) }
+          : undefined,
+      )
       setSelected(new Set())
       setBulkStatus(null)
       setBulkNotes('')
@@ -888,7 +974,14 @@ export default function CompliancePage() {
                 </tr>
               ) : (
                 flags.map((flag) => {
-                  const episodeUrl = `/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`
+                  // Thread the current location (path + active filters) so the
+                  // episode page's breadcrumb/back link return here — to
+                  // Compliance with these filters — instead of the Episodes list.
+                  const from = locationFrom(pathname, searchParams.toString())
+                  const episodeUrl = withFrom(
+                    `/dashboard/episodes/${flag.episode_id}${flag.timestamp_seconds != null ? `?seek=${flag.timestamp_seconds}` : ''}`,
+                    from,
+                  )
                   return (
                   <tr
                     key={flag.id}
@@ -931,7 +1024,8 @@ export default function CompliancePage() {
                     <td className="px-4 py-3">
                       {flag.timestamp_seconds != null ? (
                         <a
-                          href={withFrom(`/dashboard/episodes/${flag.episode_id}?seek=${flag.timestamp_seconds}`, locationFrom(pathname, searchParams.toString()))}
+                          href={episodeUrl}
+                          onClick={(e) => e.stopPropagation()}
                           className="text-blue-600 hover:underline font-mono text-xs"
                         >
                           {formatTimestamp(flag.timestamp_seconds)}

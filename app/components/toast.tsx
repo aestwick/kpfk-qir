@@ -2,14 +2,20 @@
 
 import { createContext, useContext, useState, useCallback, useEffect } from 'react'
 
+interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 interface Toast {
   id: number
   type: 'success' | 'error'
   message: string
+  action?: ToastAction
 }
 
 interface ToastContextValue {
-  toast: (type: 'success' | 'error', message: string) => void
+  toast: (type: 'success' | 'error', message: string, action?: ToastAction) => void
 }
 
 const ToastContext = createContext<ToastContextValue>({ toast: () => {} })
@@ -23,9 +29,9 @@ let nextId = 0
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
 
-  const toast = useCallback((type: 'success' | 'error', message: string) => {
+  const toast = useCallback((type: 'success' | 'error', message: string, action?: ToastAction) => {
     const id = ++nextId
-    setToasts((prev) => [...prev, { id, type, message }])
+    setToasts((prev) => [...prev, { id, type, message, action }])
   }, [])
 
   const dismiss = useCallback((id: number) => {
@@ -46,9 +52,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
   useEffect(() => {
-    const timer = setTimeout(() => onDismiss(toast.id), 5000)
+    // Give a little longer to act when an action (e.g. Undo) is offered.
+    const timer = setTimeout(() => onDismiss(toast.id), toast.action ? 8000 : 5000)
     return () => clearTimeout(timer)
-  }, [toast.id, onDismiss])
+  }, [toast.id, toast.action, onDismiss])
 
   const colors = toast.type === 'success'
     ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/50'
@@ -57,12 +64,22 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
   return (
     <div className={`${colors} border rounded-xl px-4 py-3 text-sm shadow-lg flex items-center justify-between gap-3 animate-slide-up`}>
       <span>{toast.message}</span>
-      <button
-        onClick={() => onDismiss(toast.id)}
-        className="text-current opacity-50 hover:opacity-100 text-xs shrink-0"
-      >
-        Dismiss
-      </button>
+      <div className="flex items-center gap-2 shrink-0">
+        {toast.action && (
+          <button
+            onClick={() => { toast.action!.onClick(); onDismiss(toast.id) }}
+            className="text-current font-semibold underline underline-offset-2 hover:opacity-80 text-xs"
+          >
+            {toast.action.label}
+          </button>
+        )}
+        <button
+          onClick={() => onDismiss(toast.id)}
+          className="text-current opacity-50 hover:opacity-100 text-xs"
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   )
 }
