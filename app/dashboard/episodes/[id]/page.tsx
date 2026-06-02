@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
@@ -114,6 +114,59 @@ function formatTimestamp(seconds: number): string {
   const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')
   const s = String(Math.floor(seconds % 60)).padStart(2, '0')
   return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`
+}
+
+/**
+ * Build a reusable VTT lookup that returns the cue start time for an excerpt.
+ *
+ * Unlike a per-cue substring match (which fails for any excerpt longer than a
+ * single short caption line — i.e. almost all of them), this concatenates the
+ * normalized cue text into one string and maps a match offset back to its cue.
+ * It also retries with progressively shorter prefixes so minor tail differences
+ * between the excerpt and the transcription don't defeat the match.
+ */
+function buildVttIndex(vtt: string | null | undefined): ((excerpt: string) => number | null) | null {
+  if (!vtt) return null
+  const cues: { start: number; text: string }[] = []
+  for (const block of vtt.split(/\n\n+/)) {
+    const lines = block.trim().split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->/)
+      if (m) {
+        const start = +m[1] * 3600 + +m[2] * 60 + +m[3] + +m[4] / 1000
+        const text = lines.slice(i + 1).join(' ').trim()
+        if (text) cues.push({ start, text })
+        break
+      }
+    }
+  }
+  if (cues.length === 0) return null
+
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ')
+  let combined = ''
+  const offsets: number[] = [] // offsets[k] = start index of cue k within `combined`
+  for (const c of cues) {
+    offsets.push(combined.length)
+    combined += norm(c.text) + ' '
+  }
+
+  return (excerpt: string): number | null => {
+    const needle = norm(excerpt).trim()
+    if (needle.length < 8) return null
+    for (let len = needle.length; len >= 8; len = Math.floor(len * 0.6)) {
+      const idx = combined.indexOf(needle.slice(0, len).trim())
+      if (idx !== -1) {
+        // Binary-search the cue whose range contains the match offset.
+        let lo = 0, hi = offsets.length - 1, found = 0
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1
+          if (offsets[mid] <= idx) { found = mid; lo = mid + 1 } else { hi = mid - 1 }
+        }
+        return cues[found].start
+      }
+    }
+    return null
+  }
 }
 
 /* ─── Inline Edit Field ─── */
@@ -485,40 +538,6 @@ export default function EpisodeDetailPage() {
     fetchEpisode()
   }
 
-  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  /** Search VTT captions for excerpt text and return the cue start time, or null */
-  function findTimestampFromVtt(excerpt: string): number | null {
-    if (!showVtt) return null
-    const needle = excerpt.toLowerCase().slice(0, 80)
-    const blocks = showVtt.split(/\n\n+/)
-    for (const block of blocks) {
-      const lines = block.trim().split('\n')
-      for (let i = 0; i < lines.length; i++) {
-        const match = lines[i].match(/(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->/)
-        if (match) {
-          const text = lines.slice(i + 1).join(' ').toLowerCase()
-          if (text.includes(needle)) {
-            return +match[1] * 3600 + +match[2] * 60 + +match[3] + +match[4] / 1000
-          }
-        }
-      }
-    }
-    return null
-  }
-
-  function jumpToTimestamp(seconds: number, excerpt?: string | null) {
-    if (seekToRef.current) {
-      seekToRef.current(seconds)
-    }
-    if (excerpt) {
-      // Clear any previous highlight timer to prevent stacking
-      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
-      setHighlightText(excerpt)
-      highlightTimerRef.current = setTimeout(() => setHighlightText(null), 5000)
-    }
-  }
-
   function copyFlagDetails(flag: ComplianceFlag) {
     const ts = flag.timestamp_seconds ?? (flag.excerpt ? findTimestampFromVtt(flag.excerpt) : null)
     const lines = [
@@ -584,6 +603,28 @@ export default function EpisodeDetailPage() {
   const isNonEnglish = transcript?.language != null && transcript.language !== 'en'
   const showTranscript = viewLang === 'english' && transcript?.english_transcript ? transcript.english_transcript : transcript?.transcript
   const showVtt = viewLang === 'english' && transcript?.english_vtt ? transcript.english_vtt : transcript?.vtt
+
+  // Memoized VTT index, rebuilt only when the active VTT changes. Locates the
+  // cue start time for an excerpt even when it spans multiple caption cues.
+  const vttLookup = useMemo(() => buildVttIndex(showVtt), [showVtt])
+  const findTimestampFromVtt = useCallback(
+    (excerpt: string): number | null => (vttLookup ? vttLookup(excerpt) : null),
+    [vttLookup]
+  )
+
+  // Single entry point for "focus this excerpt": seek + play the audio (which
+  // highlights the matching caption cue) AND highlight/scroll the transcript, so
+  // the two feeds always show the same selection. Falls back to a transcript-only
+  // highlight when the excerpt can't be located in the audio's captions.
+  const focusExcerpt = useCallback(
+    (excerpt: string | null | undefined, timestampSeconds?: number | null) => {
+      if (!excerpt) return
+      const ts = timestampSeconds ?? findTimestampFromVtt(excerpt)
+      if (ts != null) seekToRef.current?.(ts)
+      setHighlightText(excerpt.slice(0, 60))
+    },
+    [findTimestampFromVtt]
+  )
 
   if (loading) return (
     <div className="space-y-6">
@@ -787,15 +828,9 @@ export default function EpisodeDetailPage() {
                     {flag.details && <p className="text-xs text-gray-600 dark:text-warm-400 mt-0.5">{flag.details}</p>}
                     {flag.excerpt && (
                       <button
-                        onClick={() => {
-                          if (flag.timestamp_seconds != null) {
-                            jumpToTimestamp(flag.timestamp_seconds, flag.excerpt)
-                          } else {
-                            setHighlightText(flag.excerpt!.slice(0, 60))
-                          }
-                        }}
+                        onClick={() => focusExcerpt(flag.excerpt, flag.timestamp_seconds)}
                         className="text-xs text-gray-500 dark:text-warm-400 mt-1 bg-gray-50 dark:bg-warm-700 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300 rounded px-2 py-1 font-mono text-left w-full transition-colors cursor-pointer"
-                        title={flag.timestamp_seconds != null ? `Play from ${formatTimestamp(flag.timestamp_seconds)}` : 'Find in transcript'}
+                        title="Play the audio here and highlight it in the transcript"
                       >
                         &ldquo;...{flag.excerpt}...&rdquo;
                       </button>
@@ -805,9 +840,9 @@ export default function EpisodeDetailPage() {
                       if (ts !== null) {
                         return (
                           <button
-                            onClick={() => jumpToTimestamp(ts, flag.excerpt)}
+                            onClick={() => focusExcerpt(flag.excerpt, ts)}
                             className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
-                            title="Play audio from this timestamp"
+                            title="Play audio here and highlight it in the transcript"
                           >
                             <span>&#9654;</span> Listen at {formatTimestamp(ts)}
                           </button>
@@ -816,7 +851,7 @@ export default function EpisodeDetailPage() {
                       if (flag.excerpt) {
                         return (
                           <button
-                            onClick={() => setHighlightText(flag.excerpt!.slice(0, 60))}
+                            onClick={() => focusExcerpt(flag.excerpt)}
                             className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
                             title="Find this excerpt in the transcript"
                           >
@@ -943,6 +978,7 @@ export default function EpisodeDetailPage() {
           vtt={showVtt}
           initialSeek={initialSeek}
           onReady={(fn) => { seekToRef.current = fn }}
+          onCueSelect={(text) => setHighlightText(text.slice(0, 60))}
         />
       )}
 

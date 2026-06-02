@@ -34,11 +34,15 @@ export function AudioPlayerWithCaptions({
   vtt,
   initialSeek,
   onReady,
+  onCueSelect,
 }: {
   mp3Url: string
   vtt: string
   initialSeek?: number
   onReady?: (seekTo: SeekToFn) => void
+  // Fired when the user clicks a caption cue, so the parent can mirror the
+  // selection in the transcript feed (keeps the two views in sync).
+  onCueSelect?: (text: string, start: number) => void
 }) {
   const [currentTime, setCurrentTime] = useState(0)
   const [autoScroll, setAutoScroll] = useState(false)
@@ -131,7 +135,7 @@ export function AudioPlayerWithCaptions({
             className={`px-2 py-1 rounded cursor-pointer ${
               i === activeCueIdx ? 'bg-blue-100 text-blue-900 font-medium dark:bg-blue-900/30 dark:text-blue-200' : 'hover:bg-gray-100 dark:hover:bg-warm-700/50'
             }`}
-            onClick={() => seekTo(cue.start)}
+            onClick={() => { seekTo(cue.start); onCueSelect?.(cue.text, cue.start) }}
           >
             <span className="text-xs text-gray-400 dark:text-warm-500 mr-2">
               {Math.floor(cue.start / 60)}:{String(Math.floor(cue.start % 60)).padStart(2, '0')}
