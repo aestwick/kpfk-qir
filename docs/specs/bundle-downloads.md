@@ -33,8 +33,9 @@ for these 12 flagged episodes" have to click through and save files one at a tim
 - Handle **multi-GB** bundles (a quarter of a daily show ≈ dozens of 50–100 MB
   files) without holding an HTTP request open or buffering in memory.
 - Deliver **asynchronously**: build the ZIP in a background worker, store it,
-  and **notify the requester two ways** — an in-app dashboard ping and an
-  **email with a download link**.
+  and **notify the requester in-browser** — an in-app dashboard ping plus a
+  **browser-tab title badge** so a ready bundle is visible even from another tab.
+  (Outbound email is **deferred** — see §8 / §11.)
 - Preserve **multi-tenant isolation** — every selection, the stored artifact,
   and the signed link are scoped to one `station_id`.
 - Degrade gracefully on missing audio (404 / `unavailable` episodes): record it
@@ -47,6 +48,8 @@ for these 12 flagged episodes" have to click through and save files one at a tim
 - Re-hosting or transcoding audio. We pass the original MP3 through verbatim.
 - A general-purpose notifications center. We add the **minimum** notification
   plumbing this feature needs (see §8), not a framework.
+- Outbound email in v1. The Resend design is retained (§8.3) but **paused**;
+  v1 notifies in-browser only.
 
 ## 4. Selection model
 
@@ -164,29 +167,41 @@ Operational notes to flag in review:
 - Optional dedup: if an identical `selection` produced a still-`ready`,
   non-expired bundle, return that id instead of rebuilding.
 
-## 8. Notifications (dashboard ping + email)
+## 8. Notifications (in-browser only for v1)
 
-Neither exists today — both are **net-new**, kept minimal:
+v1 ships **in-browser notifications only**; outbound email is **deferred** (§8.3).
+Both v1 channels read from `download_jobs` — no separate notifications table.
 
-**Dashboard ping.** Reuse `download_jobs` as the source of truth; no separate
-notifications table needed for v1. The dashboard polls
-`GET /api/downloads/bundles` (or the existing dashboard stats endpoint gains a
-"my recent bundles" slice). When a job flips to `ready`, the Bundles panel shows
-a **Download** button and a small unread badge; `failed` shows the error. This is
-poll-based and station-scoped — no websockets required.
+### 8.1 Dashboard ping
 
-**Email.** Introduce a thin `lib/email.ts` with a single `sendEmail()` helper
-backed by **Resend** (`RESEND_API_KEY`, sender `BUNDLE_EMAIL_FROM` reusing the
-station's existing Resend-verified `no-reply@` donation sender — no new domain
-verification needed; links built from the existing `NEXT_PUBLIC_BASE_URL`). The
-worker, on `ready`, emails `requested_by` (resolved via
-`auth.users`) with the station name, what was included, the file count/size, the
-**expiry**, and a link to `…/bundles/[id]/link` (the app mints a fresh signed URL
-on click — the email never embeds a long-lived signed URL, which would be a
-leak vector). Provider creds live in env (workers already run server-side);
-sender identity/branding interpolates `{{STATION_NAME}}` like the prompt
-settings do. Email failure is **non-fatal** — the bundle is still `ready` and the
-dashboard ping still fires; log and move on.
+The dashboard polls `GET /api/downloads/bundles` (or the existing dashboard stats
+endpoint gains a "my recent bundles" slice). When a job flips to `ready`, the
+Bundles panel shows a **Download** button and a small unread badge; `failed`
+shows the error. Poll-based and station-scoped — no websockets required.
+
+### 8.2 Browser-tab title badge
+
+So a ready bundle is noticed from another tab, the dashboard updates
+`document.title` to a badged form — e.g. `(1) Downloads · QIR` — whenever a
+bundle becomes `ready` while the tab is **not focused** (tracked via the Page
+Visibility API). The badge count reflects unseen-ready bundles; it clears (title
+restored) when the user focuses the tab or opens the Bundles panel. Pure
+client-side, driven by the same poll as §8.1 — no new backend. (Optional later:
+a favicon dot; a `Notification` API toast if the user grants permission. Both
+nice-to-have, not v1.)
+
+### 8.3 Email (deferred — design retained)
+
+**Paused — not in v1.** When enabled, a thin `lib/email.ts#sendEmail()` backed by
+**Resend** (`RESEND_API_KEY`, sender `BUNDLE_EMAIL_FROM` reusing the station's
+existing Resend-verified `no-reply@` donation sender — no new domain
+verification) would email `requested_by` (resolved via `auth.users`) on `ready`
+with the station name, what was included, file count/size, **expiry**, and a link
+to `…/bundles/[id]/link` (the app mints a fresh signed URL on click — never embed
+a long-lived signed URL). Email would be **non-fatal** — bundle still `ready` and
+the in-browser notifications still fire. Adding it later is purely additive: no
+schema or API change, just the helper + a worker call gated on `RESEND_API_KEY`
+being set.
 
 ## 9. Dashboard UX
 
@@ -209,21 +224,23 @@ On `app/dashboard/episodes/page.tsx`, the existing bulk-action bar gains
    `requested_by`, `status`, `expires_at`), RLS policies via `user_station_ids()`.
 2. Create the private `bundles` Storage bucket (Supabase) + lifecycle/cleanup
    cron (reuse the auto-retry cron cadence or a dedicated daily tick).
-3. Add `archiver` (and the email provider SDK) to `package.json`.
-4. Wire `bundleQueue` + worker registration; add the email helper.
-5. Ship API routes + UI behind the existing auth.
+3. Add `archiver` to `package.json`. (Resend SDK deferred with §8.3.)
+4. Wire `bundleQueue` + worker registration.
+5. Ship API routes + UI (incl. dashboard ping + tab-title badge) behind the
+   existing auth.
 
 ## 11. Open decisions
 
-- ~~**Email provider**~~: **Resolved — Resend.** Env: `RESEND_API_KEY` (own
-  sending-only key) + `BUNDLE_EMAIL_FROM` reusing the station's existing
-  Resend-verified `no-reply@` donation sender, so **no new DNS / domain
-  verification** is required. `lib/email.ts` wraps the Resend SDK.
+- ~~**Email provider**~~: **Resolved but deferred — Resend.** Not in v1 (§8.3).
+  When turned on: `RESEND_API_KEY` (own sending-only key) + `BUNDLE_EMAIL_FROM`
+  reusing the station's existing Resend-verified `no-reply@` donation sender, so
+  **no new DNS / domain verification** is required. `lib/email.ts` wraps the
+  Resend SDK; enablement is gated on `RESEND_API_KEY` being present.
 - **Streaming target**: archive straight to the Storage upload stream vs. temp
   file then upload — depends on whether the Supabase upload needs a known
   content length and the VPS disk budget.
 - **Caps**: exact max episode count / byte ceiling and the per-station active-job
   concurrency limit (proposed 200 / ~10 GB / 1 active).
-- **Expiry window**: 7 days proposed for both the artifact and the signed-link
-  reminder in email.
+- **Expiry window**: 7 days proposed for the stored artifact (and the signed-link
+  reminder, once email is enabled).
 ```
