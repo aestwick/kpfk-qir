@@ -33,9 +33,10 @@ for these 12 flagged episodes" have to click through and save files one at a tim
 - Handle **multi-GB** bundles (a quarter of a daily show ≈ dozens of 50–100 MB
   files) without holding an HTTP request open or buffering in memory.
 - Deliver **asynchronously**: build the ZIP in a background worker, store it,
-  and **notify the requester in-browser** — an in-app dashboard ping plus a
-  **browser-tab title badge** so a ready bundle is visible even from another tab.
-  (Outbound email is **deferred** — see §8 / §11.)
+  and **notify the requester in-browser** — dashboard ping, browser-tab title
+  badge, favicon dot, and an opt-in OS-level Web Notification — so a ready bundle
+  is noticed even from another tab or app. (Outbound email is **deferred** —
+  see §8 / §11.)
 - Preserve **multi-tenant isolation** — every selection, the stored artifact,
   and the signed link are scoped to one `station_id`.
 - Degrade gracefully on missing audio (404 / `unavailable` episodes): record it
@@ -48,7 +49,7 @@ for these 12 flagged episodes" have to click through and save files one at a tim
 - Re-hosting or transcoding audio. We pass the original MP3 through verbatim.
 - A general-purpose notifications center. We add the **minimum** notification
   plumbing this feature needs (see §8), not a framework.
-- Outbound email in v1. The Resend design is retained (§8.3) but **paused**;
+- Outbound email in v1. The Resend design is retained (§8.5) but **paused**;
   v1 notifies in-browser only.
 
 ## 4. Selection model
@@ -169,7 +170,7 @@ Operational notes to flag in review:
 
 ## 8. Notifications (in-browser only for v1)
 
-v1 ships **in-browser notifications only**; outbound email is **deferred** (§8.3).
+v1 ships **in-browser notifications only**; outbound email is **deferred** (§8.5).
 Both v1 channels read from `download_jobs` — no separate notifications table.
 
 ### 8.1 Dashboard ping
@@ -186,11 +187,33 @@ So a ready bundle is noticed from another tab, the dashboard updates
 bundle becomes `ready` while the tab is **not focused** (tracked via the Page
 Visibility API). The badge count reflects unseen-ready bundles; it clears (title
 restored) when the user focuses the tab or opens the Bundles panel. Pure
-client-side, driven by the same poll as §8.1 — no new backend. (Optional later:
-a favicon dot; a `Notification` API toast if the user grants permission. Both
-nice-to-have, not v1.)
+client-side, driven by the same poll as §8.1 — no new backend.
 
-### 8.3 Email (deferred — design retained)
+### 8.3 Favicon badge dot
+
+Alongside the title badge, overlay a small dot on the favicon while there are
+unseen-ready bundles, so the signal survives even when the tab title is
+truncated to an icon. Implementation: keep the static favicon as the base; when
+the unseen count goes positive, draw it onto an offscreen `<canvas>`, stamp a
+colored dot in the corner, and swap the `<link rel="icon">` `href` to the
+canvas `toDataURL()`. Restore the original `href` when the count clears. Same
+client-side state as §8.2 (shared "unseen-ready" counter); no backend change.
+Degrades silently where canvas/favicon swapping isn't supported.
+
+### 8.4 Web Notification toast (permission-gated)
+
+For an OS-level nudge when the dashboard isn't even the foreground tab, use the
+**Notifications API**. Permission is **never** requested on load — only after a
+deliberate user gesture (a "Notify me when ready" toggle on the bundle builder,
+or first bundle submit), respecting `Notification.permission`
+(`default`/`granted`/`denied`). When a bundle flips to `ready` *and* the tab is
+hidden *and* permission is `granted`, fire one `new Notification('Bundle ready',
+{ body, tag: bundleId })` whose click focuses the tab and opens the Bundles
+panel; `tag` de-dupes so re-polling can't stack duplicates. If permission is
+`denied` or unsupported, fall back silently to §8.1–8.3 (which always run).
+Entirely client-side — no push service, no service worker, no backend.
+
+### 8.5 Email (deferred — design retained)
 
 **Paused — not in v1.** When enabled, a thin `lib/email.ts#sendEmail()` backed by
 **Resend** (`RESEND_API_KEY`, sender `BUNDLE_EMAIL_FROM` reusing the station's
@@ -224,14 +247,14 @@ On `app/dashboard/episodes/page.tsx`, the existing bulk-action bar gains
    `requested_by`, `status`, `expires_at`), RLS policies via `user_station_ids()`.
 2. Create the private `bundles` Storage bucket (Supabase) + lifecycle/cleanup
    cron (reuse the auto-retry cron cadence or a dedicated daily tick).
-3. Add `archiver` to `package.json`. (Resend SDK deferred with §8.3.)
+3. Add `archiver` to `package.json`. (Resend SDK deferred with §8.5.)
 4. Wire `bundleQueue` + worker registration.
 5. Ship API routes + UI (incl. dashboard ping + tab-title badge) behind the
    existing auth.
 
 ## 11. Open decisions
 
-- ~~**Email provider**~~: **Resolved but deferred — Resend.** Not in v1 (§8.3).
+- ~~**Email provider**~~: **Resolved but deferred — Resend.** Not in v1 (§8.5).
   When turned on: `RESEND_API_KEY` (own sending-only key) + `BUNDLE_EMAIL_FROM`
   reusing the station's existing Resend-verified `no-reply@` donation sender, so
   **no new DNS / domain verification** is required. `lib/email.ts` wraps the
