@@ -5,16 +5,20 @@ import { processSummarize } from './summarize'
 import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
-import { getSetting, isPipelinePaused } from '../lib/settings'
+import { isPipelinePaused } from '../lib/settings'
+import { jobPriority } from '../lib/tier'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
-// -- Pipeline Mode Presets --
-const PIPELINE_MODES: Record<string, { transcribe: number; summarize: number }> = {
-  steady: { transcribe: 1, summarize: 5 },
-  'catch-up': { transcribe: 3, summarize: 10 },
-}
-const DEFAULT_MODE = 'steady'
+// -- Fixed worker concurrency --
+// The steady/catch-up mode toggle was throughput theater (the pipeline is
+// I/O-bound on Groq + archive bandwidth, which local concurrency can't raise).
+// A fixed floor ≥ 2 on the expensive stages is for *isolation*, not speed: at 1,
+// one station head-of-line-blocks KPFK. Production-first ordering comes from
+// BullMQ job priority (lib/tier.ts); the per-(station,stage) lock (lib/locks.ts)
+// keeps any one station to a single chain so it can't occupy both slots.
+const TRANSCRIBE_CONCURRENCY = 2
+const SUMMARIZE_CONCURRENCY = 5
 
 function parseRedisUrl(url: string) {
   const parsed = new URL(url)
@@ -82,9 +86,9 @@ ingestWorker.on('completed', async (job) => {
   // through summarize → compliance. Skipped while the pipeline is paused (the
   // station-level job carries stationId; the cron fan-out tick does not).
   const stationId = job.data?.stationId
-  if (newCount > 0 && stationId && !(await isPipelinePaused())) {
+  if (newCount > 0 && stationId && !(await isPipelinePaused(stationId))) {
     console.log('[ingest] auto-chain → transcribe')
-    await transcribeQueue.add('chain-transcribe', { stationId, source: 'chain', chain: true })
+    await transcribeQueue.add('chain-transcribe', { stationId, source: 'chain', chain: true }, { priority: await jobPriority(stationId) })
   }
 })
 ingestWorker.on('failed', (job, err) => {
@@ -92,29 +96,30 @@ ingestWorker.on('failed', (job, err) => {
 })
 
 // -- Transcribe Worker --
-const initialMode = PIPELINE_MODES[DEFAULT_MODE]
 const transcribeWorker = new Worker('transcribe', processTranscribe, {
   connection,
-  concurrency: initialMode.transcribe,
+  concurrency: TRANSCRIBE_CONCURRENCY,
 })
 
 transcribeWorker.on('completed', async (job) => {
+  const stationId = job.data?.stationId
+  const priority = await jobPriority(stationId)
   const count = job.returnvalue?.transcribed ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[transcribe] completed — ${count} episodes transcribed${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', { stationId: job.data?.stationId }, { delay: 5 * 60 * 1000 })
+      await transcribeQueue.add('transcribe-backoff', { stationId }, { delay: 5 * 60 * 1000, priority })
     } else {
-      await transcribeQueue.add('transcribe-continue', { stationId: job.data?.stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) })
+      await transcribeQueue.add('transcribe-continue', { stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
     }
   }
   // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
   // Skipped while paused so a resumed pipeline doesn't fan out stale work.
-  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused())) {
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
     console.log(`[transcribe] ${job.data.source} auto-chain → summarize`)
-    await summarizeQueue.add('chain-summarize', { stationId: job.data?.stationId, source: job.data.source, chain: true })
+    await summarizeQueue.add('chain-summarize', { stationId, source: job.data.source, chain: true }, { priority })
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -124,27 +129,29 @@ transcribeWorker.on('failed', (job, err) => {
 // -- Summarize Worker --
 const summarizeWorker = new Worker('summarize', processSummarize, {
   connection,
-  concurrency: initialMode.summarize,
+  concurrency: SUMMARIZE_CONCURRENCY,
 })
 
 summarizeWorker.on('completed', async (job) => {
+  const stationId = job.data?.stationId
+  const priority = await jobPriority(stationId)
   const count = job.returnvalue?.summarized ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[summarize] completed — ${count} episodes summarized${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', { stationId: job.data?.stationId }, { delay: 5 * 60 * 1000 })
+      await summarizeQueue.add('summarize-backoff', { stationId }, { delay: 5 * 60 * 1000, priority })
     } else {
-      await summarizeQueue.add('summarize-continue', { stationId: job.data?.stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) })
+      await summarizeQueue.add('summarize-continue', { stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
     }
   }
   // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).
   // This is the final automated stage — episodes get compliance-checked without a
   // manual trigger. Skipped while paused.
-  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused())) {
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
     console.log(`[summarize] ${job.data.source} auto-chain → compliance`)
-    await complianceQueue.add('chain-compliance', { stationId: job.data?.stationId, source: job.data.source })
+    await complianceQueue.add('chain-compliance', { stationId, source: job.data.source }, { priority })
   }
 })
 summarizeWorker.on('failed', (job, err) => {
@@ -162,7 +169,7 @@ complianceWorker.on('completed', async (job) => {
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
-    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId })
+    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId }, { priority: await jobPriority(job.data?.stationId) })
   }
 })
 complianceWorker.on('failed', (job, err) => {
@@ -243,62 +250,55 @@ ingestQueue.add('ingest-startup', {}).then(() => {
   console.log('[workers] startup ingest queued')
 }).catch(console.error)
 
-// -- Pipeline Mode Polling --
-let currentMode = DEFAULT_MODE
+// -- Pause Polling --
+// pipeline_paused is the global kill switch (toggled from the dashboard). Poll it
+// and pause/resume every worker to match. The steady/catch-up mode toggle was
+// removed — concurrency is fixed (see the constants near the top).
 let currentlyPaused = false
 
-async function syncPipelineMode() {
+async function syncPipelinePause() {
   try {
-    // Check pause state
+    // GLOBAL master pause only (no stationId) — this is the one signal that can
+    // BullMQ-pause the shared worker pool wholesale. Per-station pause can't pause
+    // the shared pool, so it's enforced inside the dispatcher/chain/processors via
+    // isPipelinePaused(stationId); it never reaches here.
     const paused = await isPipelinePaused()
-    if (paused !== currentlyPaused) {
-      currentlyPaused = paused
-      if (paused) {
-        console.log('[workers] pipeline PAUSED — all workers will skip new jobs')
-        await Promise.all([
-          ingestWorker.pause(),
-          transcribeWorker.pause(),
-          summarizeWorker.pause(),
-          complianceWorker.pause(),
-          generateQirWorker.pause(),
-        ])
-      } else {
-        console.log('[workers] pipeline RESUMED — workers accepting jobs again')
-        await Promise.all([
-          ingestWorker.resume(),
-          transcribeWorker.resume(),
-          summarizeWorker.resume(),
-          complianceWorker.resume(),
-          generateQirWorker.resume(),
-        ])
-      }
-    }
-
-    // Check mode (only matters when not paused)
-    const mode = (await getSetting<string>('pipeline_mode')) ?? DEFAULT_MODE
-    const preset = PIPELINE_MODES[mode]
-    if (!preset) return
-    if (mode !== currentMode) {
-      transcribeWorker.concurrency = preset.transcribe
-      summarizeWorker.concurrency = preset.summarize
-      console.log(`[workers] pipeline mode changed: ${currentMode} → ${mode} (transcribe=${preset.transcribe}, summarize=${preset.summarize})`)
-      currentMode = mode
+    if (paused === currentlyPaused) return
+    currentlyPaused = paused
+    if (paused) {
+      console.log('[workers] pipeline PAUSED (global) — all workers will skip new jobs')
+      await Promise.all([
+        ingestWorker.pause(),
+        transcribeWorker.pause(),
+        summarizeWorker.pause(),
+        complianceWorker.pause(),
+        generateQirWorker.pause(),
+      ])
+    } else {
+      console.log('[workers] pipeline RESUMED — workers accepting jobs again')
+      await Promise.all([
+        ingestWorker.resume(),
+        transcribeWorker.resume(),
+        summarizeWorker.resume(),
+        complianceWorker.resume(),
+        generateQirWorker.resume(),
+      ])
     }
   } catch (err) {
-    console.error('[workers] failed to sync pipeline mode:', err)
+    console.error('[workers] failed to sync pause state:', err)
   }
 }
 
 // Check on startup, then every 30s
-syncPipelineMode()
-const modeInterval = setInterval(syncPipelineMode, 30_000)
+syncPipelinePause()
+const pauseInterval = setInterval(syncPipelinePause, 30_000)
 
 console.log('[workers] all workers started')
 
 // Graceful shutdown
 async function shutdown() {
   console.log('[workers] shutting down...')
-  clearInterval(modeInterval)
+  clearInterval(pauseInterval)
   await Promise.all([
     ingestWorker.close(),
     transcribeWorker.close(),

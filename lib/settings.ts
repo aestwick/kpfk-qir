@@ -146,31 +146,50 @@ export async function isComplianceBlocking(stationId: string): Promise<boolean> 
   return (await getSetting<boolean>('compliance_blocking', stationId)) ?? false
 }
 
-// Pipeline pause is a GLOBAL operational flag — the worker pool is shared across
-// stations, so pausing pauses everything. Kept global (no stationId) by design.
-export async function isPipelinePaused(): Promise<boolean> {
-  // Read fresh every time — never cache. This is a control signal toggled from
-  // the dashboard and polled by both the UI and workers; a stale cached value
-  // makes Pause/Resume appear not to take effect (and shows a "PAUSED" badge
-  // over an actively-running pipeline). A single cheap boolean read is worth it.
+// Pipeline pause is layered: a GLOBAL master flag (qir_settings.pipeline_paused)
+// pauses every station, and each station may *additionally* be paused on its own
+// via station_settings(station_id, 'pipeline_paused'). The shared worker pool can
+// only be BullMQ-paused as a whole — that's what the GLOBAL flag drives in
+// workers/index.ts. Per-station pause can't pause the shared pool, so it's
+// enforced one level up: the ingest dispatcher skips paused stations, the
+// auto-chain hooks skip them, and each stage processor early-skips a job whose
+// station is paused. All of those pass their stationId here.
+//
+// Effective state = global OR (stationId given AND that station's own flag).
+// Read fresh every time — never cache. This is a control signal toggled from the
+// dashboard and polled by both the UI and workers; a stale cached value makes
+// Pause/Resume appear not to take effect (and shows a "PAUSED" badge over an
+// actively-running pipeline). A couple of cheap boolean reads are worth it.
+export async function isPipelinePaused(stationId?: string): Promise<boolean> {
   const { data } = await supabaseAdmin
     .from('qir_settings')
     .select('value')
     .eq('key', 'pipeline_paused')
-    .single()
-
-  let value: unknown = data?.value
-  if (typeof value === 'string') {
-    try {
-      value = JSON.parse(value)
-    } catch {
-      // keep as-is
-    }
-  }
+    .maybeSingle()
+  const globalPaused = parseJsonValue(data?.value) === true
   // Refresh the shared cache too, so getSetting('pipeline_paused') callers stay
   // consistent — using the same station-prefixed key getSetting reads (global).
-  settingsCache.set(cacheKeyFor('pipeline_paused'), { value: value ?? false, fetchedAt: Date.now() })
-  return value === true
+  settingsCache.set(cacheKeyFor('pipeline_paused'), { value: globalPaused, fetchedAt: Date.now() })
+  if (globalPaused) return true
+
+  if (stationId) return isStationPaused(stationId)
+  return false
+}
+
+/**
+ * This station's *own* pause override only — ignores the GLOBAL master flag.
+ * Used by the super-admin master control to show each station's individual pause
+ * state, and composed by isPipelinePaused() into the effective state. Read fresh
+ * (control signal — same rationale as isPipelinePaused).
+ */
+export async function isStationPaused(stationId: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('station_settings')
+    .select('value')
+    .eq('station_id', stationId)
+    .eq('key', 'pipeline_paused')
+    .maybeSingle()
+  return parseJsonValue(data?.value) === true
 }
 
 /** Replace the {{STATION_NAME}} placeholder used in parameterized prompts. */

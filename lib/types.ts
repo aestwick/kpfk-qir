@@ -12,6 +12,8 @@ export interface Station {
   station_id_patterns: string[] | null
   /** Prefixes stripped from auto-derived show display names (e.g. ["KPFK -"]). Display-only. */
   show_name_strip_prefixes: string[] | null
+  /** Sharing-policy class — sets scheduling priority and (Layer B) demo allowance. */
+  tier: 'production' | 'paying' | 'demo' | 'test'
   created_at: string
 }
 

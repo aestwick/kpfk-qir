@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
+import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
@@ -84,21 +85,22 @@ export async function POST(request: NextRequest) {
       ])
 
       const triggered: string[] = []
+      const priority = await jobPriority(stationId)
 
       // Always run ingest to pull any new episodes
       await ingestQueue.add('pipeline-ingest', { stationId })
       triggered.push('ingest')
 
       if ((pendingRes.count ?? 0) > 0) {
-        await transcribeQueue.add('pipeline-transcribe', { stationId })
+        await transcribeQueue.add('pipeline-transcribe', { stationId }, { priority })
         triggered.push(`transcribe (${pendingRes.count} pending)`)
       }
       if ((transcribedRes.count ?? 0) > 0) {
-        await summarizeQueue.add('pipeline-summarize', { stationId })
+        await summarizeQueue.add('pipeline-summarize', { stationId }, { priority })
         triggered.push(`summarize (${transcribedRes.count} transcribed)`)
       }
       if ((summarizedRes.count ?? 0) > 0) {
-        await complianceQueue.add('pipeline-compliance', { stationId })
+        await complianceQueue.add('pipeline-compliance', { stationId }, { priority })
         triggered.push(`compliance (${summarizedRes.count} summarized)`)
       }
 
@@ -110,17 +112,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, message, triggered, backlog: total })
     }
 
+    const priority = await jobPriority(stationId)
     switch (action) {
       case 'ingest': {
         await ingestQueue.add('manual-ingest', { stationId })
         return NextResponse.json({ ok: true, message: 'Ingest job queued' })
       }
       case 'transcribe': {
-        await transcribeQueue.add('manual-transcribe', { stationId })
+        await transcribeQueue.add('manual-transcribe', { stationId }, { priority })
         return NextResponse.json({ ok: true, message: 'Transcribe job queued' })
       }
       case 'summarize': {
-        await summarizeQueue.add('manual-summarize', { stationId })
+        await summarizeQueue.add('manual-summarize', { stationId }, { priority })
         return NextResponse.json({ ok: true, message: 'Summarize job queued' })
       }
       case 'compliance': {
@@ -133,10 +136,10 @@ export async function POST(request: NextRequest) {
             .eq('station_id', stationId)
             .eq('show_key', showKey)
             .eq('status', 'summarized')
-          await complianceQueue.add(`manual-compliance-${showKey}`, { show_key: showKey, stationId })
+          await complianceQueue.add(`manual-compliance-${showKey}`, { show_key: showKey, stationId }, { priority })
           return NextResponse.json({ ok: true, message: `Compliance check queued for show "${showKey}" (${count ?? 0} episodes eligible)` })
         }
-        await complianceQueue.add('manual-compliance', { stationId })
+        await complianceQueue.add('manual-compliance', { stationId }, { priority })
         return NextResponse.json({ ok: true, message: 'Compliance check job queued' })
       }
       default:
