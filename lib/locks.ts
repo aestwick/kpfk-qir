@@ -54,13 +54,13 @@ function keyFor(stationId: string, stage: PipelineStage): string {
  * released on return or throw. A crashed holder's lock expires via TTL, after
  * which the next kick/continue/cron re-acquires and resumes the chain.
  */
-export async function withStationStageLock<T>(
+export async function withStationStageLock<T, U>(
   stationId: string,
   stage: PipelineStage,
   fn: () => Promise<T>,
-  onBusy: T,
+  onBusy: U,
   ttlMs: number = DEFAULT_TTL_MS,
-): Promise<T> {
+): Promise<T | U> {
   const key = keyFor(stationId, stage)
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
