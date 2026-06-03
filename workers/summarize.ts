@@ -203,6 +203,7 @@ ${transcriptText}`
       const usage = response.usage
       if (usage) {
         await logSummarizationUsage(
+          stationId,
           episode.id,
           usage.prompt_tokens,
           usage.completion_tokens

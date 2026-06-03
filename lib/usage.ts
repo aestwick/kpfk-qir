@@ -1,5 +1,17 @@
 import { supabaseAdmin } from './supabase'
 
+// usage_log.station_id is NOT NULL — every row must carry the tenant it belongs
+// to. These inserts are best-effort (a logging failure must never fail the
+// pipeline stage that produced the work), but we surface the error instead of
+// swallowing it silently, since a silently-dropped insert is what previously
+// hid a missing-station_id regression for every non-embedding operation.
+async function insertUsage(row: Record<string, unknown>, context: string) {
+  const { error } = await supabaseAdmin.from('usage_log').insert(row)
+  if (error) {
+    console.warn(`[usage] failed to log ${context} usage:`, error.message)
+  }
+}
+
 // Groq Whisper pricing: $0.111 per hour of audio
 const GROQ_WHISPER_COST_PER_SECOND = 0.111 / 3600
 
@@ -11,13 +23,15 @@ const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 const OPENAI_EMBEDDING_COST_PER_TOKEN = 0.02 / 1_000_000
 
 export async function logTranscriptionUsage(
+  stationId: string,
   episodeId: number,
   durationSeconds: number,
   metadata?: Record<string, unknown>
 ) {
   const estimatedCost = durationSeconds * GROQ_WHISPER_COST_PER_SECOND
 
-  await supabaseAdmin.from('usage_log').insert({
+  await insertUsage({
+    station_id: stationId,
     episode_id: episodeId,
     service: 'groq',
     model: 'whisper-large-v3',
@@ -27,10 +41,11 @@ export async function logTranscriptionUsage(
     duration_seconds: durationSeconds,
     estimated_cost: estimatedCost,
     metadata: metadata ?? {},
-  })
+  }, 'transcription')
 }
 
 export async function logSummarizationUsage(
+  stationId: string,
   episodeId: number,
   inputTokens: number,
   outputTokens: number,
@@ -40,7 +55,8 @@ export async function logSummarizationUsage(
     inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
     outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
 
-  await supabaseAdmin.from('usage_log').insert({
+  await insertUsage({
+    station_id: stationId,
     episode_id: episodeId,
     service: 'openai',
     model: 'gpt-4o-mini',
@@ -50,10 +66,11 @@ export async function logSummarizationUsage(
     duration_seconds: null,
     estimated_cost: estimatedCost,
     metadata: metadata ?? {},
-  })
+  }, 'summarization')
 }
 
 export async function logComplianceUsage(
+  stationId: string,
   episodeId: number,
   inputTokens: number,
   outputTokens: number,
@@ -63,7 +80,8 @@ export async function logComplianceUsage(
     inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
     outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
 
-  await supabaseAdmin.from('usage_log').insert({
+  await insertUsage({
+    station_id: stationId,
     episode_id: episodeId,
     service: 'openai',
     model: 'gpt-4o-mini',
@@ -73,12 +91,10 @@ export async function logComplianceUsage(
     duration_seconds: null,
     estimated_cost: estimatedCost,
     metadata: metadata ?? {},
-  })
+  }, 'compliance')
 }
 
-// Corpus embedding for semantic search (Phase 2). Unlike the older helpers above,
-// this sets station_id explicitly (matching the translate route) so the cost
-// rolls up per station in the existing usage analytics. episode_id may be null
+// Corpus embedding for semantic search (Phase 2). episode_id may be null
 // (e.g. a future ad-hoc embed); for the per-episode corpus embed it is set.
 export async function logEmbeddingUsage(
   stationId: string,
@@ -89,7 +105,7 @@ export async function logEmbeddingUsage(
 ) {
   const estimatedCost = inputTokens * OPENAI_EMBEDDING_COST_PER_TOKEN
 
-  await supabaseAdmin.from('usage_log').insert({
+  await insertUsage({
     station_id: stationId,
     episode_id: episodeId,
     service: 'openai',
@@ -100,10 +116,11 @@ export async function logEmbeddingUsage(
     duration_seconds: null,
     estimated_cost: estimatedCost,
     metadata: metadata ?? {},
-  })
+  }, 'embedding')
 }
 
 export async function logCurationUsage(
+  stationId: string,
   inputTokens: number,
   outputTokens: number,
   metadata?: Record<string, unknown>
@@ -112,7 +129,8 @@ export async function logCurationUsage(
     inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
     outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
 
-  await supabaseAdmin.from('usage_log').insert({
+  await insertUsage({
+    station_id: stationId,
     episode_id: null,
     service: 'openai',
     model: 'gpt-4o-mini',
@@ -122,5 +140,5 @@ export async function logCurationUsage(
     duration_seconds: null,
     estimated_cost: estimatedCost,
     metadata: metadata ?? {},
-  })
+  }, 'curation')
 }

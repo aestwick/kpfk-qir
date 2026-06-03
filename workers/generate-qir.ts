@@ -251,7 +251,7 @@ ${categorySummaries.join('\n')}`
   // Log usage
   const usage = response.usage
   if (usage) {
-    await logCurationUsage(usage.prompt_tokens, usage.completion_tokens, {
+    await logCurationUsage(stationId, usage.prompt_tokens, usage.completion_tokens, {
       year,
       quarter,
       draft_id: draft?.id,
