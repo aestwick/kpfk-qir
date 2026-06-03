@@ -65,6 +65,83 @@ function parsePaste(text: string): DraftRow[] {
 const rowIsEmpty = (r: DraftRow) => !r.show_name.trim() && !r.key.trim() && !r.category.trim()
 const rowIsValid = (r: DraftRow) => !!r.show_name.trim() && !!r.key.trim()
 
+/* ─── Checklist of programs discovered from the station's archive ─── */
+function DiscoverChecklist({
+  discovered,
+  selected,
+  setSelected,
+  existingSet,
+  resolving,
+  onAdd,
+  onCancel,
+}: {
+  discovered: { key: string; name: string }[]
+  selected: Set<string>
+  setSelected: (s: Set<string>) => void
+  existingSet: Set<string>
+  resolving: boolean
+  onAdd: () => void
+  onCancel: () => void
+}) {
+  const newOnes = discovered.filter((s) => !existingSet.has(s.key.toLowerCase()))
+
+  function toggle(key: string) {
+    const next = new Set(selected)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    setSelected(next)
+  }
+
+  return (
+    <div className="border dark:border-warm-600 rounded p-3 space-y-2 bg-white dark:bg-warm-800">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <p className="text-sm font-medium">
+          {discovered.length} program{discovered.length === 1 ? '' : 's'} found · {newOnes.length} new · {selected.size} selected
+        </p>
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={() => setSelected(new Set(newOnes.map((s) => s.key)))} className="text-blue-600 dark:text-blue-400 hover:underline">
+            Select all new
+          </button>
+          <button onClick={() => setSelected(new Set(discovered.map((s) => s.key)))} className="text-blue-600 dark:text-blue-400 hover:underline">
+            Select all
+          </button>
+          <button onClick={() => setSelected(new Set())} className="text-gray-500 dark:text-warm-400 hover:underline">
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <div className="max-h-72 overflow-y-auto border dark:border-warm-600 rounded divide-y dark:divide-warm-600/50">
+        {discovered.map((s) => {
+          const exists = existingSet.has(s.key.toLowerCase())
+          return (
+            <label key={s.key} className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-warm-700">
+              <input type="checkbox" checked={selected.has(s.key)} onChange={() => toggle(s.key)} className="shrink-0" />
+              <span className="flex-1 truncate">{s.name}</span>
+              <span className="font-mono text-xs text-gray-400 dark:text-warm-500 shrink-0">{s.key}</span>
+              {exists && <span className="text-xs text-blue-600 dark:text-blue-400 shrink-0" title="Already a show — will update">exists</span>}
+            </label>
+          )
+        })}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onAdd}
+          disabled={resolving || selected.size === 0}
+          className="px-4 py-1.5 text-sm bg-green-600 dark:bg-green-700 text-white rounded hover:bg-green-700 dark:hover:bg-green-600 disabled:opacity-40"
+        >
+          {resolving ? 'Looking up…' : `Add ${selected.size || ''} selected`.trim()}
+        </button>
+        <button onClick={onCancel} className="text-xs text-gray-500 hover:text-gray-900 dark:text-warm-400 dark:hover:text-warm-200">
+          Cancel
+        </button>
+        <span className="text-xs text-gray-500 dark:text-warm-400">Looks up name + category from each feed, then loads them below to review.</span>
+      </div>
+    </div>
+  )
+}
+
 /* ─── Fast bulk entry for show keys (grid typing or paste) ─── */
 export function BulkShowEntry({
   existingKeys,
@@ -81,6 +158,9 @@ export function BulkShowEntry({
   const [saving, setSaving] = useState(false)
   const [keysText, setKeysText] = useState('')
   const [resolving, setResolving] = useState(false)
+  const [discovered, setDiscovered] = useState<{ key: string; name: string }[] | null>(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
   const existingSet = useMemo(() => new Set(existingKeys.map((k) => k.trim().toLowerCase())), [existingKeys])
 
@@ -121,50 +201,95 @@ export function BulkShowEntry({
   }
 
   // Resolve a list of bare show keys against the station's archive feeds, filling
-  // in name + category from each live feed. Keys that don't resolve are still added
-  // (key only) so they show as "incomplete" rather than vanishing silently.
-  async function lookupKeys() {
-    const keys = keysText
-      .split(/\r?\n/)
-      .flatMap((l) => l.split(','))
-      .map((k) => k.trim())
-      .filter(Boolean)
+  // in name + category from each live feed, then load the results into the grid.
+  // Keys that don't resolve are still added (key only) so they show as "incomplete"
+  // rather than vanishing silently. The resolve endpoint caps at 100 keys/request,
+  // so chunk to support discovering a whole station at once. Returns false on error.
+  async function resolveAndLoad(rawKeys: string[]): Promise<boolean> {
+    const keys = Array.from(new Set(rawKeys.map((k) => k.trim()).filter(Boolean)))
     if (keys.length === 0) {
-      toast('error', 'Paste at least one show key (one per line)')
-      return
+      toast('error', 'No show keys to look up')
+      return false
     }
     setResolving(true)
     try {
-      const res = await authedFetch('/api/shows/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keys }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        toast('error', data.error ?? 'Lookup failed')
-        return
+      const results: { key: string; feed_name: string | null; category: string | null; ok: boolean }[] = []
+      for (let i = 0; i < keys.length; i += 100) {
+        const res = await authedFetch('/api/shows/resolve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keys: keys.slice(i, i + 100) }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          toast('error', data.error ?? 'Lookup failed')
+          return false
+        }
+        results.push(...(data.results ?? []))
       }
-      const resolved: DraftRow[] = (data.results ?? []).map(
-        (r: { key: string; feed_name: string | null; category: string | null }) => ({
+      loadParsed(
+        results.map((r) => ({
           show_name: r.feed_name ?? '',
           key: r.key,
           category: r.category ?? '',
           primary_language: '',
-        })
+        }))
       )
-      loadParsed(resolved)
-      const found = data.summary?.found ?? 0
-      const failed = data.summary?.failed ?? 0
+      const found = results.filter((r) => r.ok).length
+      const failed = results.length - found
       toast(
         failed ? 'error' : 'success',
         `Looked up ${found} feed${found === 1 ? '' : 's'}${failed ? `, ${failed} not found (left blank — review or remove)` : ''}`
       )
-      setKeysText('')
+      return true
+    } catch {
+      toast('error', 'Network error')
+      return false
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  async function lookupKeys() {
+    const keys = keysText.split(/\r?\n/).flatMap((l) => l.split(',')).map((k) => k.trim()).filter(Boolean)
+    if (keys.length === 0) {
+      toast('error', 'Paste at least one show key (one per line)')
+      return
+    }
+    if (await resolveAndLoad(keys)) setKeysText('')
+  }
+
+  // Fetch the station's full program list from its archive home page and show it
+  // as a checklist. New keys (not already saved) are pre-selected.
+  async function discover() {
+    setDiscovering(true)
+    try {
+      const res = await authedFetch('/api/shows/discover')
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast('error', data.error ?? 'Discovery failed')
+        return
+      }
+      const shows: { key: string; name: string }[] = data.shows ?? []
+      setDiscovered(shows)
+      setSelected(new Set(shows.filter((s) => !existingSet.has(s.key.toLowerCase())).map((s) => s.key)))
+      toast('success', `Found ${shows.length} program${shows.length === 1 ? '' : 's'} — pick which to add`)
     } catch {
       toast('error', 'Network error')
     }
-    setResolving(false)
+    setDiscovering(false)
+  }
+
+  // Resolve the checked programs (name + category from each feed) into the grid.
+  async function addSelectedDiscovered() {
+    if (selected.size === 0) {
+      toast('error', 'Select at least one program')
+      return
+    }
+    if (await resolveAndLoad(Array.from(selected))) {
+      setDiscovered(null)
+      setSelected(new Set())
+    }
   }
 
   async function save() {
@@ -210,12 +335,38 @@ export function BulkShowEntry({
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium">Add shows — type and press Tab to move across, or paste a table</p>
         <button
-          onClick={() => { setOpen(false); setRows([{ ...EMPTY_ROW }]); setPasteText(''); setKeysText('') }}
+          onClick={() => { setOpen(false); setRows([{ ...EMPTY_ROW }]); setPasteText(''); setKeysText(''); setDiscovered(null); setSelected(new Set()) }}
           className="text-xs text-gray-500 hover:text-gray-900 dark:text-warm-400 dark:hover:text-warm-200"
         >
           Close
         </button>
       </div>
+
+      {/* Discover from archive: enumerate every program for this station */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={discover}
+          disabled={discovering || resolving}
+          className="px-3 py-1.5 text-sm bg-purple-600 dark:bg-purple-700 text-white rounded hover:bg-purple-700 dark:hover:bg-purple-600 disabled:opacity-40"
+        >
+          {discovering ? 'Discovering…' : '🔍 Discover from archive'}
+        </button>
+        <span className="text-xs text-gray-500 dark:text-warm-400">
+          Pull the station&apos;s full program list, then pick which shows to add.
+        </span>
+      </div>
+
+      {discovered && (
+        <DiscoverChecklist
+          discovered={discovered}
+          selected={selected}
+          setSelected={setSelected}
+          existingSet={existingSet}
+          resolving={resolving}
+          onAdd={addSelectedDiscovered}
+          onCancel={() => { setDiscovered(null); setSelected(new Set()) }}
+        />
+      )}
 
       {/* Paste loader */}
       <div className="space-y-1.5">

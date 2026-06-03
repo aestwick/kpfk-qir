@@ -49,6 +49,8 @@ workers/
   transcribe.ts     — ffmpeg chunk → Groq Whisper → corrections → store transcript + VTT
   summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata
   generate-qir.ts   — Group episodes → OpenAI curation → build draft
+  discover-sync.ts  — Daily: scrape each station's archive program list →
+                      insert NEW show_keys as inactive (opt-out onboarding)
 ```
 
 ### Library / Shared
@@ -192,7 +194,12 @@ The app is multi-tenant: **one codebase, one database, one deployment** serving 
 ### Provisioning a new station (SQL/admin, no UI yet)
 
 1. **Create the station:** `insert into stations (slug, name, timezone, rss_base_url, mp3_filename_prefix, station_id_patterns) values ('wxyz', 'WXYZ, City', 'America/New_York', 'https://archive.example.org/getrss.php?id=', 'wxyz', array['wxyz','101.5']);` — `rss_base_url` is the full prefix up to `?id=` (the show key is appended); leave it null until known (ingest skips the station, visibly, until set).
-2. **Add shows:** insert `show_keys` rows with that `station_id`, **or** use the dashboard (Settings → Shows → "Add shows"). The bulk-entry panel takes a pasted spreadsheet (name, key, category, language) and also has a **"Look up" by key** mode: paste bare show keys and it resolves each name + category from the station's live archive feeds via `POST /api/shows/resolve` (read-only preview; fails visibly if `rss_base_url` is unset). Ingest only pulls **active** `show_keys`, so a station with feed config but no shows pulls nothing.
+2. **Add shows:** mostly automatic. A **daily discovery sync** (`workers/discover-sync.ts`, cron 06:37 + on startup; also `POST /api/jobs {action:'discover-sync'}`) scrapes the station's archive program list and inserts any **new** `show_keys` as **`active = false`** — opt-out onboarding: every program lands for review, nothing pulls until you activate it. Existing/curated rows are never touched. Gated per station by `discovery_sync_enabled` (default true). Then review the inactive shows and activate the ones you want (drop Music/Español/dupes). You can also add shows manually via the dashboard (Settings → Shows → "Add shows") — three import paths, all landing in the same review grid → save (`POST /api/settings`, `resource:'shows'`):
+   - **"Discover from archive"** (`GET /api/shows/discover`) — one click enumerates the station's **entire** program list by scraping the `<option value="key">Name</option>` dropdown on the archive home page (`new URL(rss_base_url).origin`). Verified identical markup across KPFK/KPFA/WPFW/KPFT. Pick from a checklist; the selected keys flow through resolve (below).
+   - **"Look up" by key** (`POST /api/shows/resolve`) — paste bare show keys; resolves each name + category from the live per-show feed.
+   - **Paste a spreadsheet** (name, key, category, language) for fully manual entry.
+
+   Resolve/discover are read-only previews and fail visibly if `rss_base_url` is unset. Category comes from each feed's plain `<category>` (e.g. "Español"/"Music"), which is what the ingest exclusion list matches — not the generic `<itunes:category>`. Ingest only pulls **active** `show_keys`, so a station with feed config but no shows pulls nothing.
 3. **Grant access:** `insert into station_users (station_id, user_id, role) values (<station>, <auth.users.id>, 'admin');` (or add to `super_admins` for all-station access).
 4. **Optional overrides:** insert `station_settings` rows (e.g. a station-specific `summarization_prompt`/`compliance_prompt`) — otherwise the global `qir_settings` defaults apply.
 5. Workers pick the station up automatically on the next ingest cron tick.
@@ -212,7 +219,7 @@ See `IMPROVEMENTS.md` for the prioritized improvement plan. Key items:
 
 - **P0 (before going live):** Missing DB indexes, no OpenAI retry logic, no BullMQ job timeouts
 - **P1 (next sprint):** Separate workers from web server, Docker resource limits, fix N+1 queries
-- **Multi-station follow-ups:** the `get_episode_counts_by_show` RPC is not station-aware (can over-count episodes for show keys shared across stations) — needs a migration adding a `station_id` arg. KPFA/WPFW/KPFT have `rss_base_url`/`mp3_filename_prefix` set (migration 020) but still need `show_keys` rows before ingest pulls anything; WBAI is deferred (its archive uses a different URL format — left NULL, skipped by ingest).
+- **Multi-station follow-ups:** the `get_episode_counts_by_show` RPC is not station-aware (can over-count episodes for show keys shared across stations) — needs a migration adding a `station_id` arg. KPFA/WPFW/KPFT have `rss_base_url`/`mp3_filename_prefix` set (migration 020); the daily discovery sync now auto-imports their `show_keys` as inactive, so onboarding is review-and-activate rather than manual entry. WBAI is deferred (its archive uses a different URL format — left NULL, skipped by both ingest and discovery).
 - **No tests** — the three targeted integration tests (RLS isolation, settings fallback, worker claim scoping) require a throwaway Postgres and are still pending.
 
 ## Environment

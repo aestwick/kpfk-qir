@@ -56,6 +56,7 @@ export const AUDIT_ACTIONS = {
   // System events from workers (the "which job / which counts" detail the generic
   // trigger can't express). Recorded with actorId: null => actor_type 'system'.
   INGEST_COMPLETE: 'ingest.complete',
+  DISCOVERY_SYNC_COMPLETE: 'discovery.sync.complete',
   TRANSCRIBE_COMPLETE: 'transcribe.complete',
   SUMMARIZE_COMPLETE: 'summarize.complete',
   COMPLIANCE_COMPLETE: 'compliance.complete',
