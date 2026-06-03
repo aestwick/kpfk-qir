@@ -390,7 +390,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
       }
 
       // Log usage
-      await logTranscriptionUsage(episode.id, totalDuration, {
+      await logTranscriptionUsage(stationId, episode.id, totalDuration, {
         chunks: chunkFiles.length,
       })
 
