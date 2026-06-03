@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +27,21 @@ export async function GET(request: NextRequest) {
 
     if (error || !draft) {
       return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
+    }
+
+    if (format === 'csv' || format === 'text') {
+      const meta = requestMeta(request)
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.REPORT_EXPORT,
+        operation: 'export',
+        actorId: result.context.userId,
+        stationId,
+        resourceType: 'qir_draft',
+        resourceId: draft.id,
+        metadata: { format, year: draft.year, quarter: draft.quarter, version: draft.version },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
     }
 
     const entries = (draft.curated_entries ?? []) as Array<{

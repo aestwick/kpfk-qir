@@ -50,6 +50,11 @@ const icons = {
       <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
     </svg>
   ),
+  master: (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+      <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clipRule="evenodd" />
+    </svg>
+  ),
   generate: (
     <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
       <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
@@ -67,15 +72,20 @@ const icons = {
   ),
 }
 
+// `superAdminOnly` items are hidden unless the signed-in user is a super-admin
+// (the page itself also hard-gates via the 403 from /api/audit — nav hiding
+// alone is never the only guard).
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: icons.overview },
   { href: '/dashboard/episodes', label: 'Episodes', icon: icons.episodes },
   { href: '/dashboard/search', label: 'Search', icon: icons.search },
   { href: '/dashboard/compliance', label: 'Compliance', icon: icons.compliance },
   { href: '/dashboard/jobs', label: 'Jobs', icon: icons.jobs },
+  { href: '/dashboard/master', label: 'Master Control', icon: icons.master, superAdminOnly: true },
   { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
   { href: '/dashboard/usage', label: 'Usage', icon: icons.usage },
   { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.audit },
+  { href: '/dashboard/audit', label: 'Audit Log', icon: icons.audit, superAdminOnly: true },
   { href: '/dashboard/generate', label: 'Generate QIR', icon: icons.generate },
   { href: '/dashboard/downloads', label: 'Downloads', icon: icons.downloads },
   { href: '/dashboard/settings', label: 'Settings', icon: icons.settings },
@@ -88,6 +98,7 @@ export default function DashboardLayout({
 }) {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [userEmail, setUserEmail] = useState('')
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const pathname = usePathname()
 
@@ -104,6 +115,15 @@ export default function DashboardLayout({
       }
       setAuthed(true)
       setUserEmail(session.user.email ?? '')
+      // Resolve super-admin status to gate the Audit Log nav entry. Reads the
+      // user's own super_admins row (allowed by RLS, same as the station
+      // switcher). The audit page itself still hard-gates on the API 403.
+      supabase
+        .from('super_admins')
+        .select('user_id')
+        .eq('user_id', session.user.id)
+        .maybeSingle()
+        .then(({ data }) => setIsSuperAdmin(!!data))
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -117,6 +137,15 @@ export default function DashboardLayout({
 
   async function handleLogout() {
     const supabase = createBrowserClient()
+    // Record the logout while the session token is still valid, then sign out.
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) {
+      await fetch('/api/audit/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ action: 'auth.logout' }),
+      }).catch(() => {})
+    }
     await supabase.auth.signOut()
     window.location.href = '/login'
   }
@@ -189,7 +218,7 @@ export default function DashboardLayout({
 
         {/* Navigation */}
         <div className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {navItems.map((item) => {
+          {navItems.filter((item) => !item.superAdminOnly || isSuperAdmin).map((item) => {
             const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
             return (
               <a

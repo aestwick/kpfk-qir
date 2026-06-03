@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
+import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +39,17 @@ export async function GET(request: NextRequest) {
       }
 
       const rows = episodes ?? []
+      const meta = requestMeta(request)
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.DOWNLOADS_EXPORT,
+        operation: 'export',
+        actorId: result.context.userId,
+        stationId,
+        resourceType: 'episode',
+        metadata: { type, format: 'csv', year, quarter, count: rows.length },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
       const headers = [
         'id', 'show_name', 'category', 'status', 'air_date', 'start_time',
         'end_time', 'duration', 'headline', 'host', 'guest',
@@ -125,6 +137,17 @@ export async function GET(request: NextRequest) {
       }
 
       const combined = parts.join('')
+      const meta = requestMeta(request)
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.DOWNLOADS_EXPORT,
+        operation: 'export',
+        actorId: result.context.userId,
+        stationId,
+        resourceType: 'transcript',
+        metadata: { type, year, quarter, episodeCount: episodes.length },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
       return new Response(combined, {
         headers: {
           'Content-Type': 'text/plain',

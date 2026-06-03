@@ -9,6 +9,8 @@ import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { parseVtt } from '../lib/vtt'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { withStationStageLock } from '../lib/locks'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -179,14 +181,29 @@ async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
 }
 
 export async function processTranscribe(job: Job) {
-  if (await isPipelinePaused()) {
-    console.log('[transcribe] pipeline paused — skipping')
-    return { transcribed: 0, remaining: false, skipped: true }
-  }
   // Workers run with the service-role client (RLS bypassed), so the station_id
   // filter below is the ONLY guard against processing another station's episodes.
   const stationId = job.data?.stationId as string | undefined
   if (!stationId) throw new Error('[transcribe] stationId is required in job data')
+  // Soft pause (global OR this station): expensive stages stop, ingest keeps
+  // running. Checked before the lock so a paused station never takes a lock.
+  if (await isPipelinePaused(stationId)) {
+    console.log(`[transcribe] paused for station ${stationId} — skipping`)
+    return { transcribed: 0, remaining: false, skipped: true }
+  }
+
+  // One chain per (station, transcribe): with transcribe concurrency ≥ 2, this
+  // lock stops a single station from occupying both slots. If another chain for
+  // this station is already draining, skip — it re-queues its own continuation.
+  return withStationStageLock(
+    stationId,
+    'transcribe',
+    () => runTranscribeBatch(job, stationId),
+    { transcribed: 0, remaining: false, skipped: 'locked' as const },
+  )
+}
+
+async function runTranscribeBatch(job: Job, stationId: string) {
   console.log(`[transcribe] starting batch for station ${stationId}...`)
 
   const excludedCategories = await getExcludedCategories(stationId)
@@ -418,5 +435,14 @@ export async function processTranscribe(job: Job) {
     console.log(`[transcribe] ${remainingCount} more pending episodes — will continue`)
   }
 
+  if (transcribed > 0) {
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.TRANSCRIBE_COMPLETE,
+      operation: 'update',
+      stationId,
+      resourceType: 'episode',
+      metadata: { transcribed, remaining },
+    })
+  }
   return { transcribed, remaining }
 }

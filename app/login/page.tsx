@@ -15,12 +15,29 @@ export default function LoginPage() {
     setLoading(true)
 
     const supabase = createBrowserClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
+      // Record the failed attempt. No session exists, so post unauthenticated;
+      // the audit route allows login_failed anonymously. Fire-and-forget.
+      void fetch('/api/audit/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'auth.login_failed', metadata: { email } }),
+      }).catch(() => {})
       setError(error.message)
       setLoading(false)
       return
+    }
+
+    // Record the successful login with the fresh session token.
+    const token = data.session?.access_token
+    if (token) {
+      void fetch('/api/audit/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'auth.login', metadata: { email } }),
+      }).catch(() => {})
     }
 
     window.location.href = '/dashboard'

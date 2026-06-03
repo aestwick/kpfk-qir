@@ -6,6 +6,7 @@ import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
 import { rssText } from '../lib/rss'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -223,14 +224,19 @@ async function processShow(
 }
 
 export async function processIngest(job: Job) {
+  const stationId = job.data?.stationId as string | undefined
+
+  // Soft pause keeps ingest running — only the GLOBAL master pause stops it. A
+  // per-station-paused station still RECEIVES new episodes (they queue as pending
+  // and serve as the liveness signal); the expensive stages, gated per-station
+  // downstream — the ingest→transcribe kick and each processor — hold them.
   if (await isPipelinePaused()) {
-    console.log('[ingest] pipeline paused — skipping')
+    console.log('[ingest] paused (global) — skipping')
     return { newEpisodes: 0, skipped: true }
   }
 
-  const stationId = job.data?.stationId as string | undefined
-
-  // Cron/startup tick (no stationId): fan out one ingest job per station.
+  // Cron/startup tick (no stationId): fan out one ingest job per station. Paused
+  // stations are NOT skipped — ingest must keep flowing during soft pause.
   if (!stationId) {
     const ids = await listStationIds()
     for (const id of ids) {
@@ -291,5 +297,15 @@ export async function processIngest(job: Job) {
   }
 
   console.log(`[ingest] done — ${totalNew} new episodes ingested`)
+  // System audit event (only when work happened, to keep the trail readable).
+  if (totalNew > 0) {
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.INGEST_COMPLETE,
+      operation: 'insert',
+      stationId,
+      resourceType: 'episode',
+      metadata: { newEpisodes: totalNew },
+    })
+  }
   return { newEpisodes: totalNew }
 }

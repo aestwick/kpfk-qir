@@ -12,6 +12,7 @@ import {
   getQuarterDateRange,
   type QirEntry,
 } from '../lib/qir-format'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 export interface GenerateQirOptions {
   year: number
@@ -238,6 +239,21 @@ ${categorySummaries.join('\n')}`
   console.log(
     `[generate-qir] Q${quarter} ${year} draft v${nextVersion} created — ${curatedEntries.length} curated from ${allEntries.length} total`
   )
+
+  void logAuditEvent({
+    action: AUDIT_ACTIONS.QIR_GENERATE_COMPLETE,
+    operation: 'insert',
+    stationId,
+    resourceType: 'qir_draft',
+    resourceId: draft?.id,
+    metadata: {
+      year,
+      quarter,
+      version: nextVersion,
+      totalEpisodes: allEntries.length,
+      curatedEpisodes: curatedEntries.length,
+    },
+  })
 
   return {
     drafted: true,

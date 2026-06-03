@@ -61,6 +61,7 @@ lib/
   queue.ts          — BullMQ queue instances (ingest, transcribe, summarize, generate-qir)
   settings.ts       — Settings cache (60s TTL) reading from qir_settings table
   usage.ts          — Cost logging helpers (Groq per-second, OpenAI per-token)
+  audit.ts          — Append-only audit log helper + the event registry (see Audit Logging)
   types.ts          — TypeScript interfaces for all database tables
   qir-format.ts     — Report formatting and date range helpers
 ```
@@ -81,6 +82,11 @@ app/api/
   settings/route.ts         — GET all / PUT upsert setting
   corrections/route.ts      — CRUD for transcript corrections
   usage/route.ts            — GET cost analytics with date range
+  audit/route.ts            — GET audit log (super-admin only, paginated, filterable)
+  audit/event/route.ts      — POST client-reported auth/station events (allowlisted)
+  admin/overview/route.ts   — GET all-station pipeline overview / POST master controls
+                              (super-admin only: pause_all, pause/resume_station,
+                              advance, retry/clear failed; see Pipeline Pause)
 ```
 
 ### Dashboard Pages (all `'use client'`)
@@ -91,9 +97,12 @@ app/dashboard/
   page.tsx                  — Overview: pipeline viz, stats, cost analytics, activity feed
   episodes/page.tsx         — Episode table with filters, sort, bulk actions, CSV export
   episodes/[id]/page.tsx    — Episode detail: audio player, transcript, edit summary
-  jobs/page.tsx             — Queue status monitoring
+  jobs/page.tsx             — Queue status monitoring (active station)
+  master/page.tsx           — Master Control (super-admin only): all-station pipeline
+                              activity + per-station pause/resume, run-now, retry/clear
   generate/page.tsx         — QIR draft builder: generate, curate, edit entries, finalize
   usage/page.tsx            — Cost tracking with date range
+  audit/page.tsx            — Audit log viewer (super-admin only; trailing window, diff view)
   settings/page.tsx         — App config + transcript corrections CRUD
   downloads/page.tsx        — Batch export hub
 ```
@@ -104,7 +113,7 @@ app/dashboard/
 app/
   page.tsx                  — Redirects to /dashboard
   login/page.tsx            — Supabase email/password auth
-  [year]/q[quarter]/page.tsx — Public finalized QIR (server-rendered, print-friendly)
+  [station]/[year]/q[quarter]/page.tsx — Public finalized QIR (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
 ```
 
 ### Shared Components
@@ -159,6 +168,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 
 **Worker chaining:** Ingest completion auto-triggers transcription (if new episodes found). Transcription completion auto-triggers summarization (if episodes transcribed). QIR generation is manual only.
 
+**Pipeline pause is layered** (`lib/settings.ts#isPipelinePaused(stationId?)`). A **global** master flag (`qir_settings.pipeline_paused`) pauses everything — it's the only signal that can BullMQ-`pause()` the *shared* worker pool wholesale (`workers/index.ts#syncPipelineMode`). Each station may *additionally* be paused on its own via `station_settings(station_id,'pipeline_paused')`; since the shared pool can't be paused per station, per-station pause is enforced one level up — the ingest dispatcher skips paused stations on fan-out, the auto-chain hooks skip them, and each stage processor (`transcribe`/`summarize`/`compliance`) early-skips a job whose station is paused. Effective state = `global OR station`. The Jobs page (active station) drives the global flag; the super-admin **Master Control** (`/dashboard/master` ↔ `api/admin/overview`) drives per-station pause/resume, run-now, and failed-job retry/clear across all stations. `isStationPaused(stationId)` reads a station's own flag in isolation (for the master view). Both pause reads are uncached (control signal).
+
 **Settings are in the database**, not env vars. Categories, batch sizes, models, prompts — all editable from the dashboard without redeploying.
 
 **Auth is active** — `dashboard/layout.tsx` requires a Supabase session and redirects to `/login` otherwise. (An older note about an "auth bypass" is obsolete.)
@@ -166,6 +177,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 **Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.
 
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
+
+**Audit logging** is hybrid and append-only (`audit_log`, migration 028; super-admin-only at `/dashboard/audit`). DB triggers (`audit_row_change()`) capture *every* mutation on tenant tables — user-attributed via `auth.uid()`, or `system` for worker/service-role writes. App-layer `lib/audit.ts#logAuditEvent` captures what triggers can't: reads/views, auth events, exports/downloads, and worker stage-completion events. Retention is **permanent** (no TTL/cron cleanup); the dashboard shows a trailing 30-day window with a "full history retained" banner. **When you add a new app-layer event type, register it in `lib/audit.ts` — `AUDIT_OPERATIONS` (must also match the DB `operation` CHECK) and `AUDIT_ACTIONS` are the single source of truth; client-postable events go in `CLIENT_AUDIT_EVENTS`. When you add a new tenant table, add it to the trigger loop in migration 028.** Heavy strings (>2000 chars) are redacted to `<redacted: N chars>` markers at capture so the permanent table stays lean.
 
 ## Multi-Station (Multi-Tenant) Model
 

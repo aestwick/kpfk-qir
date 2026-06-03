@@ -4,6 +4,7 @@ import { listStationIds, getStation } from '../lib/stations'
 import { discoverShows, selectNewShows } from '../lib/archive-discover'
 import { getDiscoverySyncEnabled } from '../lib/settings'
 import { discoverSyncQueue } from '../lib/queue'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 /**
  * Scheduled archive show-key sync. The cron/startup tick (no stationId) fans out
@@ -83,5 +84,13 @@ export async function processDiscoverSync(job: Job) {
   if (insertErr) throw new Error(`[discover-sync] insert failed: ${insertErr.message}`)
 
   console.log(`[discover-sync] ${station.slug}: +${newShows.length} new show(s) imported inactive`)
+  // System audit event, mirroring ingest (only when work happened).
+  void logAuditEvent({
+    action: AUDIT_ACTIONS.DISCOVERY_SYNC_COMPLETE,
+    operation: 'insert',
+    stationId,
+    resourceType: 'show_key',
+    metadata: { discovered: discovered.length, added: newShows.length },
+  })
   return { discovered: discovered.length, added: newShows.length }
 }
