@@ -67,6 +67,25 @@ export function parseProgramOptions(html: string): DiscoveredShow[] {
 }
 
 /**
+ * Given the discovered program list and the keys already stored for a station,
+ * return only the programs whose key isn't already present (case-insensitively,
+ * de-duped). This is the "new keys to add" set for the scheduled sync — existing
+ * (curated) rows are never touched.
+ */
+export function selectNewShows(discovered: DiscoveredShow[], existingKeys: string[]): DiscoveredShow[] {
+  const have = new Set(existingKeys.map((k) => k.trim().toLowerCase()))
+  const seen = new Set<string>()
+  const out: DiscoveredShow[] = []
+  for (const s of discovered) {
+    const k = s.key.trim().toLowerCase()
+    if (!k || have.has(k) || seen.has(k)) continue
+    seen.add(k)
+    out.push(s)
+  }
+  return out
+}
+
+/**
  * Fetch a station's archive home page and return its full program list. The home
  * page is derived from the station's rss_base_url origin (the same archive host
  * ingest pulls feeds from). Throws on a non-OK response so the caller can surface

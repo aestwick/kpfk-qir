@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
+import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue, discoverSyncQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
@@ -122,6 +122,12 @@ export async function POST(request: NextRequest) {
       case 'summarize': {
         await summarizeQueue.add('manual-summarize', { stationId })
         return NextResponse.json({ ok: true, message: 'Summarize job queued' })
+      }
+      case 'discover-sync': {
+        // Import this station's archive program list as inactive show_keys now,
+        // rather than waiting for the daily cron.
+        await discoverSyncQueue.add('manual-discover-sync', { stationId })
+        return NextResponse.json({ ok: true, message: 'Archive show-key sync queued' })
       }
       case 'compliance': {
         const showKey = body.show_key as string | undefined

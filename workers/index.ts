@@ -5,6 +5,7 @@ import { processSummarize } from './summarize'
 import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
+import { processDiscoverSync } from './discover-sync'
 import { getSetting, isPipelinePaused } from '../lib/settings'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
@@ -63,6 +64,12 @@ const generateQirQueue = new Queue('generate-qir', {
   },
 })
 const autoRetryQueue = new Queue('auto-retry', {
+  connection,
+  defaultJobOptions: {
+    attempts: 1,
+  },
+})
+const discoverSyncQueue = new Queue('discover-sync', {
   connection,
   defaultJobOptions: {
     attempts: 1,
@@ -198,6 +205,25 @@ autoRetryWorker.on('failed', (job, err) => {
   console.error(`[auto-retry] failed:`, err.message)
 })
 
+// -- Discover-Sync Worker --
+// Periodically imports each station's archive program list as INACTIVE show_keys
+// (opt-out onboarding). Not paused with the pipeline — it only writes inactive
+// metadata and never pulls/processes.
+const discoverSyncWorker = new Worker('discover-sync', processDiscoverSync, {
+  connection,
+  concurrency: 1,
+})
+
+discoverSyncWorker.on('completed', (job) => {
+  const { dispatched, added, discovered, skipped } = job.returnvalue ?? {}
+  if (dispatched != null) console.log(`[discover-sync] dispatched ${dispatched} station(s)`)
+  else if (skipped) console.log(`[discover-sync] skipped (${skipped})`)
+  else console.log(`[discover-sync] completed — ${added ?? 0} new of ${discovered ?? 0} programs`)
+})
+discoverSyncWorker.on('failed', (job, err) => {
+  console.error(`[discover-sync] failed:`, err.message)
+})
+
 // -- Cron Schedules --
 async function setupCron() {
   // Remove any existing repeatable jobs first
@@ -208,6 +234,10 @@ async function setupCron() {
   const existingRetry = await autoRetryQueue.getRepeatableJobs()
   for (const job of existingRetry) {
     await autoRetryQueue.removeRepeatableByKey(job.key)
+  }
+  const existingDiscover = await discoverSyncQueue.getRepeatableJobs()
+  for (const job of existingDiscover) {
+    await discoverSyncQueue.removeRepeatableByKey(job.key)
   }
 
   await ingestQueue.add(
@@ -226,8 +256,17 @@ async function setupCron() {
     }
   )
 
+  await discoverSyncQueue.add(
+    'discover-sync-cron',
+    {},
+    {
+      repeat: { pattern: '37 6 * * *' }, // daily at 06:37 — program lineups change rarely
+    }
+  )
+
   console.log('[cron] hourly ingest scheduled at minute :02')
   console.log('[cron] auto-retry scheduled every 4 hours at minute :17')
+  console.log('[cron] archive discovery sync scheduled daily at 06:37')
 }
 
 setupCron().catch(console.error)
@@ -241,6 +280,12 @@ autoRetryQueue.add('auto-retry-startup', { recoverAll: true }).then(() => {
 // Run ingest immediately on startup
 ingestQueue.add('ingest-startup', {}).then(() => {
   console.log('[workers] startup ingest queued')
+}).catch(console.error)
+
+// Sync the archive program list on startup so a freshly-configured station gets
+// its (inactive) show_keys without waiting for the daily cron.
+discoverSyncQueue.add('discover-sync-startup', {}).then(() => {
+  console.log('[workers] startup discovery sync queued')
 }).catch(console.error)
 
 // -- Pipeline Mode Polling --
@@ -306,6 +351,7 @@ async function shutdown() {
     complianceWorker.close(),
     generateQirWorker.close(),
     autoRetryWorker.close(),
+    discoverSyncWorker.close(),
   ])
   process.exit(0)
 }

@@ -96,6 +96,13 @@ export async function getExcludedCategories(stationId: string): Promise<string[]
   return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
 }
 
+// Whether the scheduled archive show-key discovery sync runs for a station.
+// Defaults ON (opt-out): new programs on the archive are auto-imported as
+// INACTIVE show_keys for review. Set the per-station override false to disable.
+export async function getDiscoverySyncEnabled(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('discovery_sync_enabled', stationId)) ?? true
+}
+
 // Show keys to skip at ingest, matched exactly against show_keys.key. Keyed by
 // the per-feed key (not the program name) so one airing of a show can be dropped
 // while sibling airings under the same name keep running (e.g. drop KPFA's 9am

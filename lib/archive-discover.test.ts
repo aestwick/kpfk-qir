@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeEntities, parseProgramOptions } from './archive-discover'
+import { decodeEntities, parseProgramOptions, selectNewShows } from './archive-discover'
 
 describe('decodeEntities', () => {
   it('decodes Spanish punctuation and accents', () => {
@@ -68,5 +68,42 @@ describe('parseProgramOptions', () => {
 
   it('returns an empty list when there are no option tags', () => {
     expect(parseProgramOptions('<html><body>no programs here</body></html>')).toEqual([])
+  })
+})
+
+describe('selectNewShows', () => {
+  const discovered = [
+    { key: 'dn', name: 'Democracy Now' },
+    { key: 'uprising', name: 'Uprising' },
+    { key: 'alterradioar', name: 'Alternative Radio' },
+  ]
+
+  it('returns only keys not already stored', () => {
+    expect(selectNewShows(discovered, ['uprising'])).toEqual([
+      { key: 'dn', name: 'Democracy Now' },
+      { key: 'alterradioar', name: 'Alternative Radio' },
+    ])
+  })
+
+  it('matches existing keys case-insensitively', () => {
+    expect(selectNewShows(discovered, ['UPRISING', 'DN'])).toEqual([
+      { key: 'alterradioar', name: 'Alternative Radio' },
+    ])
+  })
+
+  it('returns everything when nothing is stored yet', () => {
+    expect(selectNewShows(discovered, [])).toEqual(discovered)
+  })
+
+  it('returns nothing when all keys already exist', () => {
+    expect(selectNewShows(discovered, ['dn', 'uprising', 'alterradioar'])).toEqual([])
+  })
+
+  it('de-dupes repeated discovered keys', () => {
+    const dupes = [
+      { key: 'dn', name: 'Democracy Now' },
+      { key: 'dn', name: 'Democracy Now Repeat' },
+    ]
+    expect(selectNewShows(dupes, [])).toEqual([{ key: 'dn', name: 'Democracy Now' }])
   })
 })
