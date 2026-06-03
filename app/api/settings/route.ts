@@ -96,11 +96,18 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'key is required' }, { status: 400 })
     }
 
-    // Master-level (global) write: centralized settings — the compliance prompt
-    // and blocking gate, and the global DEFAULT for checks. Super-admin only,
-    // since it changes the setting for EVERY station (the per-station path below
-    // only writes that one station's override).
-    if (scope === 'global') {
+    // Centralized (master-level) keys that have NO per-station override — federal
+    // compliance rules. Any write to these is forced global + super-admin,
+    // regardless of which UI surface or scope the caller sent, so a per-station
+    // override can never be created (which would desync display from enforcement,
+    // since the workers read these global-only). compliance_checks_enabled is NOT
+    // here: it stays central-default + per-station override.
+    const GLOBAL_ONLY_KEYS = new Set(['compliance_prompt', 'compliance_blocking'])
+
+    // Master-level (global) write: the centralized keys above, or an explicit
+    // scope:'global' (e.g. a super-admin editing the global DEFAULT for checks).
+    // Super-admin only — it changes the setting for EVERY station.
+    if (scope === 'global' || GLOBAL_ONLY_KEYS.has(key)) {
       if (!result.context.isSuperAdmin) {
         return stationErrorResponse({ status: 403, error: 'Global settings can only be changed by a super-admin' })
       }
