@@ -90,10 +90,35 @@ export async function PUT(request: NextRequest) {
     if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
-    const { key, value } = body
+    const { key, value, scope } = body
 
     if (!key) {
       return NextResponse.json({ error: 'key is required' }, { status: 400 })
+    }
+
+    // Centralized (master-level) keys that have NO per-station override — federal
+    // compliance rules. Any write to these is forced global + super-admin,
+    // regardless of which UI surface or scope the caller sent, so a per-station
+    // override can never be created (which would desync display from enforcement,
+    // since the workers read these global-only). compliance_checks_enabled is NOT
+    // here: it stays central-default + per-station override.
+    const GLOBAL_ONLY_KEYS = new Set(['compliance_prompt', 'compliance_blocking'])
+
+    // Master-level (global) write: the centralized keys above, or an explicit
+    // scope:'global' (e.g. a super-admin editing the global DEFAULT for checks).
+    // Super-admin only — it changes the setting for EVERY station.
+    if (scope === 'global' || GLOBAL_ONLY_KEYS.has(key)) {
+      if (!result.context.isSuperAdmin) {
+        return stationErrorResponse({ status: 403, error: 'Global settings can only be changed by a super-admin' })
+      }
+      const { error } = await supabaseAdmin
+        .from('qir_settings')
+        .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      invalidateSetting(key)
+      return NextResponse.json({ ok: true, scope: 'global' })
     }
 
     // Settings edits are saved as per-station overrides in station_settings;

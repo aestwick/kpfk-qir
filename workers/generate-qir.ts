@@ -2,7 +2,7 @@ import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
-import { getSetting, getCurationPrompt } from '../lib/settings'
+import { getSetting, getCurationPrompt, isComplianceBlocking } from '../lib/settings'
 import { getStation } from '../lib/stations'
 import { resolveGroupDisplayName, resolveShowGroup } from '../lib/shows'
 import {
@@ -71,10 +71,34 @@ export async function processGenerateQir(job: Job) {
     return { drafted: false, reason: 'no episodes' }
   }
 
+  // Compliance blocking gate (centralized, FCC safety). When on, hold back any
+  // episode that has an unresolved CRITICAL flag — only a 'dismissed' (cleared)
+  // critical flag lets it into the report. Warnings never block.
+  let blockedCount = 0
+  let gatedEpisodes = episodes
+  if (await isComplianceBlocking()) {
+    const { data: criticalFlags } = await supabaseAdmin
+      .from('compliance_flags')
+      .select('episode_id')
+      .in('episode_id', episodes.map((e) => e.id))
+      .eq('severity', 'critical')
+      .neq('review_status', 'dismissed')
+    const blocked = new Set((criticalFlags ?? []).map((f) => f.episode_id))
+    if (blocked.size) {
+      blockedCount = blocked.size
+      gatedEpisodes = episodes.filter((e) => !blocked.has(e.id))
+      console.log(`[generate-qir] blocking on — held back ${blockedCount} episode(s) with unresolved critical flags`)
+    }
+  }
+  if (!gatedEpisodes.length) {
+    console.log('[generate-qir] all candidate episodes blocked by unresolved critical flags')
+    return { drafted: false, reason: 'all episodes blocked by compliance', blocked: blockedCount }
+  }
+
   // Filter by included shows if specified
   const filteredEpisodes = includedShows?.length
-    ? episodes.filter(ep => includedShows.includes(ep.show_key))
-    : episodes
+    ? gatedEpisodes.filter(ep => includedShows.includes(ep.show_key))
+    : gatedEpisodes
 
   if (!filteredEpisodes.length) {
     console.log('[generate-qir] no episodes match show filter')
@@ -261,5 +285,6 @@ ${categorySummaries.join('\n')}`
     version: nextVersion,
     total_episodes: allEntries.length,
     curated_episodes: curatedEntries.length,
+    blocked_episodes: blockedCount,
   }
 }

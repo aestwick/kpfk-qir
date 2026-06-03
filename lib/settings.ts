@@ -145,12 +145,17 @@ export async function getComplianceChecksEnabled(stationId: string): Promise<Rec
 }
 
 export async function getCompliancePrompt(stationId: string): Promise<string> {
-  const raw = (await getSetting<string>('compliance_prompt', stationId)) ?? DEFAULT_COMPLIANCE_PROMPT
+  // Centralized (master-level): the FCC review prompt is read GLOBAL-only — no
+  // per-station override, since the rules are federal and uniform. The station
+  // name is still injected per station via {{STATION_NAME}}.
+  const raw = (await getSetting<string>('compliance_prompt')) ?? DEFAULT_COMPLIANCE_PROMPT
   return fillStationName(raw, await stationName(stationId))
 }
 
-export async function isComplianceBlocking(stationId: string): Promise<boolean> {
-  return (await getSetting<boolean>('compliance_blocking', stationId)) ?? false
+// Centralized FCC safety gate: when on, generate-qir holds back episodes with an
+// unresolved critical compliance flag. Global-only — a station can't disable it.
+export async function isComplianceBlocking(): Promise<boolean> {
+  return (await getSetting<boolean>('compliance_blocking')) ?? false
 }
 
 // Pipeline pause is layered: a GLOBAL master flag (qir_settings.pipeline_paused)
