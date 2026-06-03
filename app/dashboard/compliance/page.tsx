@@ -37,6 +37,7 @@ interface ComplianceWord {
   word: string
   severity: string
   active: boolean
+  station_id: string | null   // null = global base term (applies to every station)
 }
 
 interface ShowHealth {
@@ -192,6 +193,10 @@ export default function CompliancePage() {
     profanity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true, indecency: true,
   })
   const [blocking, setBlocking] = useState(false)
+  // Centralized compliance config (prompt, checks default, blocking, global
+  // wordlist) is super-admin-only; station staff see it read-only.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+  const [newWordGlobal, setNewWordGlobal] = useState(false)
 
   // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -272,6 +277,7 @@ export default function CompliancePage() {
     ]).then(([, , wordData, settingsData, showData]) => {
       setShowHealth(showData.shows ?? [])
       setWords(wordData.words ?? [])
+      setIsSuperAdmin(wordData.isSuperAdmin === true)
       const s = settingsData.settings ?? {}
       setSettings(s)
       setCompliancePrompt((s.compliance_prompt as string) ?? '')
@@ -475,7 +481,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance/wordlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word: newWord.trim(), severity: newWordSeverity }),
+        body: JSON.stringify({ word: newWord.trim(), severity: newWordSeverity, scope: newWordGlobal ? 'global' : 'station' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setNewWord('')
@@ -532,7 +538,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'compliance_prompt', value: compliancePrompt }),
+        body: JSON.stringify({ key: 'compliance_prompt', value: compliancePrompt, scope: 'global' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       setPromptDirty(false)
@@ -553,7 +559,9 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'compliance_checks_enabled', value: updated }),
+        // Super-admin edits the central default (global); a station admin sets a
+        // local override. Checks are "managed centrally, overridable locally".
+        body: JSON.stringify({ key: 'compliance_checks_enabled', value: updated, ...(isSuperAdmin ? { scope: 'global' } : {}) }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch (err) {
@@ -569,7 +577,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'compliance_blocking', value: String(b) }),
+        body: JSON.stringify({ key: 'compliance_blocking', value: String(b), scope: 'global' }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch (err) {
@@ -1165,12 +1173,29 @@ export default function CompliancePage() {
                   {addingWord ? 'Adding...' : 'Add'}
                 </button>
               </div>
+              {isSuperAdmin && (
+                <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-warm-300 -mt-2">
+                  <input type="checkbox" checked={newWordGlobal} onChange={(e) => setNewWordGlobal(e.target.checked)} />
+                  Add to the <strong>global base</strong> list (applies to every station)
+                </label>
+              )}
+              <p className="text-xs text-gray-400 dark:text-warm-500">
+                <span className="px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">global</span> terms are the shared FCC base (super-admin managed); the rest are this station&apos;s own additions.
+              </p>
               <div className="divide-y dark:divide-warm-700 max-h-80 overflow-y-auto">
-                {words.map((w) => (
+                {words.map((w) => {
+                  // Station staff may edit their own additions but not the global base.
+                  const canEdit = isSuperAdmin || w.station_id !== null
+                  return (
                   <div key={w.id} className="flex items-center justify-between py-2 px-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-mono dark:text-warm-100">{w.word}</span>
-                      {editingWord === w.id ? (
+                      {w.station_id === null && (
+                        <span className="text-xs px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">global</span>
+                      )}
+                      {!canEdit ? (
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${severityColors[w.severity]}`}>{w.severity}</span>
+                      ) : editingWord === w.id ? (
                         <div className="flex items-center gap-1">
                           <select
                             value={editWordSeverity}
@@ -1194,22 +1219,25 @@ export default function CompliancePage() {
                         </button>
                       )}
                     </div>
-                    <button
-                      onClick={() => {
-                        setConfirmDialog({
-                          open: true,
-                          title: 'Delete Word',
-                          message: `Remove "${w.word}" from the compliance word list?`,
-                          variant: 'danger',
-                          onConfirm: () => { deleteWord(w.id); setConfirmDialog((p) => ({ ...p, open: false })) },
-                        })
-                      }}
-                      className="text-xs text-red-500 hover:text-red-700"
-                    >
-                      Remove
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => {
+                          setConfirmDialog({
+                            open: true,
+                            title: 'Delete Word',
+                            message: `Remove "${w.word}" from the compliance word list?`,
+                            variant: 'danger',
+                            onConfirm: () => { deleteWord(w.id); setConfirmDialog((p) => ({ ...p, open: false })) },
+                          })
+                        }}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
-                ))}
+                  )
+                })}
                 {words.length === 0 && (
                   <p className="text-sm text-gray-400 dark:text-warm-500 py-4 text-center">No words in compliance list</p>
                 )}
@@ -1220,11 +1248,15 @@ export default function CompliancePage() {
           {/* Prompt Tab */}
           {rulesTab === 'prompt' && (
             <div className="space-y-4">
+              <p className="text-xs text-gray-500 dark:text-warm-400">
+                The FCC compliance prompt is <strong>centralized</strong> — one shared rule set for every station ({'{{STATION_NAME}}'} is filled in per station).{!isSuperAdmin && ' Managed by a super-admin; read-only here.'}
+              </p>
               <div className={`relative ${promptDirty ? 'ring-2 ring-amber-300 rounded-lg' : ''}`}>
                 <textarea
                   value={compliancePrompt}
                   onChange={(e) => { setCompliancePrompt(e.target.value); setPromptDirty(true) }}
-                  className="w-full border rounded-lg p-3 text-sm font-mono h-48 resize-y dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                  readOnly={!isSuperAdmin}
+                  className="w-full border rounded-lg p-3 text-sm font-mono h-48 resize-y dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 read-only:opacity-70 read-only:cursor-not-allowed"
                   placeholder="Compliance check prompt for AI..."
                 />
               </div>
@@ -1252,7 +1284,7 @@ export default function CompliancePage() {
                 </button>
                 <button
                   onClick={savePrompt}
-                  disabled={!promptDirty || savingPrompt || !compliancePrompt.trim()}
+                  disabled={!isSuperAdmin || !promptDirty || savingPrompt || !compliancePrompt.trim()}
                   className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-700 dark:hover:bg-blue-600"
                 >
                   {savingPrompt ? 'Saving...' : 'Save Prompt'}
@@ -1264,6 +1296,11 @@ export default function CompliancePage() {
           {/* Checks Tab */}
           {rulesTab === 'checks' && (
             <div className="space-y-1">
+              <p className="text-xs text-gray-500 dark:text-warm-400 mb-3">
+                {isSuperAdmin
+                  ? 'You are editing the central default that applies to every station (stations may still override locally).'
+                  : 'Defaults are managed centrally; toggles here set an override for this station only.'}
+              </p>
               <p className="text-xs font-semibold text-gray-400 dark:text-warm-500 uppercase tracking-wide mb-3">Check Types</p>
               {FLAG_TYPES.map((type) => (
                 <div key={type} className="flex items-center justify-between py-3 border-b last:border-b-0 dark:border-warm-700">
@@ -1280,12 +1317,13 @@ export default function CompliancePage() {
               ))}
               <div className="flex items-center justify-between py-3 mt-2 border-t dark:border-warm-700">
                 <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-warm-100">Blocking Mode</p>
-                  <p className="text-xs text-gray-500 dark:text-warm-400">Block non-compliant episodes from QIR inclusion</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-warm-100">Blocking Mode <span className="ml-1 text-xs px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">global</span></p>
+                  <p className="text-xs text-gray-500 dark:text-warm-400">Hold episodes with an unresolved critical flag out of the QIR until it&apos;s cleared.{!isSuperAdmin && ' Managed by a super-admin.'}</p>
                 </div>
                 <button
                   onClick={() => toggleBlocking(!blocking)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${blocking ? 'bg-red-600' : 'bg-gray-300 dark:bg-warm-600'}`}
+                  disabled={!isSuperAdmin}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${blocking ? 'bg-red-600' : 'bg-gray-300 dark:bg-warm-600'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${blocking ? 'translate-x-6' : 'translate-x-1'}`} />
                 </button>

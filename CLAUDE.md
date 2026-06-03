@@ -172,6 +172,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 
 **Settings are in the database**, not env vars. Categories, batch sizes, models, prompts — all editable from the dashboard without redeploying.
 
+**Compliance config is centralized (master-level)** because FCC rules are federal/uniform. The `compliance_prompt` and the `compliance_blocking` gate are **global-only** (`lib/settings.ts` reads them with no `stationId`; edited only via `PUT /api/settings {scope:'global'}`, super-admin-gated). `compliance_checks_enabled` is **central default + local override** (super-admin sets the global default with `scope:'global'`; a station admin may still override for their station). The `compliance_wordlist` is **two-layer**: rows with `station_id IS NULL` are the global base (super-admin managed, apply to every station); per-station rows are local additions. The compliance worker flags on the **union** (`station_id = me OR station_id IS NULL`); RLS lets members read the base + their own rows but only super-admins write base rows (migration 030). Only station-ID detection stays per-station (`stations.station_id_patterns`). **Blocking** (`isComplianceBlocking()`, consumed in `generate-qir.ts`): when on, an episode with an unresolved **critical** flag (review_status ≠ `dismissed`) is held out of the QIR draft; warnings never block.
+
 **Auth is active** — `dashboard/layout.tsx` requires a Supabase session and redirects to `/login` otherwise. (An older note about an "auth bypass" is obsolete.)
 
 **Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.

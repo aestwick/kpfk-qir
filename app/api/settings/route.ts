@@ -90,10 +90,28 @@ export async function PUT(request: NextRequest) {
     if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
-    const { key, value } = body
+    const { key, value, scope } = body
 
     if (!key) {
       return NextResponse.json({ error: 'key is required' }, { status: 400 })
+    }
+
+    // Master-level (global) write: centralized settings — the compliance prompt
+    // and blocking gate, and the global DEFAULT for checks. Super-admin only,
+    // since it changes the setting for EVERY station (the per-station path below
+    // only writes that one station's override).
+    if (scope === 'global') {
+      if (!result.context.isSuperAdmin) {
+        return stationErrorResponse({ status: 403, error: 'Global settings can only be changed by a super-admin' })
+      }
+      const { error } = await supabaseAdmin
+        .from('qir_settings')
+        .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+      invalidateSetting(key)
+      return NextResponse.json({ ok: true, scope: 'global' })
     }
 
     // Settings edits are saved as per-station overrides in station_settings;
