@@ -2,6 +2,7 @@ import { Job } from 'bullmq'
 import { supabaseAdmin } from '../lib/supabase'
 import { listStationIds, getStation } from '../lib/stations'
 import { discoverShows, selectNewShows } from '../lib/archive-discover'
+import { resolveShowKeys } from '../lib/shows-resolve'
 import { getDiscoverySyncEnabled } from '../lib/settings'
 import { discoverSyncQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
@@ -68,16 +69,27 @@ export async function processDiscoverSync(job: Job) {
     return { discovered: discovered.length, added: 0 }
   }
 
-  // New programs arrive INACTIVE. show_name is seeded from the home-page label;
-  // the canonical name + category come from the feed when the show is reviewed/
-  // activated (the resolve step), so we leave category null here. ignoreDuplicates
-  // makes a concurrent insert a no-op rather than clobbering a curated row.
-  const rows = newShows.map((s) => ({
-    station_id: stationId,
-    key: s.key,
-    show_name: s.name,
-    active: false,
-  }))
+  // Resolve each NEW key's feed for its real <category> (and canonical title). The
+  // category is load-bearing: it's what the ingest/transcribe exclusion list matches
+  // (Música/Español/...). Without it, a show activated before its category is set
+  // would silently bypass that exclusion. Bounded to new keys only, so steady-state
+  // cost is ~zero; a station's first sync resolves its whole list once.
+  const resolved = await resolveShowKeys(station.rss_base_url, newShows.map((s) => s.key))
+  const byKey = new Map(resolved.map((r) => [r.key, r]))
+
+  // New programs arrive INACTIVE. ignoreDuplicates makes a concurrent insert a
+  // no-op rather than clobbering a curated row. A feed that didn't resolve keeps
+  // the home-page name and a null category (visible for review).
+  const rows = newShows.map((s) => {
+    const r = byKey.get(s.key)
+    return {
+      station_id: stationId,
+      key: s.key,
+      show_name: r?.feed_name ?? s.name,
+      category: r?.category ?? null,
+      active: false,
+    }
+  })
   const { error: insertErr } = await supabaseAdmin
     .from('show_keys')
     .upsert(rows, { onConflict: 'station_id,key', ignoreDuplicates: true })

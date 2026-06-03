@@ -1,4 +1,4 @@
-import { parseChannelMeta } from '@/lib/rss'
+import { parseChannelMeta } from './rss'
 
 // Each key is a live archive fetch, so resolve in small concurrent batches
 // (matches the ingest worker's CONCURRENCY=5 / 30s feed timeout pacing).

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
-import { getSetting, invalidateSetting, isStationPaused } from '@/lib/settings'
+import { getSetting, invalidateSetting, isStationPaused, isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -254,6 +254,23 @@ export async function POST(request: NextRequest) {
     if (action === 'advance') {
       const station = await resolveStation()
       if (!station) return NextResponse.json({ error: 'Unknown or missing stationId' }, { status: 400 })
+
+      // Only report stages that will actually run. Under the GLOBAL pause every
+      // worker (incl. ingest) is BullMQ-paused, so nothing would run — don't queue
+      // it and say so. Under a per-station pause ingest still runs (liveness) but
+      // the expensive stages skip themselves, so queue/report ingest only.
+      const [globalPaused, stationPaused] = await Promise.all([
+        isPipelinePaused(),
+        isStationPaused(station.id),
+      ])
+      if (globalPaused) {
+        return NextResponse.json({
+          ok: true,
+          message: `${station.slug}: pipeline is globally paused — resume before advancing`,
+          triggered: [],
+        })
+      }
+
       const { start, end } = currentQuarterBounds()
       const base = (status: string) =>
         supabaseAdmin
@@ -263,11 +280,20 @@ export async function POST(request: NextRequest) {
           .gte('air_date', start)
           .lte('air_date', end)
           .eq('status', status)
-      const [pending, transcribed, summarized] = await Promise.all([base('pending'), base('transcribed'), base('summarized')])
 
       const triggered: string[] = []
       await ingestQueue.add('master-ingest', { stationId: station.id })
       triggered.push('ingest')
+
+      if (stationPaused) {
+        return NextResponse.json({
+          ok: true,
+          message: `${station.slug}: ingest queued — station is paused, so processing stages were skipped (resume to process)`,
+          triggered,
+        })
+      }
+
+      const [pending, transcribed, summarized] = await Promise.all([base('pending'), base('transcribed'), base('summarized')])
       if ((pending.count ?? 0) > 0) {
         await transcribeQueue.add('master-transcribe', { stationId: station.id })
         triggered.push(`transcribe (${pending.count})`)
