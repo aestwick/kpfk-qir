@@ -211,16 +211,25 @@ export async function isStationPaused(stationId: string): Promise<boolean> {
 }
 
 // ─── Spend limits (super-admin-managed; auto-pause enforcement) ─────────────
-// Budgets live in the same key-value layers as everything else, so the effective
-// limit resolves per-station override → global default via getSetting():
-//   spend_limit_monthly  / spend_limit_quarterly   (USD; absent or ≤ 0 = no cap)
-// "Global" is a DEFAULT applied to every station; a per-station row overrides it.
-// Enforcement is auto-pause only: a station over EITHER cap is treated as paused
-// by isPipelinePaused(), which stops the paid stages (transcribe/summarize/
-// compliance) and the auto-chain. Ingest is gated globally only, so episodes keep
-// being captured as `pending` and drain once the budget resets (monthly/quarterly
-// rollover) or is raised. The *reason* is never shown to non-super-admins — only
-// the super-admin Master Control surfaces budget status.
+// Budgets live in the same key-value layers as everything else. Two independent
+// layers, both enforced (a station trips if EITHER is breached):
+//
+//   Per-station — resolves override → global default via getSetting():
+//     spend_limit_monthly / spend_limit_quarterly   (USD; absent or ≤ 0 = no cap)
+//     "Global" here is a DEFAULT applied to every station; a per-station row
+//     overrides it for that station.
+//   Universal — a single combined ceiling on the SUM of *all* stations' spend
+//     (global-only, super-admin-managed):
+//     spend_limit_universal_monthly / spend_limit_universal_quarterly
+//     When the all-stations total reaches it, every station trips at once.
+//
+// Enforcement is auto-pause only: a station over its own cap OR under a breached
+// universal ceiling is treated as paused by isPipelinePaused(), which stops the
+// paid stages (transcribe/summarize/compliance) and the auto-chain. Ingest is
+// gated globally only, so episodes keep being captured as `pending` and drain
+// once the budget resets (monthly/quarterly rollover) or is raised. The *reason*
+// is never shown to non-super-admins — only the super-admin Master Control
+// surfaces budget status.
 
 function monthAndQuarterStart(): { monthStart: string; quarterStart: string } {
   const now = new Date()
@@ -232,7 +241,7 @@ function monthAndQuarterStart(): { monthStart: string; quarterStart: string } {
 }
 
 /**
- * Effective spend caps for a station (per-station override → global default).
+ * Effective per-station spend caps (per-station override → global default).
  * A non-positive or missing value means "no cap" → null.
  */
 export async function getEffectiveSpendLimits(stationId: string): Promise<{ monthly: number | null; quarterly: number | null }> {
@@ -246,14 +255,31 @@ export async function getEffectiveSpendLimits(stationId: string): Promise<{ mont
   }
 }
 
-/** Month-to-date and quarter-to-date spend for a station (one quarter-spanning read). */
-export async function getStationSpend(stationId: string): Promise<{ month: number; quarter: number }> {
+/**
+ * Universal (all-stations combined) spend ceiling — global-only.
+ * A non-positive or missing value means "no cap" → null.
+ */
+export async function getUniversalSpendLimits(): Promise<{ monthly: number | null; quarterly: number | null }> {
+  const [m, q] = await Promise.all([
+    getSetting<number>('spend_limit_universal_monthly'),
+    getSetting<number>('spend_limit_universal_quarterly'),
+  ])
+  return {
+    monthly: typeof m === 'number' && m > 0 ? m : null,
+    quarterly: typeof q === 'number' && q > 0 ? q : null,
+  }
+}
+
+// Month-to-date and quarter-to-date spend, optionally scoped to one station
+// (one quarter-spanning read; month ⊆ quarter).
+async function sumSpend(stationId?: string): Promise<{ month: number; quarter: number }> {
   const { monthStart, quarterStart } = monthAndQuarterStart()
-  const { data } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('usage_log')
     .select('estimated_cost, created_at')
-    .eq('station_id', stationId)
     .gte('created_at', quarterStart)
+  if (stationId) query = query.eq('station_id', stationId)
+  const { data } = await query
   let month = 0
   let quarter = 0
   for (const r of data ?? []) {
@@ -264,14 +290,44 @@ export async function getStationSpend(stationId: string): Promise<{ month: numbe
   return { month, quarter }
 }
 
-// Cached over-budget check for the hot worker pause path. Spend accrues slowly,
+/** Month-to-date and quarter-to-date spend for one station. */
+export async function getStationSpend(stationId: string): Promise<{ month: number; quarter: number }> {
+  return sumSpend(stationId)
+}
+
+/** Month-to-date and quarter-to-date spend across every station (universal cap). */
+export async function getTotalSpend(): Promise<{ month: number; quarter: number }> {
+  return sumSpend()
+}
+
+// Cached over-budget checks for the hot worker pause path. Spend accrues slowly,
 // so a 60s cache bounds the cost of the usage_log sum (worst case: a station
 // overshoots by ~one job before the next stage skips). Fast path with no spend
 // query at all when no cap is configured — the common case.
 const budgetCache = new Map<string, { over: boolean; fetchedAt: number }>()
 const BUDGET_CACHE_TTL_MS = 60_000
+let universalBudgetCache: { over: boolean; fetchedAt: number } | null = null
+
+/** True when the combined all-stations spend has reached the universal ceiling. */
+export async function isUniversalOverBudget(): Promise<boolean> {
+  if (universalBudgetCache && Date.now() - universalBudgetCache.fetchedAt < BUDGET_CACHE_TTL_MS) {
+    return universalBudgetCache.over
+  }
+  const { monthly, quarterly } = await getUniversalSpendLimits()
+  let over = false
+  if (monthly != null || quarterly != null) {
+    const { month, quarter } = await getTotalSpend()
+    over = (monthly != null && month >= monthly) || (quarterly != null && quarter >= quarterly)
+  }
+  universalBudgetCache = { over, fetchedAt: Date.now() }
+  return over
+}
 
 export async function isStationOverBudget(stationId: string): Promise<boolean> {
+  // Universal ceiling trips every station at once — check it first (cached,
+  // station-independent, with a no-query fast path when unset).
+  if (await isUniversalOverBudget()) return true
+
   const cached = budgetCache.get(stationId)
   if (cached && Date.now() - cached.fetchedAt < BUDGET_CACHE_TTL_MS) return cached.over
 
@@ -288,6 +344,7 @@ export async function isStationOverBudget(stationId: string): Promise<boolean> {
 /** Drop the cached over-budget results so a limit change takes effect promptly. */
 export function invalidateBudgetCache(): void {
   budgetCache.clear()
+  universalBudgetCache = null
 }
 
 /** Replace the {{STATION_NAME}} placeholder used in parameterized prompts. */

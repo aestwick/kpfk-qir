@@ -166,14 +166,20 @@ export async function GET(request: NextRequest) {
     // Per-station spend: quarter-to-date (groq/openai/total) + month-to-date total.
     type StationCost = { groq: number; openai: number; total: number; month: number }
     const costByStation = new Map<string, StationCost>()
+    // Combined all-stations totals for the universal ceiling (every row, matching
+    // lib/settings#getTotalSpend — independent of per-station attribution).
+    const grand = { month: 0, quarter: 0 }
     for (const row of usageRows.data ?? []) {
+      const amount = Number(row.estimated_cost) || 0
+      const inMonth = typeof row.created_at === 'string' && row.created_at.slice(0, 10) >= monthStart
+      grand.quarter += amount
+      if (inMonth) grand.month += amount
       if (!row.station_id) continue
       const c = costByStation.get(row.station_id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
-      const amount = Number(row.estimated_cost) || 0
       c.total += amount
       if (row.service === 'groq') c.groq += amount
       else if (row.service === 'openai') c.openai += amount
-      if (typeof row.created_at === 'string' && row.created_at.slice(0, 10) >= monthStart) c.month += amount
+      if (inMonth) c.month += amount
       costByStation.set(row.station_id, c)
     }
 
@@ -197,15 +203,18 @@ export async function GET(request: NextRequest) {
       const n = Number(parsed)
       return Number.isFinite(n) && n > 0 ? n : null
     }
-    const [globalMonthly, globalQuarterly, overrideRowsRes] = await Promise.all([
+    const [globalMonthly, globalQuarterly, universalMonthly, universalQuarterly, overrideRowsRes] = await Promise.all([
       getSetting<number>('spend_limit_monthly'),
       getSetting<number>('spend_limit_quarterly'),
+      getSetting<number>('spend_limit_universal_monthly'),
+      getSetting<number>('spend_limit_universal_quarterly'),
       supabaseAdmin
         .from('station_settings')
         .select('station_id, key, value')
         .in('key', ['spend_limit_monthly', 'spend_limit_quarterly']),
     ])
     const budgetDefaults = { monthly: num(globalMonthly), quarterly: num(globalQuarterly) }
+    const budgetUniversalCaps = { monthly: num(universalMonthly), quarterly: num(universalQuarterly) }
     const overrideByStation = new Map<string, { monthly: number | null; quarterly: number | null }>()
     for (const row of overrideRowsRes.data ?? []) {
       const entry = overrideByStation.get(row.station_id) ?? { monthly: null, quarterly: null }
@@ -213,6 +222,11 @@ export async function GET(request: NextRequest) {
       else if (row.key === 'spend_limit_quarterly') entry.quarterly = num(row.value)
       overrideByStation.set(row.station_id, entry)
     }
+
+    // Universal (all-stations combined) ceiling: trips every station at once.
+    const universalOverMonthly = budgetUniversalCaps.monthly != null && grand.month >= budgetUniversalCaps.monthly
+    const universalOverQuarterly = budgetUniversalCaps.quarterly != null && grand.quarter >= budgetUniversalCaps.quarterly
+    const universalOverBudget = universalOverMonthly || universalOverQuarterly
 
     // Tier order = sharing order: production first, then paying, demo, test.
     const TIER_RANK: Record<string, number> = { production: 0, paying: 1, demo: 2, test: 3 }
@@ -233,8 +247,9 @@ export async function GET(request: NextRequest) {
           tier: (s.tier as string | null) ?? 'test',
           paused,
           // Over-budget auto-pause folds into effective pause (mirrors the worker
-          // gate). The reason ('overBudget') is only exposed on this super-admin view.
-          effectivePaused: globalPaused || paused || overBudget,
+          // gate): the station's own cap OR the universal ceiling. The reason is
+          // only exposed on this super-admin view.
+          effectivePaused: globalPaused || paused || overBudget || universalOverBudget,
           episodes: episodeCounts[i].counts,
           lastAdvancedAt: episodeCounts[i].lastAdvancedAt,
           activity: activityByStation.get(s.id) ?? { active: 0, waiting: 0, failed: 0 },
@@ -280,6 +295,13 @@ export async function GET(request: NextRequest) {
       quarter: { start, end },
       costTotals,
       budgetDefaults,
+      budgetUniversal: {
+        monthly: budgetUniversalCaps.monthly,
+        quarterly: budgetUniversalCaps.quarterly,
+        overMonthly: universalOverMonthly,
+        overQuarterly: universalOverQuarterly,
+        overBudget: universalOverBudget,
+      },
     })
   } catch (err) {
     console.error('GET /api/admin/overview failed:', err)
@@ -307,14 +329,19 @@ export async function POST(request: NextRequest) {
     }
 
     // -- Set spend caps (super-admin only; this whole route is super-admin-gated) --
-    // body: { action:'set_budget', stationId?, monthly?, quarterly? }
-    //   stationId present → per-station override; absent → global default.
+    // body: { action:'set_budget', scope?:'universal', stationId?, monthly?, quarterly? }
+    //   scope:'universal' → combined all-stations ceiling (global-only keys);
+    //   else stationId present → per-station override; absent → global default.
     //   A positive number sets a cap; null / 0 / '' clears it (delete the row).
     //   A period key omitted from the body is left untouched.
     if (action === 'set_budget') {
-      const stationId = body.stationId as string | undefined
+      const universal = body.scope === 'universal'
+      // stationId only applies to per-station overrides; ignored for universal/global.
+      const stationId = universal ? undefined : (body.stationId as string | undefined)
       const now = new Date().toISOString()
-      const KEYS = { monthly: 'spend_limit_monthly', quarterly: 'spend_limit_quarterly' } as const
+      const KEYS = universal
+        ? { monthly: 'spend_limit_universal_monthly', quarterly: 'spend_limit_universal_quarterly' }
+        : ({ monthly: 'spend_limit_monthly', quarterly: 'spend_limit_quarterly' } as const)
 
       if (stationId) {
         const { data: station } = await supabaseAdmin.from('stations').select('id, slug').eq('id', stationId).maybeSingle()
@@ -354,7 +381,8 @@ export async function POST(request: NextRequest) {
       // Spend caps changed — drop the cached over-budget decisions so enforcement
       // re-evaluates promptly (rather than lagging up to the 60s budget cache TTL).
       invalidateBudgetCache()
-      return NextResponse.json({ ok: true, message: stationId ? 'Station spend cap updated' : 'Global spend cap updated' })
+      const scopeMsg = universal ? 'Universal spend cap updated' : stationId ? 'Station spend cap updated' : 'Global spend cap updated'
+      return NextResponse.json({ ok: true, message: scopeMsg })
     }
 
     // Resolve and validate the target station for the per-station actions below.

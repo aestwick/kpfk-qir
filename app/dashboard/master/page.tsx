@@ -59,6 +59,14 @@ interface Overview {
   quarter: { start: string; end: string }
   costTotals: { quarter: number; month: number }
   budgetDefaults: { monthly: number | null; quarterly: number | null }
+  // Universal (all-stations combined) ceiling + its over-budget state.
+  budgetUniversal: {
+    monthly: number | null
+    quarterly: number | null
+    overMonthly: boolean
+    overQuarterly: boolean
+    overBudget: boolean
+  }
 }
 
 function fmtCost(n: number): string {
@@ -116,11 +124,15 @@ function isProductionDark(s: StationRow): boolean {
 // clears a cap (per-station blank reverts to the global default).
 function BudgetEditor({
   defaults,
+  universal,
+  totals,
   stations,
   busy,
   onSave,
 }: {
   defaults: { monthly: number | null; quarterly: number | null }
+  universal: Overview['budgetUniversal']
+  totals: { month: number; quarter: number }
   stations: StationRow[]
   busy: string | null
   onSave: (key: string, body: Record<string, unknown>) => void
@@ -150,11 +162,41 @@ function BudgetEditor({
       <div className="px-5 py-3 border-b border-warm-200 dark:border-warm-700">
         <h3 className="font-semibold">Spend caps</h3>
         <p className="text-xs text-warm-400">
-          Super-admin only. A station that reaches a cap auto-pauses its paid stages (ingest keeps running; episodes drain when the
-          budget rolls over or is raised). Blank = no cap; a blank per-station value inherits the global default.
+          Super-admin only. A station auto-pauses its paid stages when it reaches its own cap OR the universal (all-stations
+          combined) ceiling — monthly or quarterly, whichever trips first. Ingest keeps running; episodes drain when the budget
+          rolls over or is raised. Blank = no cap; a blank per-station value inherits the global default.
         </p>
       </div>
       <div className="p-5 space-y-3">
+        {/* Universal ceiling — combined across every station. */}
+        <div className="flex items-center gap-3 flex-wrap pb-3 border-b border-warm-100 dark:border-warm-800">
+          <span className="text-sm font-medium w-40">Universal (all stations)</span>
+          <label className="text-xs text-warm-500 flex items-center gap-1.5">Monthly {moneyInput('universal:monthly', universal.monthly, 'none')}</label>
+          <label className="text-xs text-warm-500 flex items-center gap-1.5">Quarterly {moneyInput('universal:quarterly', universal.quarterly, 'none')}</label>
+          <button
+            onClick={() =>
+              onSave('budget:universal', {
+                action: 'set_budget',
+                scope: 'universal',
+                monthly: parseCap(valOf('universal:monthly', universal.monthly)),
+                quarterly: parseCap(valOf('universal:quarterly', universal.quarterly)),
+              })
+            }
+            disabled={busy !== null}
+            className="text-xs font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {busy === 'budget:universal' ? '...' : 'Save'}
+          </button>
+          <span className="text-xs tabular-nums text-warm-400 ml-auto">
+            {fmtCost(totals.month)}/mo · {fmtCost(totals.quarter)}/qtr combined
+          </span>
+          {universal.overBudget && (
+            <span className="text-2xs font-semibold px-2 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+              OVER — all stations auto-paused
+            </span>
+          )}
+        </div>
+
         {/* Global defaults */}
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm font-medium w-40">Global default</span>
@@ -449,7 +491,16 @@ export default function MasterControlPage() {
       )}
 
       {/* Spend caps — super-admin budget management (auto-pause enforcement). */}
-      {data && <BudgetEditor defaults={data.budgetDefaults} stations={stations} busy={busy} onSave={act} />}
+      {data && (
+        <BudgetEditor
+          defaults={data.budgetDefaults}
+          universal={data.budgetUniversal}
+          totals={data.costTotals}
+          stations={stations}
+          busy={busy}
+          onSave={act}
+        />
+      )}
 
       {view === 'glance' ? (
         /* ---- GLANCE: staleness-first, tier-ordered cards ---- */
