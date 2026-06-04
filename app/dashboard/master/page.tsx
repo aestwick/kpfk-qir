@@ -24,6 +24,8 @@ interface StationRow {
   episodes: { pending: number; transcribed: number; summarized: number; compliance_checked: number; failed: number; total: number }
   lastAdvancedAt: string | null
   activity: { active: number; waiting: number; failed: number }
+  // Running spend tally: quarter-to-date (groq/openai/total) + month-to-date.
+  cost: { groq: number; openai: number; total: number; month: number }
 }
 
 interface JobItem {
@@ -45,6 +47,11 @@ interface Overview {
   stations: StationRow[]
   jobs: { recent: JobItem[]; waiting: JobItem[] }
   quarter: { start: string; end: string }
+  costTotals: { quarter: number; month: number }
+}
+
+function fmtCost(n: number): string {
+  return '$' + (n ?? 0).toFixed(2)
 }
 
 function fmtTime(ms: number | null): string {
@@ -302,6 +309,17 @@ export default function MasterControlPage() {
         </div>
       ))}
 
+      {/* Running spend tally across all stations — surfaced in both views. */}
+      {data && (
+        <div className="rounded-xl border border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 px-5 py-3 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <span className="text-sm font-semibold text-warm-800 dark:text-warm-100 tabular-nums">Spend this quarter: {fmtCost(data.costTotals.quarter)}</span>
+            <span className="text-xs text-warm-400 tabular-nums">month-to-date: {fmtCost(data.costTotals.month)}</span>
+          </div>
+          <span className="text-2xs text-warm-400">Running tally across all stations · {data.quarter.start} → {data.quarter.end}</span>
+        </div>
+      )}
+
       {view === 'glance' ? (
         /* ---- GLANCE: staleness-first, tier-ordered cards ---- */
         loading && !data ? (
@@ -339,6 +357,11 @@ export default function MasterControlPage() {
                   <div className="mt-2 text-xs text-warm-500 dark:text-warm-400 tabular-nums">
                     {s.episodes.pending} pending · {s.episodes.transcribed} transcribed · {s.episodes.summarized} summarized · {s.episodes.compliance_checked} checked
                     {s.episodes.failed > 0 && <span className="text-red-500"> · {s.episodes.failed} failed</span>}
+                  </div>
+
+                  <div className="mt-1 text-xs text-warm-500 dark:text-warm-400 tabular-nums">
+                    Spend: {fmtCost(s.cost.total)} this quarter
+                    <span className="text-warm-400"> · {fmtCost(s.cost.month)} this month</span>
                   </div>
 
                   <div className="mt-3 border-t border-warm-100 dark:border-warm-800 pt-3">
@@ -389,6 +412,7 @@ export default function MasterControlPage() {
                     <th className="font-medium px-2 py-2">Summarized</th>
                     <th className="font-medium px-2 py-2">Checked</th>
                     <th className="font-medium px-2 py-2">Failed</th>
+                    <th className="font-medium px-2 py-2">Spend&nbsp;(Q)</th>
                     <th className="font-medium px-5 py-2 text-right">Controls</th>
                   </tr>
                 </thead>
@@ -396,7 +420,7 @@ export default function MasterControlPage() {
                   {loading && !data ? (
                     <SkeletonTableRows rows={4} />
                   ) : stations.length === 0 ? (
-                    <tr><td colSpan={10} className="px-5 py-6 text-center text-warm-400">No stations.</td></tr>
+                    <tr><td colSpan={11} className="px-5 py-6 text-center text-warm-400">No stations.</td></tr>
                   ) : (
                     stations.map((s) => {
                       const inFlight = s.activity.active + s.activity.waiting
@@ -421,6 +445,9 @@ export default function MasterControlPage() {
                           <td className="px-2 py-3 tabular-nums">{s.episodes.compliance_checked}</td>
                           <td className="px-2 py-3 tabular-nums">
                             <span className={s.episodes.failed > 0 ? 'text-red-600 dark:text-red-400 font-medium' : ''}>{s.episodes.failed}</span>
+                          </td>
+                          <td className="px-2 py-3 tabular-nums" title={`Groq ${fmtCost(s.cost.groq)} · OpenAI ${fmtCost(s.cost.openai)} · month-to-date ${fmtCost(s.cost.month)}`}>
+                            {fmtCost(s.cost.total)}
                           </td>
                           <td className="px-5 py-3"><StationControls s={s} /></td>
                         </tr>

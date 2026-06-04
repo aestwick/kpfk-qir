@@ -163,6 +163,8 @@ export default function SettingsPage() {
   // Members tab state (only populated/shown for station admins)
   const [members, setMembers] = useState<StationMember[]>([])
   const [canManageMembers, setCanManageMembers] = useState(false)
+  // Cost/spend figures (e.g. per-check pricing hints) are super-admin-only.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [newMember, setNewMember] = useState<{ email: string; role: StationRole }>({ email: '', role: 'viewer' })
   const [memberBusy, setMemberBusy] = useState(false)
 
@@ -236,6 +238,7 @@ export default function SettingsPage() {
     if (wordlistRes.ok) {
       const data = await wordlistRes.json()
       setWordlist(data.words ?? [])
+      setIsSuperAdmin(!!data.isSuperAdmin)
     }
     if (showsRes.ok) {
       const data = await showsRes.json()
@@ -1500,7 +1503,7 @@ export default function SettingsPage() {
                   <div className={`w-2 h-2 rounded-full ${complianceChecks[key] ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-warm-500'}`} />
                   <span className="text-sm font-medium text-gray-900 dark:text-warm-100">{label}</span>
                 </div>
-                <span className="text-[10px] text-gray-400 dark:text-warm-500">{cost}</span>
+                {isSuperAdmin && <span className="text-[10px] text-gray-400 dark:text-warm-500">{cost}</span>}
               </button>
             ))}
           </div>

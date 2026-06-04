@@ -64,6 +64,10 @@ export async function GET(request: NextRequest) {
     if (guard.error) return guard.error
 
     const { start, end } = currentQuarterBounds()
+    // Month-to-date bound for the running spend tally (month ⊆ quarter, so the
+    // single quarter-scoped usage pull below covers it).
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
 
     // All stations (service-role; this is an admin cross-tenant view).
     const { data: stations, error: stationsErr } = await supabaseAdmin
@@ -75,7 +79,7 @@ export async function GET(request: NextRequest) {
 
     const queueNames = Object.keys(QUEUES) as QueueName[]
 
-    const [globalPaused, mode, stationPauseStates, episodeCounts, queueData] = await Promise.all([
+    const [globalPaused, mode, stationPauseStates, episodeCounts, queueData, usageRows] = await Promise.all([
       // Global master flag.
       getSetting<boolean>('pipeline_paused').then((v) => v === true),
       getSetting<string>('pipeline_mode').then((v) => v ?? 'steady'),
@@ -151,7 +155,27 @@ export async function GET(request: NextRequest) {
           }
         })
       ),
+      // Running spend tally: every station's usage this quarter (month-to-date is
+      // a subset). Service-role cross-tenant read, aggregated per station below.
+      supabaseAdmin
+        .from('usage_log')
+        .select('station_id, service, estimated_cost, created_at')
+        .gte('created_at', start),
     ])
+
+    // Per-station spend: quarter-to-date (groq/openai/total) + month-to-date total.
+    type StationCost = { groq: number; openai: number; total: number; month: number }
+    const costByStation = new Map<string, StationCost>()
+    for (const row of usageRows.data ?? []) {
+      if (!row.station_id) continue
+      const c = costByStation.get(row.station_id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
+      const amount = Number(row.estimated_cost) || 0
+      c.total += amount
+      if (row.service === 'groq') c.groq += amount
+      else if (row.service === 'openai') c.openai += amount
+      if (typeof row.created_at === 'string' && row.created_at.slice(0, 10) >= monthStart) c.month += amount
+      costByStation.set(row.station_id, c)
+    }
 
     // Flatten jobs and tally in-flight (active/waiting/failed) activity per station.
     const allJobs = queueData.flatMap((q) => q.jobs)
@@ -180,6 +204,7 @@ export async function GET(request: NextRequest) {
           episodes: episodeCounts[i].counts,
           lastAdvancedAt: episodeCounts[i].lastAdvancedAt,
           activity: activityByStation.get(s.id) ?? { active: 0, waiting: 0, failed: 0 },
+          cost: costByStation.get(s.id) ?? { groq: 0, openai: 0, total: 0, month: 0 },
         }
       })
       .sort((a, b) => (TIER_RANK[a.tier] ?? 9) - (TIER_RANK[b.tier] ?? 9) || a.name.localeCompare(b.name))
@@ -194,12 +219,23 @@ export async function GET(request: NextRequest) {
       .slice(0, 60)
     const waitingJobs = allJobs.filter((j) => j.state === 'waiting').slice(0, 40)
 
+    // Grand totals across all stations for the running tally header.
+    const costTotals = stationsOut.reduce(
+      (acc, s) => {
+        acc.quarter += s.cost.total
+        acc.month += s.cost.month
+        return acc
+      },
+      { quarter: 0, month: 0 }
+    )
+
     return NextResponse.json({
       global: { paused: globalPaused, mode },
       queues,
       stations: stationsOut,
       jobs: { recent: recentJobs, waiting: waitingJobs },
       quarter: { start, end },
+      costTotals,
     })
   } catch (err) {
     console.error('GET /api/admin/overview failed:', err)
