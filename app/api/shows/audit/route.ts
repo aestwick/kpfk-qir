@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,16 +33,6 @@ async function batchInQuery<T>(
     if (data) results.push(...(data as T[]))
   }
   return results
-}
-
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
 }
 
 /**

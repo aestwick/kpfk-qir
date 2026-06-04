@@ -6,6 +6,7 @@ import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, i
 import { isSpendLimitError } from '../lib/retry-policy'
 import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { getCurrentQuarterBounds } from '../lib/quarters'
 
 interface SummaryResponse {
   headline: string
@@ -14,16 +15,6 @@ interface SummaryResponse {
   guest: string
   discrepancy: string
   issue_category: string
-}
-
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
 }
 
 export async function processSummarize(job: Job) {

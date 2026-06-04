@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,15 +23,6 @@ async function getQueueCounts(queue: typeof ingestQueue) {
       processedOn: j.processedOn ?? null,
     })),
   }
-}
-
-function getCurrentQuarterBounds() {
-  const now = new Date()
-  const q = Math.floor(now.getMonth() / 3)
-  const year = now.getFullYear()
-  const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
-  const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
-  return { start, end }
 }
 
 async function getEpisodeBacklog(supabase: SupabaseClient, stationId: string) {

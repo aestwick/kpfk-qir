@@ -11,6 +11,7 @@ import { isSpendLimitError } from '../lib/retry-policy'
 import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
+import { getCurrentQuarterBounds } from '../lib/quarters'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -51,16 +52,6 @@ interface WhisperResponse {
   segments?: WhisperSegment[]
   duration?: number
   language?: string
-}
-
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
 }
 
 async function loadCorrections(stationId: string): Promise<

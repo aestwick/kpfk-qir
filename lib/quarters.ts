@@ -15,6 +15,19 @@ export function getCurrentQuarter(now: Date = new Date()): { year: number; quart
 }
 
 /**
+ * Inclusive date bounds of `now`'s calendar quarter, as YYYY-MM-DD strings.
+ * Single source of truth for the quarter window that workers and API routes use
+ * to scope episode queries (previously copy-pasted in ~7 places).
+ */
+export function getCurrentQuarterBounds(now: Date = new Date()): { start: string; end: string } {
+  const year = now.getFullYear()
+  const q = Math.floor(now.getMonth() / 3)
+  const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
+  const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
+  return { start, end }
+}
+
+/**
  * Quarter options from the current quarter backwards, newest first.
  * Never includes future quarters.
  *
