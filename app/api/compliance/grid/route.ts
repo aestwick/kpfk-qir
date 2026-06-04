@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   bucketEpisodes,
@@ -29,11 +29,9 @@ interface GridFilters {
 
 // GET /api/compliance/grid — offense-density grids for one or two windows.
 // Single: ?start=&end=  ·  Compare: ?compare=true&a_start=&a_end=&b_start=&b_end=
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
 
@@ -80,7 +78,7 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/compliance/grid failed:', err)
     return NextResponse.json({ error: 'Failed to build compliance grid' }, { status: 500 })
   }
-}
+})
 
 function parseWindow(params: URLSearchParams, prefix: string): { start: string; end: string } | null {
   const start = params.get(`${prefix}start`)

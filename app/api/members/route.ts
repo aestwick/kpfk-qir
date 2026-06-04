@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 import { StationRole } from '@/lib/types'
 
@@ -42,13 +42,9 @@ async function findUserByEmail(email: string): Promise<{ id: string; email: stri
 }
 
 // GET — list members of the active station (admin only).
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const denied = requireRole(result.context, 'admin')
-    if (denied) return stationErrorResponse(denied)
-    const { stationId, userId } = result.context
+    const { stationId, userId } = ctx
 
     // Authorized as a station admin above; read via the service role so we can
     // also resolve emails from auth.users (not reachable under RLS).
@@ -85,17 +81,13 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/members failed:', err)
     return NextResponse.json({ error: 'Failed to fetch members' }, { status: 500 })
   }
-}
+}, { role: 'admin' })
 
 // POST — add an existing user by email (or invite a new one) to the active
 // station with a role (admin only).
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const denied = requireRole(result.context, 'admin')
-    if (denied) return stationErrorResponse(denied)
-    const { stationId } = result.context
+    const { stationId } = ctx
 
     const body = await request.json()
     const email = typeof body.email === 'string' ? body.email.trim() : ''
@@ -131,16 +123,12 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/members failed:', err)
     return NextResponse.json({ error: 'Failed to add member' }, { status: 500 })
   }
-}
+}, { role: 'admin' })
 
 // PATCH — change a member's role (admin only). Won't demote the last admin.
-export async function PATCH(request: NextRequest) {
+export const PATCH = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const denied = requireRole(result.context, 'admin')
-    if (denied) return stationErrorResponse(denied)
-    const { stationId } = result.context
+    const { stationId } = ctx
 
     const body = await request.json()
     const targetUserId = typeof body.user_id === 'string' ? body.user_id : ''
@@ -170,17 +158,13 @@ export async function PATCH(request: NextRequest) {
     console.error('PATCH /api/members failed:', err)
     return NextResponse.json({ error: 'Failed to update member' }, { status: 500 })
   }
-}
+}, { role: 'admin' })
 
 // DELETE — remove a member from the active station (admin only). Won't remove
 // the last admin or the caller themselves.
-export async function DELETE(request: NextRequest) {
+export const DELETE = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const denied = requireRole(result.context, 'admin')
-    if (denied) return stationErrorResponse(denied)
-    const { stationId, userId } = result.context
+    const { stationId, userId } = ctx
 
     const { searchParams } = new URL(request.url)
     const targetUserId = searchParams.get('user_id')
@@ -205,7 +189,7 @@ export async function DELETE(request: NextRequest) {
     console.error('DELETE /api/members failed:', err)
     return NextResponse.json({ error: 'Failed to remove member' }, { status: 500 })
   }
-}
+}, { role: 'admin' })
 
 // True when `targetUserId` is an admin of `stationId` and the only one.
 async function isLastAdmin(stationId: string, targetUserId: string): Promise<boolean> {

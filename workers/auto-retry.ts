@@ -1,5 +1,5 @@
 import { Job } from 'bullmq'
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { listStationIds } from '../lib/stations'
 import { autoRetryQueue } from '../lib/queue'
 
@@ -39,7 +39,7 @@ export async function processAutoRetry(job: Job) {
     ['transcribing', 'pending'],
     ['summarizing', 'transcribed'],
   ] as const) {
-    let q = supabaseAdmin.from('episode_log').select('id').eq('station_id', stationId).eq('status', stuckStatus)
+    let q = stationScoped(supabaseAdmin.from('episode_log').select('id'), stationId).eq('status', stuckStatus)
     if (!recoverAll) q = q.lt('updated_at', staleCutoff)
     const { data: stuck, error: stuckErr } = await q
     if (stuckErr) {
@@ -47,21 +47,22 @@ export async function processAutoRetry(job: Job) {
       continue
     }
     if (stuck?.length) {
-      await supabaseAdmin
-        .from('episode_log')
-        .update({ status: resetTo, updated_at: new Date().toISOString() })
-        .eq('station_id', stationId)
-        .in('id', stuck.map((e) => e.id))
+      await stationScoped(
+        supabaseAdmin
+          .from('episode_log')
+          .update({ status: resetTo, updated_at: new Date().toISOString() }),
+        stationId,
+      ).in('id', stuck.map((e) => e.id))
       recovered += stuck.length
       console.log(`[auto-retry] recovered ${stuck.length} stuck '${stuckStatus}' → ${resetTo}`)
     }
   }
 
   // Promote episodes that have exceeded max retries to 'dead' status
-  const { data: deadEpisodes, error: deadError } = await supabaseAdmin
-    .from('episode_log')
-    .select('id')
-    .eq('station_id', stationId)
+  const { data: deadEpisodes, error: deadError } = await stationScoped(
+    supabaseAdmin.from('episode_log').select('id'),
+    stationId,
+  )
     .eq('status', 'failed')
     .gte('retry_count', MAX_RETRY_COUNT)
 
@@ -69,19 +70,20 @@ export async function processAutoRetry(job: Job) {
     console.error('[auto-retry] failed to query dead episodes:', deadError.message)
   } else if (deadEpisodes?.length) {
     const deadIds = deadEpisodes.map((ep) => ep.id)
-    await supabaseAdmin
-      .from('episode_log')
-      .update({ status: 'dead', updated_at: new Date().toISOString() })
-      .eq('station_id', stationId)
-      .in('id', deadIds)
+    await stationScoped(
+      supabaseAdmin
+        .from('episode_log')
+        .update({ status: 'dead', updated_at: new Date().toISOString() }),
+      stationId,
+    ).in('id', deadIds)
     console.log(`[auto-retry] moved ${deadIds.length} episodes to dead status`)
   }
 
   // Reset retryable failed episodes back to pending (retry_count < max)
-  const { data: retryable, error: retryError } = await supabaseAdmin
-    .from('episode_log')
-    .select('id, retry_count')
-    .eq('station_id', stationId)
+  const { data: retryable, error: retryError } = await stationScoped(
+    supabaseAdmin.from('episode_log').select('id, retry_count'),
+    stationId,
+  )
     .eq('status', 'failed')
     .lt('retry_count', MAX_RETRY_COUNT)
 
@@ -96,11 +98,12 @@ export async function processAutoRetry(job: Job) {
   }
 
   const retryIds = retryable.map((ep) => ep.id)
-  await supabaseAdmin
-    .from('episode_log')
-    .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
-    .eq('station_id', stationId)
-    .in('id', retryIds)
+  await stationScoped(
+    supabaseAdmin
+      .from('episode_log')
+      .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() }),
+    stationId,
+  ).in('id', retryIds)
 
   console.log(`[auto-retry] reset ${retryIds.length} episodes to pending`)
   return { retried: retryIds.length, dead: deadEpisodes?.length ?? 0, recovered }

@@ -1,16 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES, isReviewStatus } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/compliance/report — compliance flags grouped by show > episode
 // Query params: flag_type, severity, quarter (e.g. "2026-1"), unresolved=true
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const flagType = searchParams.get('flag_type')
@@ -168,4 +166,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/compliance/report failed:', err)
     return NextResponse.json({ error: 'Failed to generate compliance report' }, { status: 500 })
   }
-}
+})

@@ -3,6 +3,7 @@ import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isStationOverBudget, isPipelinePaused } from '@/lib/settings'
+import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,15 +16,6 @@ export const dynamic = 'force-dynamic'
 const QUEUES = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
 type QueueName = keyof typeof QUEUES
 const EPISODE_STATUSES = ['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed'] as const
-
-function currentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const q = Math.floor(now.getMonth() / 3)
-  const year = now.getFullYear()
-  const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
-  const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
-  return { start, end }
-}
 
 type Guarded =
   | { context: StationContext; error?: undefined }
@@ -63,7 +55,7 @@ export async function GET(request: NextRequest) {
     const guard = await requireSuperAdmin(request)
     if (guard.error) return guard.error
 
-    const { start, end } = currentQuarterBounds()
+    const { start, end } = getCurrentQuarterBounds()
     // Month-to-date bound for the running spend tally (month ⊆ quarter, so the
     // single quarter-scoped usage pull below covers it).
     const now = new Date()
@@ -434,7 +426,7 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      const { start, end } = currentQuarterBounds()
+      const { start, end } = getCurrentQuarterBounds()
       const base = (status: string) =>
         supabaseAdmin
           .from('episode_log')

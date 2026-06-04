@@ -6,6 +6,7 @@ import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, i
 import { isSpendLimitError } from '../lib/retry-policy'
 import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { claimEpisodeBatch, countRemainingInStatus } from './claim-batch'
 
 interface SummaryResponse {
   headline: string
@@ -14,16 +15,6 @@ interface SummaryResponse {
   guest: string
   discrepancy: string
   issue_category: string
-}
-
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
 }
 
 export async function processSummarize(job: Job) {
@@ -48,52 +39,16 @@ export async function processSummarize(job: Job) {
   // summary (resolved once per batch — the 60s settings cache makes this cheap).
   const embeddingsEnabled = await isEmbeddingsEnabled(stationId)
   const embeddingModel = await getEmbeddingModel(stationId)
-  const { start, end } = getCurrentQuarterBounds()
 
-  // Get candidate transcribed episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
-  const { data: candidates, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('id, category')
-    .eq('station_id', stationId)
-    .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-    .order('created_at', { ascending: true })
-    .limit(batchSize)
-
-  if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!candidates?.length) {
-    console.log('[summarize] no transcribed episodes')
-    return { summarized: 0 }
-  }
-
-  // Drop excluded categories before claiming so they stay transcribed (not stuck mid-stage)
-  const claimIds = candidates
-    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
-    .map((ep) => ep.id)
-
-  if (!claimIds.length) {
-    console.log('[summarize] only excluded-category episodes transcribed')
-    return { summarized: 0 }
-  }
-
-  // Atomically claim: the `.eq('status', 'transcribed')` guard ensures overlapping
-  // runs can't grab the same episode (see transcribe.ts for the full rationale).
-  const { data: episodes, error: claimError } = await supabaseAdmin
-    .from('episode_log')
-    .update({ status: 'summarizing', updated_at: new Date().toISOString() })
-    .eq('station_id', stationId)
-    .in('id', claimIds)
-    .eq('status', 'transcribed')
-    .select('*')
-
-  if (claimError) throw new Error(`Failed to claim episodes: ${claimError.message}`)
-  if (!episodes?.length) {
-    console.log('[summarize] no episodes claimed (already taken by another run)')
-    return { summarized: 0 }
-  }
-
-  const filteredEpisodes = episodes
+  const filteredEpisodes = await claimEpisodeBatch({
+    stationId,
+    fromStatus: 'transcribed',
+    toStatus: 'summarizing',
+    batchSize,
+    excludedCategories,
+    label: 'summarize',
+  })
+  if (!filteredEpisodes.length) return { summarized: 0 }
 
   // Batch-fetch all transcripts upfront to avoid N+1 queries
   const epIds = filteredEpisodes.map((ep) => ep.id)
@@ -247,14 +202,8 @@ ${transcriptText}`
 
   // Check if more transcribed episodes remain after this batch (this station only —
   // the continue-chain job carries this station's id)
-  const { count: remainingCount } = await supabaseAdmin
-    .from('episode_log')
-    .select('id', { count: 'exact', head: true })
-    .eq('station_id', stationId)
-    .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-
-  const remaining = (remainingCount ?? 0) > 0
+  const remainingCount = await countRemainingInStatus(stationId, 'transcribed')
+  const remaining = remainingCount > 0
   if (remaining) {
     console.log(`[summarize] ${remainingCount} more transcribed episodes — will continue`)
   }

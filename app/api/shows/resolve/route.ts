@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { resolveShowKeys } from '@/lib/shows-resolve'
 
 export const dynamic = 'force-dynamic'
@@ -18,15 +18,9 @@ const MAX_KEYS = 100
  * the reviewed rows are saved via POST /api/settings. Thin route: auth + validate
  * + shape; the fetch/parse/concurrency lives in lib/shows-resolve.
  */
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    // Provisioning action — gate behind editor (same as the save step it feeds).
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json().catch(() => ({}))
     const rawKeys = Array.isArray(body.keys) ? body.keys : []
@@ -82,4 +76,4 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/shows/resolve failed:', err)
     return NextResponse.json({ error: 'Failed to resolve show keys' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

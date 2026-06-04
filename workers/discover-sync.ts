@@ -1,5 +1,5 @@
 import { Job } from 'bullmq'
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { listStationIds, getStation } from '../lib/stations'
 import { discoverShows, selectNewShows } from '../lib/archive-discover'
 import { resolveShowKeys } from '../lib/shows-resolve'
@@ -31,11 +31,10 @@ import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
  * stays null (re-checked only on the next manual backfill).
  */
 async function backfillNullCategories(stationId: string, slug: string, rssBaseUrl: string) {
-  const { data: rows, error } = await supabaseAdmin
-    .from('show_keys')
-    .select('key')
-    .eq('station_id', stationId)
-    .is('category', null)
+  const { data: rows, error } = await stationScoped(
+    supabaseAdmin.from('show_keys').select('key'),
+    stationId,
+  ).is('category', null)
   if (error) throw new Error(`[discover-sync] backfill: failed to load uncategorized keys: ${error.message}`)
   if (!rows || rows.length === 0) {
     console.log(`[discover-sync] ${slug}: no uncategorized shows to backfill`)
@@ -46,10 +45,10 @@ async function backfillNullCategories(stationId: string, slug: string, rssBaseUr
   let backfilled = 0
   for (const r of resolved) {
     if (!r.ok || !r.category) continue
-    const { error: upErr } = await supabaseAdmin
-      .from('show_keys')
-      .update({ category: r.category })
-      .eq('station_id', stationId)
+    const { error: upErr } = await stationScoped(
+      supabaseAdmin.from('show_keys').update({ category: r.category }),
+      stationId,
+    )
       .eq('key', r.key)
       .is('category', null)
     if (upErr) {
@@ -119,10 +118,10 @@ export async function processDiscoverSync(job: Job) {
     return { discovered: 0, added: 0 }
   }
 
-  const { data: existingRows, error: existingErr } = await supabaseAdmin
-    .from('show_keys')
-    .select('key')
-    .eq('station_id', stationId)
+  const { data: existingRows, error: existingErr } = await stationScoped(
+    supabaseAdmin.from('show_keys').select('key'),
+    stationId,
+  )
   if (existingErr) throw new Error(`[discover-sync] failed to load existing keys: ${existingErr.message}`)
 
   const newShows = selectNewShows(discovered, (existingRows ?? []).map((r) => r.key))

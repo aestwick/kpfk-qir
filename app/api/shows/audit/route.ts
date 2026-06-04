@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { SupabaseClient } from '@supabase/supabase-js'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
+import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
@@ -34,27 +35,15 @@ async function batchInQuery<T>(
   return results
 }
 
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
-}
-
 /**
  * GET /api/shows/audit?show_keys=key1,key2&from=2026-01-01&to=2026-01-31
  *
  * Returns episodes for the given shows and date range, grouped by status,
  * with cost estimates for episodes that still need processing.
  */
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId, isSuperAdmin } = result.context
+    const { supabase, stationId, isSuperAdmin } = ctx
 
     const { searchParams } = new URL(request.url)
     const showKeysParam = searchParams.get('show_keys')
@@ -194,4 +183,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/shows/audit failed:', err)
     return NextResponse.json({ error: 'Failed to fetch show audit' }, { status: 500 })
   }
-}
+})

@@ -1,18 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { getIssueCategories, getExcludedCategories, isPipelinePaused } from '@/lib/settings'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
+import { getCurrentQuarter, getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
 function getQuarterBounds() {
-  const now = new Date()
-  const q = Math.floor(now.getMonth() / 3)
-  const year = now.getFullYear()
-  const quarter = q + 1
-  const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
-  const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
+  const { year, quarter } = getCurrentQuarter()
+  const { start, end } = getCurrentQuarterBounds()
   return { year, quarter, start, end, label: `Q${quarter} ${year}` }
 }
 
@@ -26,10 +23,8 @@ async function getQueueCounts(queue: typeof ingestQueue) {
   }
 }
 
-export async function GET(request: NextRequest) {
-  const result = await getStationContext(request)
-  if (result.error) return stationErrorResponse(result.error)
-  const { supabase, stationId, isSuperAdmin } = result.context
+export const GET = withStationAuth(async (ctx) => {
+  const { supabase, stationId, isSuperAdmin } = ctx
 
   const qtr = getQuarterBounds()
 
@@ -447,4 +442,4 @@ export async function GET(request: NextRequest) {
     lastCompletedJobs: lastJobTimestamps,
     pipelinePaused: await isPipelinePaused(),
   })
-}
+})

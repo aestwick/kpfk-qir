@@ -1,14 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 // GET — list QIR drafts, optionally filtered by year/quarter
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const year = searchParams.get('year')
@@ -34,17 +32,12 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/qir failed:', err)
     return NextResponse.json({ error: 'Failed to fetch drafts' }, { status: 500 })
   }
-}
+})
 
 // POST — generate a new QIR draft or finalize/un-finalize
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { stationId } = ctx
 
     const body = await request.json()
 
@@ -68,17 +61,12 @@ export async function POST(request: NextRequest) {
     const msg = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ error: msg }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
 // PATCH — finalize or un-finalize a draft, or update curated entries
-export async function PATCH(request: NextRequest) {
+export const PATCH = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { id, action } = body
@@ -154,17 +142,12 @@ export async function PATCH(request: NextRequest) {
     console.error('PATCH /api/qir failed:', err)
     return NextResponse.json({ error: 'Failed to update draft' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
 // DELETE — remove a draft
-export async function DELETE(request: NextRequest) {
+export const DELETE = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
@@ -189,4 +172,4 @@ export async function DELETE(request: NextRequest) {
     console.error('DELETE /api/qir failed:', err)
     return NextResponse.json({ error: 'Failed to delete draft' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

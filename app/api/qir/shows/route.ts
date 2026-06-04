@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
 import { resolveGroupDisplayName, resolveShowGroup } from '@/lib/shows'
 
@@ -10,11 +10,9 @@ export const dynamic = 'force-dynamic'
  * Returns shows that have summarized episodes in the given quarter,
  * with episode counts per show.
  */
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const year = parseInt(searchParams.get('year') ?? '')
@@ -100,4 +98,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/qir/shows failed:', err)
     return NextResponse.json({ error: 'Failed to fetch shows' }, { status: 500 })
   }
-}
+})

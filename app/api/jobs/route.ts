@@ -1,20 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue, discoverSyncQueue } from '@/lib/queue'
 import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
+import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const ctx = await getStationContext(request)
-    if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
-
-    const denied = requireRole(ctx.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { action } = body
@@ -71,11 +67,7 @@ export async function POST(request: NextRequest) {
 
     // Advance pipeline: check backlog and trigger all stages with pending work
     if (action === 'advance-pipeline') {
-      const now = new Date()
-      const q = Math.floor(now.getMonth() / 3)
-      const year = now.getFullYear()
-      const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
-      const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
+      const { start, end } = getCurrentQuarterBounds()
       const dateFilter = `and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`
 
       const [pendingRes, transcribedRes, summarizedRes] = await Promise.all([
@@ -162,13 +154,11 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/jobs failed:', err)
     return NextResponse.json({ error: 'Failed to queue job' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx) => {
   try {
-    const ctx = await getStationContext(request)
-    if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
+    const { supabase, stationId } = ctx
 
     const queues = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
     const queueNames = Object.keys(queues) as (keyof typeof queues)[]
@@ -222,11 +212,7 @@ export async function GET(request: NextRequest) {
         })
       ),
       (async () => {
-        const now = new Date()
-        const q = Math.floor(now.getMonth() / 3)
-        const year = now.getFullYear()
-        const start = new Date(year, q * 3, 1).toISOString().slice(0, 10)
-        const end = new Date(year, q * 3 + 3, 0).toISOString().slice(0, 10)
+        const { start, end } = getCurrentQuarterBounds()
 
         // Use count queries to avoid Supabase's default 1000-row limit
         const baseQuery = () => supabase.from('episode_log').select('id', { count: 'exact', head: true }).eq('station_id', stationId).gte('air_date', start).lte('air_date', end)
@@ -283,7 +269,7 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/jobs failed:', err)
     return NextResponse.json({ error: 'Failed to fetch queue status' }, { status: 500 })
   }
-}
+})
 
 function getQueue(name: string) {
   switch (name) {

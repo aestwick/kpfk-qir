@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { discoverShows } from '@/lib/archive-discover'
 
 export const dynamic = 'force-dynamic'
@@ -11,15 +11,9 @@ export const dynamic = 'force-dynamic'
  * category from each feed). Read-only — writes nothing. Thin route: auth +
  * validate + shape; the fetch/parse lives in lib/archive-discover.
  */
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    // Provisioning action — gate behind editor (same as the save step it feeds).
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const { data: station, error } = await supabase
       .from('stations')
@@ -57,4 +51,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/shows/discover failed:', err)
     return NextResponse.json({ error: 'Failed to discover shows' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

@@ -1,18 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export const POST = withStationAuth(async (ctx, request, { params }: { params: { id: string } }) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const episodeId = parseInt(params.id)
     const openaiKey = process.env.OPENAI_API_KEY
@@ -161,7 +156,7 @@ export async function POST(
     console.error('POST /api/episodes/[id]/translate failed:', err)
     return NextResponse.json({ error: 'Translation failed' }, { status: 500 })
   }
-}
+})
 
 /** Extract just the text content from each VTT cue */
 function extractVttCueTexts(vtt: string): string[] {

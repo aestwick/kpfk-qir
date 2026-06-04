@@ -4,13 +4,14 @@ import { promisify } from 'util'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
+import { claimEpisodeBatch, countRemainingInStatus } from './claim-batch'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -53,24 +54,13 @@ interface WhisperResponse {
   language?: string
 }
 
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
-}
-
 async function loadCorrections(stationId: string): Promise<
   Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
 > {
-  const { data } = await supabaseAdmin
-    .from('transcript_corrections')
-    .select('wrong, correct, case_sensitive, is_regex')
-    .eq('station_id', stationId)
-    .eq('active', true)
+  const { data } = await stationScoped(
+    supabaseAdmin.from('transcript_corrections').select('wrong, correct, case_sensitive, is_regex'),
+    stationId,
+  ).eq('active', true)
 
   return (data ?? []).map((c) => ({
     wrong: c.wrong,
@@ -208,53 +198,17 @@ async function runTranscribeBatch(job: Job, stationId: string) {
 
   const excludedCategories = await getExcludedCategories(stationId)
   const batchSize = await getTranscribeBatchSize(stationId)
-  const { start, end } = getCurrentQuarterBounds()
 
-  // Get candidate pending episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
-  const { data: candidates, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('id, category')
-    .eq('station_id', stationId)
-    .eq('status', 'pending')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-    .order('created_at', { ascending: true })
-    .limit(batchSize)
+  const filteredEpisodes = await claimEpisodeBatch({
+    stationId,
+    fromStatus: 'pending',
+    toStatus: 'transcribing',
+    batchSize,
+    excludedCategories,
+    label: 'transcribe',
+  })
+  if (!filteredEpisodes.length) return { transcribed: 0 }
 
-  if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!candidates?.length) {
-    console.log('[transcribe] no pending episodes')
-    return { transcribed: 0 }
-  }
-
-  // Drop excluded categories before claiming so they stay pending (not stuck mid-stage)
-  const claimIds = candidates
-    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
-    .map((ep) => ep.id)
-
-  if (!claimIds.length) {
-    console.log('[transcribe] only excluded-category episodes pending')
-    return { transcribed: 0 }
-  }
-
-  // Atomically claim: the `.eq('status', 'pending')` guard means only rows still
-  // pending are flipped to 'transcribing', so overlapping runs (manual retry,
-  // continue-chain, BullMQ attempts, cron) can never grab the same episode.
-  const { data: episodes, error: claimError } = await supabaseAdmin
-    .from('episode_log')
-    .update({ status: 'transcribing', updated_at: new Date().toISOString() })
-    .eq('station_id', stationId)
-    .in('id', claimIds)
-    .eq('status', 'pending')
-    .select('*')
-
-  if (claimError) throw new Error(`Failed to claim episodes: ${claimError.message}`)
-  if (!episodes?.length) {
-    console.log('[transcribe] no episodes claimed (already taken by another run)')
-    return { transcribed: 0 }
-  }
-
-  const filteredEpisodes = episodes
   const corrections = await loadCorrections(stationId)
   let transcribed = 0
 
@@ -423,14 +377,8 @@ async function runTranscribeBatch(job: Job, stationId: string) {
 
   // Check if more pending episodes remain after this batch (this station only —
   // the continue-chain job carries this station's id)
-  const { count: remainingCount } = await supabaseAdmin
-    .from('episode_log')
-    .select('id', { count: 'exact', head: true })
-    .eq('station_id', stationId)
-    .eq('status', 'pending')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-
-  const remaining = (remainingCount ?? 0) > 0
+  const remainingCount = await countRemainingInStatus(stationId, 'pending')
+  const remaining = remainingCount > 0
   if (remaining) {
     console.log(`[transcribe] ${remainingCount} more pending episodes — will continue`)
   }

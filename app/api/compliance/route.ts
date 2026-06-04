@@ -1,16 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { datesForDowInWindow } from '@/lib/compliance-grid'
 import { ACTIVE_REVIEW_STATUSES, REVIEW_STATUSES, isReviewStatus } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/compliance — list flags with pagination and filters, or stats summary
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
 
@@ -217,18 +215,13 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/compliance failed:', err)
     return NextResponse.json({ error: 'Failed to fetch compliance flags' }, { status: 500 })
   }
-}
+})
 
 // PATCH /api/compliance — set a flag's review status (single or bulk).
 // Body: { id | ids, review_status, resolved_by?, resolved_notes? }
-export async function PATCH(request: NextRequest) {
+export const PATCH = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { review_status, resolved_by, resolved_notes } = body
@@ -297,4 +290,4 @@ export async function PATCH(request: NextRequest) {
     console.error('PATCH /api/compliance failed:', err)
     return NextResponse.json({ error: 'Failed to update compliance flag' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

@@ -157,6 +157,43 @@ export function stationErrorResponse(error: StationContextError): NextResponse {
 }
 
 /**
+ * A route handler that runs *after* station auth has resolved. Receives the
+ * resolved StationContext first (the value every route reaches for), then the
+ * raw request, then any Next.js route context (e.g. `{ params }` for dynamic
+ * segments). Return a NextResponse as usual.
+ */
+export type StationRouteHandler<P = unknown> = (
+  context: StationContext,
+  request: NextRequest,
+  routeCtx: P,
+) => Promise<Response> | Response
+
+/**
+ * Wrap a route handler with the standard station-auth preamble so individual
+ * routes stop re-implementing it: resolve getStationContext(), short-circuit on
+ * its error, optionally gate on a minimum role, then hand the resolved context
+ * to the handler. Routes that need finer gating (super-admin, per-action roles)
+ * omit `role` and do that check inside the handler off the passed context.
+ *
+ *   export const GET  = withStationAuth(async (ctx) => { ... })
+ *   export const POST = withStationAuth(async (ctx, request) => { ... }, { role: 'editor' })
+ */
+export function withStationAuth<P = unknown>(
+  handler: StationRouteHandler<P>,
+  opts: { role?: StationRole } = {},
+): (request: NextRequest, routeCtx: P) => Promise<Response> {
+  return async (request, routeCtx) => {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    if (opts.role) {
+      const denied = requireRole(result.context, opts.role)
+      if (denied) return stationErrorResponse(denied)
+    }
+    return handler(result.context, request, routeCtx)
+  }
+}
+
+/**
  * Resolve a station id from a URL-safe slug using the service-role client (no
  * user JWT). For public/no-auth paths only — the public RSS feeds, which carry
  * the station as an explicit ?station slug. Returns null when the slug is

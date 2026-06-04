@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { searchTranscripts, searchTranscriptsSemantic, MIN_QUERY_LENGTH, DEFAULT_LIMIT, MAX_LIMIT } from '@/lib/transcript-search'
 
 export const dynamic = 'force-dynamic'
@@ -11,11 +11,9 @@ export const dynamic = 'force-dynamic'
 //
 // mode=lexical (default) -> Phase-1 exact FTS, free and deterministic.
 // mode=semantic          -> Phase-2 hybrid (FTS + vector), one embed/query.
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const q = (searchParams.get('q') ?? '').trim()
@@ -51,4 +49,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/transcript-search failed:', err)
     return NextResponse.json({ error: 'Transcript search failed' }, { status: 500 })
   }
-}
+})

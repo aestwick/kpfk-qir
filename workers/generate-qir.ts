@@ -1,6 +1,6 @@
 import { Job } from 'bullmq'
 import OpenAI from 'openai'
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
 import { getSetting, getCurationPrompt, isComplianceBlocking } from '../lib/settings'
 import { getStation } from '../lib/stations'
@@ -57,10 +57,10 @@ export async function processGenerateQir(job: Job) {
 
   // Get all completed episodes in this quarter (summarized or compliance_checked),
   // including those with null air_date created during this quarter
-  const { data: episodes, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('*')
-    .eq('station_id', stationId)
+  const { data: episodes, error } = await stationScoped(
+    supabaseAdmin.from('episode_log').select('*'),
+    stationId,
+  )
     .in('status', ['summarized', 'compliance_checked'])
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('air_date', { ascending: true })
@@ -109,10 +109,10 @@ export async function processGenerateQir(job: Job) {
   // which can carry different name spellings — appear under one consistent name
   // in the report (the episode's show_name is a possibly-stale ingest snapshot).
   // Display-only; grouping/merging happens via the explicit show_group.
-  const { data: showKeyRows } = await supabaseAdmin
-    .from('show_keys')
-    .select('key, show_name, feed_name, display_name, show_group')
-    .eq('station_id', stationId)
+  const { data: showKeyRows } = await stationScoped(
+    supabaseAdmin.from('show_keys').select('key, show_name, feed_name, display_name, show_group'),
+    stationId,
+  )
   const feedsByGroup = new Map<string, typeof showKeyRows>()
   for (const r of showKeyRows ?? []) {
     const group = resolveShowGroup(r)
@@ -203,10 +203,10 @@ ${categorySummaries.join('\n')}`
   const curatedText = formatCuratedReport(curatedEntries, year, quarter, station.name)
 
   // Get the next version number for this quarter
-  const { data: existingDrafts } = await supabaseAdmin
-    .from('qir_drafts')
-    .select('version')
-    .eq('station_id', stationId)
+  const { data: existingDrafts } = await stationScoped(
+    supabaseAdmin.from('qir_drafts').select('version'),
+    stationId,
+  )
     .eq('year', year)
     .eq('quarter', quarter)
     .order('version', { ascending: false })

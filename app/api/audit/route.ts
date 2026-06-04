@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 import type { AuditLogWithActor } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -32,16 +32,13 @@ async function emailsByUserId(userIds: string[]): Promise<Map<string, string | n
 // window (the DB keeps everything forever; the UI just doesn't render all of
 // history at once). Returns the in-window total (for pagination) and the
 // total ignoring the window (so the UI can show "X of Y").
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-
     // Hard gate: super-admins only. RLS also restricts rows, but fail loud here.
-    if (!result.context.isSuperAdmin) {
+    if (!ctx.isSuperAdmin) {
       return NextResponse.json({ error: 'Audit log is restricted to super-admins' }, { status: 403 })
     }
-    const { supabase } = result.context
+    const { supabase } = ctx
 
     const { searchParams } = new URL(request.url)
     const page = Math.max(parseInt(searchParams.get('page') ?? '1') || 1, 1)
@@ -118,4 +115,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/audit failed:', err)
     return NextResponse.json({ error: 'Failed to fetch audit log' }, { status: 500 })
   }
-}
+})

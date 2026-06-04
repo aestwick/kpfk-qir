@@ -31,8 +31,14 @@ function cacheKeyFor(key: string, stationId?: string): string {
  *
  * The 60s cache is keyed by (stationId|'global', key) so stations never read
  * each other's values.
+ *
+ * Pass `defaultValue` to get it back (typed, non-null) when no layer has the
+ * key — this is what the typed getters below use so the `?? default` fallback
+ * lives in one place instead of at every call site.
  */
-export async function getSetting<T = unknown>(key: string, stationId?: string): Promise<T | null> {
+export async function getSetting<T>(key: string, stationId: string | undefined, defaultValue: T): Promise<T>
+export async function getSetting<T = unknown>(key: string, stationId?: string): Promise<T | null>
+export async function getSetting<T = unknown>(key: string, stationId?: string, defaultValue?: T): Promise<T | null> {
   const cacheKey = cacheKeyFor(key, stationId)
   const cached = settingsCache.get(cacheKey)
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
@@ -72,7 +78,7 @@ export async function getSetting<T = unknown>(key: string, stationId?: string): 
     return parsed as T
   }
 
-  return null
+  return defaultValue ?? null
 }
 
 /**
@@ -93,14 +99,14 @@ export function invalidateSetting(key?: string): void {
 }
 
 export async function getExcludedCategories(stationId: string): Promise<string[]> {
-  return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
+  return getSetting<string[]>('excluded_categories', stationId, ['Music', 'Español'])
 }
 
 // Whether the scheduled archive show-key discovery sync runs for a station.
 // Defaults ON (opt-out): new programs on the archive are auto-imported as
 // INACTIVE show_keys for review. Set the per-station override false to disable.
 export async function getDiscoverySyncEnabled(stationId: string): Promise<boolean> {
-  return (await getSetting<boolean>('discovery_sync_enabled', stationId)) ?? true
+  return getSetting<boolean>('discovery_sync_enabled', stationId, true)
 }
 
 // Show keys to skip at ingest, matched exactly against show_keys.key. Keyed by
@@ -109,15 +115,15 @@ export async function getDiscoverySyncEnabled(stationId: string): Promise<boolea
 // Democracy Now! feed `dn9` while keeping the 6am `dn6`). Distinct from
 // excluded_categories (matched on category). Defaults to none.
 export async function getExcludedShowKeys(stationId: string): Promise<string[]> {
-  return (await getSetting<string[]>('excluded_show_keys', stationId)) ?? []
+  return getSetting<string[]>('excluded_show_keys', stationId, [])
 }
 
 export async function getTranscribeBatchSize(stationId: string): Promise<number> {
-  return (await getSetting<number>('transcribe_batch_size', stationId)) ?? 5
+  return getSetting<number>('transcribe_batch_size', stationId, 5)
 }
 
 export async function getSummarizeBatchSize(stationId: string): Promise<number> {
-  return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
+  return getSetting<number>('summarize_batch_size', stationId, 10)
 }
 
 // Semantic search (Phase 2): whether the summarize worker embeds each episode's
@@ -126,36 +132,36 @@ export async function getSummarizeBatchSize(stationId: string): Promise<number> 
 // embedding model is pinned to 1536 dims to match the vector column; changing it
 // requires re-embedding the corpus with a same-dimension model.
 export async function isEmbeddingsEnabled(stationId: string): Promise<boolean> {
-  return (await getSetting<boolean>('embeddings_enabled', stationId)) ?? true
+  return getSetting<boolean>('embeddings_enabled', stationId, true)
 }
 
 export async function getEmbeddingModel(stationId: string): Promise<string> {
-  return (await getSetting<string>('embedding_model', stationId)) ?? 'text-embedding-3-small'
+  return getSetting<string>('embedding_model', stationId, 'text-embedding-3-small')
 }
 
 export async function getComplianceChecksEnabled(stationId: string): Promise<Record<string, boolean>> {
-  return (await getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId)) ?? {
+  return getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId, {
     profanity: true,
     station_id_missing: true,
     technical: true,
     payola_plugola: true,
     sponsor_id: true,
     indecency: true,
-  }
+  })
 }
 
 export async function getCompliancePrompt(stationId: string): Promise<string> {
   // Centralized (master-level): the FCC review prompt is read GLOBAL-only — no
   // per-station override, since the rules are federal and uniform. The station
   // name is still injected per station via {{STATION_NAME}}.
-  const raw = (await getSetting<string>('compliance_prompt')) ?? DEFAULT_COMPLIANCE_PROMPT
+  const raw = await getSetting<string>('compliance_prompt', undefined, DEFAULT_COMPLIANCE_PROMPT)
   return fillStationName(raw, await stationName(stationId))
 }
 
 // Centralized FCC safety gate: when on, generate-qir holds back episodes with an
 // unresolved critical compliance flag. Global-only — a station can't disable it.
 export async function isComplianceBlocking(): Promise<boolean> {
-  return (await getSetting<boolean>('compliance_blocking')) ?? false
+  return getSetting<boolean>('compliance_blocking', undefined, false)
 }
 
 // Pipeline pause is layered: a GLOBAL master flag (qir_settings.pipeline_paused)
@@ -433,17 +439,17 @@ Return ONLY valid JSON. If no issues found, return empty flags array.
 }`
 
 export async function getSummarizationPrompt(stationId: string): Promise<string> {
-  const raw = (await getSetting<string>('summarization_prompt', stationId)) ?? DEFAULT_SUMMARIZATION_PROMPT
+  const raw = await getSetting<string>('summarization_prompt', stationId, DEFAULT_SUMMARIZATION_PROMPT)
   return fillStationName(raw, await stationName(stationId))
 }
 
 export async function getCurationPrompt(stationId: string): Promise<string> {
-  const raw = (await getSetting<string>('curation_prompt', stationId)) ?? DEFAULT_CURATION_PROMPT
+  const raw = await getSetting<string>('curation_prompt', stationId, DEFAULT_CURATION_PROMPT)
   return fillStationName(raw, await stationName(stationId))
 }
 
 export async function getIssueCategories(stationId: string): Promise<string[]> {
-  return (await getSetting<string[]>('issue_categories', stationId)) ?? [
+  return getSetting<string[]>('issue_categories', stationId, [
     'Civil Rights / Social Justice',
     'Immigration',
     'Economy / Labor',
@@ -452,5 +458,5 @@ export async function getIssueCategories(stationId: string): Promise<string[]> {
     'Health',
     'International Affairs / War & Peace',
     'Arts & Culture',
-  ]
+  ])
 }
