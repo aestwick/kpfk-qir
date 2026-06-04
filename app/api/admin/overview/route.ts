@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
-import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isPipelinePaused } from '@/lib/settings'
+import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isStationOverBudget, isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -416,11 +416,15 @@ export async function POST(request: NextRequest) {
 
       // Only report stages that will actually run. Under the GLOBAL pause every
       // worker (incl. ingest) is BullMQ-paused, so nothing would run — don't queue
-      // it and say so. Under a per-station pause ingest still runs (liveness) but
-      // the expensive stages skip themselves, so queue/report ingest only.
-      const [globalPaused, stationPaused] = await Promise.all([
+      // it and say so. Under a per-station pause OR an over-budget auto-pause,
+      // ingest still runs (liveness) but the expensive stages skip themselves
+      // (each processor gates on isPipelinePaused(stationId)), so queue/report
+      // ingest only — otherwise we'd report transcribe/summarize as "triggered"
+      // when they're going to skip.
+      const [globalPaused, stationPaused, overBudget] = await Promise.all([
         isPipelinePaused(),
         isStationPaused(station.id),
+        isStationOverBudget(station.id),
       ])
       if (globalPaused) {
         return NextResponse.json({
@@ -444,10 +448,12 @@ export async function POST(request: NextRequest) {
       await ingestQueue.add('master-ingest', { stationId: station.id })
       triggered.push('ingest')
 
-      if (stationPaused) {
+      if (stationPaused || overBudget) {
+        const reason = stationPaused ? 'station is paused' : 'station is over its spend cap'
+        const remedy = stationPaused ? 'resume to process' : 'raise/clear the cap or wait for the budget to roll over'
         return NextResponse.json({
           ok: true,
-          message: `${station.slug}: ingest queued — station is paused, so processing stages were skipped (resume to process)`,
+          message: `${station.slug}: ingest queued — ${reason}, so processing stages were skipped (${remedy})`,
           triggered,
         })
       }
