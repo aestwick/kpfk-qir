@@ -29,7 +29,7 @@ async function getQueueCounts(queue: typeof ingestQueue) {
 export async function GET(request: NextRequest) {
   const result = await getStationContext(request)
   if (result.error) return stationErrorResponse(result.error)
-  const { supabase, stationId } = result.context
+  const { supabase, stationId, isSuperAdmin } = result.context
 
   const qtr = getQuarterBounds()
 
@@ -287,7 +287,8 @@ export async function GET(request: NextRequest) {
       show_key: ep.show_key,
       time: ep.updated_at,
       duration_seconds: usageInfo?.duration_seconds ?? null,
-      cost: usageInfo?.cost ?? null,
+      // Cost/spend is super-admin-only; omit for everyone else.
+      cost: isSuperAdmin ? (usageInfo?.cost ?? null) : null,
     }
   })
 
@@ -415,11 +416,14 @@ export async function GET(request: NextRequest) {
       summarize: summarizeCounts,
       compliance: complianceCounts,
     },
-    cost: {
-      quarter: { groq: usage.groq, openai: usage.openai, total: usage.total, episodeCount: usage.episodes.size, apiCalls: usage.apiCalls },
-      daily: dailyCostData,
-      month: { groq: monthGroq, openai: monthOpenai, total: monthGroq + monthOpenai },
-    },
+    // Cost/spend metrics are super-admin-only — omit the entire block otherwise.
+    ...(isSuperAdmin ? {
+      cost: {
+        quarter: { groq: usage.groq, openai: usage.openai, total: usage.total, episodeCount: usage.episodes.size, apiCalls: usage.apiCalls },
+        daily: dailyCostData,
+        month: { groq: monthGroq, openai: monthOpenai, total: monthGroq + monthOpenai },
+      },
+    } : {}),
     categories: categoryData,
     shows: showData,
     recentEpisodes: (recentEpisodes.data ?? []).slice(0, 15),

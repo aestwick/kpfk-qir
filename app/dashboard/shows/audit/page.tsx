@@ -37,7 +37,8 @@ interface AuditEpisode {
   compliance_status: string | null
   mp3_url: string
   compliance_flags: ComplianceFlag[]
-  actual_cost: number
+  // Cost/spend is super-admin-only; the API omits it for everyone else.
+  actual_cost?: number
 }
 
 interface AuditData {
@@ -48,14 +49,16 @@ interface AuditData {
   isCurrentQuarter: boolean
   processing: {
     episodesNeedingWork: number
-    estimatedCost: {
+    // Cost estimates are super-admin-only; omitted for everyone else.
+    estimatedCost?: {
       transcription: number
       summarization: number
       compliance: number
       total: number
     }
   }
-  actualCostTotal: number
+  // Actual spend total is super-admin-only; omitted for everyone else.
+  actualCostTotal?: number
 }
 
 const statusColors: Record<string, string> = {
@@ -487,10 +490,12 @@ export default function ShowAuditPage() {
               <p className="text-2xl font-bold text-yellow-600">{episodesNeedingWork}</p>
               <p className="text-xs text-gray-500 dark:text-warm-400">Episodes Need Work</p>
             </div>
-            <div className="bg-white dark:bg-warm-800 rounded-xl border dark:border-warm-700 p-4">
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">${auditData.actualCostTotal.toFixed(3)}</p>
-              <p className="text-xs text-gray-500 dark:text-warm-400">Cost So Far</p>
-            </div>
+            {auditData.actualCostTotal != null && (
+              <div className="bg-white dark:bg-warm-800 rounded-xl border dark:border-warm-700 p-4">
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">${auditData.actualCostTotal.toFixed(3)}</p>
+                <p className="text-xs text-gray-500 dark:text-warm-400">Cost So Far</p>
+              </div>
+            )}
           </div>
 
           {/* Past quarter warning */}
@@ -511,30 +516,34 @@ export default function ShowAuditPage() {
           {episodesNeedingWork > 0 && auditData.isCurrentQuarter && (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-5">
               <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Processing Required</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mb-3">
-                {auditData.processing.estimatedCost.transcription > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-amber-700 dark:text-amber-400">Transcription</span>
-                    <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.transcription.toFixed(3)}</span>
-                  </div>
-                )}
-                {auditData.processing.estimatedCost.summarization > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-amber-700 dark:text-amber-400">Summarization</span>
-                    <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.summarization.toFixed(3)}</span>
-                  </div>
-                )}
-                {auditData.processing.estimatedCost.compliance > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-amber-700 dark:text-amber-400">Compliance</span>
-                    <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.compliance.toFixed(3)}</span>
-                  </div>
-                )}
-              </div>
+              {auditData.processing.estimatedCost && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mb-3">
+                  {auditData.processing.estimatedCost.transcription > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-amber-700 dark:text-amber-400">Transcription</span>
+                      <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.transcription.toFixed(3)}</span>
+                    </div>
+                  )}
+                  {auditData.processing.estimatedCost.summarization > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-amber-700 dark:text-amber-400">Summarization</span>
+                      <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.summarization.toFixed(3)}</span>
+                    </div>
+                  )}
+                  {auditData.processing.estimatedCost.compliance > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-amber-700 dark:text-amber-400">Compliance</span>
+                      <span className="font-mono text-amber-800 dark:text-amber-300">${auditData.processing.estimatedCost.compliance.toFixed(3)}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="flex items-center justify-between border-t border-amber-200 dark:border-amber-700 pt-3">
                 <div>
                   <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                    Est. Total: ${auditData.processing.estimatedCost.total.toFixed(3)} for {episodesNeedingWork} episode{episodesNeedingWork !== 1 ? 's' : ''}
+                    {auditData.processing.estimatedCost
+                      ? `Est. Total: $${auditData.processing.estimatedCost.total.toFixed(3)} for ${episodesNeedingWork} episode${episodesNeedingWork !== 1 ? 's' : ''}`
+                      : `${episodesNeedingWork} episode${episodesNeedingWork !== 1 ? 's' : ''} to process`}
                   </span>
                 </div>
                 <button
@@ -686,7 +695,7 @@ export default function ShowAuditPage() {
                           ))}
                         </div>
                       )}
-                      {ep.actual_cost > 0 && (
+                      {ep.actual_cost != null && ep.actual_cost > 0 && (
                         <div className="text-xs text-gray-400 dark:text-warm-500">
                           Processing cost: ${ep.actual_cost.toFixed(4)}
                         </div>
@@ -777,11 +786,13 @@ export default function ShowAuditPage() {
             )
           })()}
 
-          {/* Cost summary */}
-          <div className="bg-white dark:bg-warm-800 rounded-xl shadow-sm border dark:border-warm-700 p-5">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-warm-200 mb-3">Processing Cost</h3>
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">${auditData.actualCostTotal.toFixed(3)}</p>
-          </div>
+          {/* Cost summary (super-admin only) */}
+          {auditData.actualCostTotal != null && (
+            <div className="bg-white dark:bg-warm-800 rounded-xl shadow-sm border dark:border-warm-700 p-5">
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-warm-200 mb-3">Processing Cost</h3>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">${auditData.actualCostTotal.toFixed(3)}</p>
+            </div>
+          )}
 
           {/* Episode-by-episode report */}
           <div className="bg-white dark:bg-warm-800 rounded-xl shadow-sm border dark:border-warm-700 overflow-hidden">

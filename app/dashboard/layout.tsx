@@ -73,8 +73,8 @@ const icons = {
 }
 
 // `superAdminOnly` items are hidden unless the signed-in user is a super-admin
-// (the page itself also hard-gates via the 403 from /api/audit — nav hiding
-// alone is never the only guard).
+// (the page/API itself also hard-gates — e.g. /api/audit and /api/usage return
+// 403 to non-admins — so nav hiding alone is never the only guard).
 const navItems = [
   { href: '/dashboard', label: 'Overview', icon: icons.overview },
   { href: '/dashboard/episodes', label: 'Episodes', icon: icons.episodes },
@@ -83,7 +83,7 @@ const navItems = [
   { href: '/dashboard/jobs', label: 'Jobs', icon: icons.jobs },
   { href: '/dashboard/master', label: 'Master Control', icon: icons.master, superAdminOnly: true },
   { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
-  { href: '/dashboard/usage', label: 'Usage', icon: icons.usage },
+  { href: '/dashboard/usage', label: 'Usage', icon: icons.usage, superAdminOnly: true },
   { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.audit },
   { href: '/dashboard/audit', label: 'Audit Log', icon: icons.audit, superAdminOnly: true },
   { href: '/dashboard/generate', label: 'Generate QIR', icon: icons.generate },

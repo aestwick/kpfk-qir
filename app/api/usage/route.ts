@@ -7,7 +7,14 @@ export async function GET(request: NextRequest) {
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId, isSuperAdmin } = result.context
+
+    // Cost/spend data is super-admin-only. Non-admins (incl. station admins)
+    // get a 403 — the dashboard and activity pages degrade gracefully when this
+    // endpoint is denied (no cost annotations shown).
+    if (!isSuperAdmin) {
+      return NextResponse.json({ error: 'Usage and cost data is restricted to super-admins' }, { status: 403 })
+    }
 
     const { searchParams } = new URL(request.url)
     const from = searchParams.get('from')
