@@ -613,7 +613,7 @@ export default function EpisodeDetailPage() {
     { label: 'Time', value: episode.start_time ? `${episode.start_time} - ${episode.end_time ?? ''}` : '\u2014' },
     { label: 'Duration', value: episode.duration ? `${episode.duration} min` : '\u2014' },
     { label: 'Show Key', value: episode.show_key },
-    { label: 'Category', value: episode.category ?? '\u2014' },
+    { label: 'Station Category', value: episode.category ?? '\u2014' },
     { label: 'Host', value: episode.host ?? '', editable: 'host' },
     { label: 'Guest', value: episode.guest ?? '', editable: 'guest' },
     { label: 'Created', value: new Date(episode.created_at).toLocaleDateString() },
@@ -725,7 +725,7 @@ export default function EpisodeDetailPage() {
 
       {/* Summary & Category Editor */}
       <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
-        <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Summary & Category</h3>
+        <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Summary & QIR Category</h3>
         {episode.headline && <p className="font-medium">{episode.headline}</p>}
         <textarea
           value={editSummary}
@@ -740,7 +740,7 @@ export default function EpisodeDetailPage() {
             onChange={(e) => setEditCategory(e.target.value)}
             className="border rounded px-2 py-1.5 text-sm dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
           >
-            <option value="">Select Issue Category</option>
+            <option value="">Select QIR Category</option>
             {issueCategories.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}

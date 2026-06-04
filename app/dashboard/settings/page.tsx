@@ -62,13 +62,24 @@ interface SettingField {
   label: string
   type: 'text' | 'number' | 'json' | 'textarea'
   autoSave?: boolean
+  description?: string
 }
 
 const settingFields: SettingField[] = [
   { key: 'station_id', label: 'Station ID', type: 'text', autoSave: true },
-  { key: 'max_entries_per_category', label: 'Max Entries Per Category', type: 'number', autoSave: true },
-  { key: 'issue_categories', label: 'Issue Categories (JSON array)', type: 'json' },
-  { key: 'excluded_categories', label: 'Excluded Categories (JSON array)', type: 'json' },
+  { key: 'max_entries_per_category', label: 'Max Entries Per QIR Category', type: 'number', autoSave: true },
+  {
+    key: 'issue_categories',
+    label: 'QIR Categories (JSON array)',
+    type: 'json',
+    description: 'FCC issue topics (Health, Immigration, …) used only when building and checking completeness of the QIR report. Not a show’s station category.',
+  },
+  {
+    key: 'excluded_categories',
+    label: 'Excluded Station Categories (JSON array)',
+    type: 'json',
+    description: 'Show feed categories (e.g. Music, Español) skipped during ingest/transcription. This is the station category, not a QIR category.',
+  },
   { key: 'excluded_show_keys', label: 'Excluded Show Keys (JSON array)', type: 'json' },
   { key: 'summarization_model', label: 'Summarization Model', type: 'text', autoSave: true },
   { key: 'transcription_model', label: 'Transcription Model', type: 'text', autoSave: true },
@@ -879,6 +890,9 @@ export default function SettingsPage() {
                       <span className="text-xs text-green-600 font-medium animate-pulse">Saved</span>
                     )}
                   </div>
+                  {field.description && (
+                    <p className="text-xs text-gray-500 dark:text-warm-400 -mt-0.5">{field.description}</p>
+                  )}
                   <div className={`flex gap-2 ${isDirty ? 'ring-2 ring-amber-300 rounded' : ''}`}>
                     {field.type === 'textarea' || field.type === 'json' ? (
                       <textarea

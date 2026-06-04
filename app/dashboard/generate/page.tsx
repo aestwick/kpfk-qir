@@ -173,7 +173,7 @@ function computeServiceRating(entries: QirEntry[], allCategories: string[]): { r
     label: 'Issue Breadth',
     score: catScore,
     maxScore: 25,
-    detail: `${coveredCategories.length} of ${allCategories.length} FCC issue categories covered`,
+    detail: `${coveredCategories.length} of ${allCategories.length} QIR categories covered`,
     suggestion: missingCats.length > 0
       ? `Add coverage for: ${missingCats.slice(0, 3).join(', ')}${missingCats.length > 3 ? ` (+${missingCats.length - 3} more)` : ''}`
       : 'All issue categories represented',

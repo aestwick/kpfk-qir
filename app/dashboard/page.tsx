@@ -704,9 +704,9 @@ export default function DashboardOverview() {
 
       {/* ═══ BOTTOM ROW: Categories + Recent Episodes ═══ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Issue Categories */}
+        {/* QIR Categories */}
         <div className="card p-5">
-          <h3 className="section-header mb-4">Issue Categories</h3>
+          <h3 className="section-header mb-4">QIR Categories</h3>
           {categories.length > 0 ? (
             <div className="space-y-2.5">
               {categories.map((c, i) => {

@@ -330,7 +330,7 @@ export default function EpisodesPage() {
           onChange={(e) => setCategoryFilterValue(e.target.value)}
           className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         >
-          <option value="">All Categories</option>
+          <option value="">All QIR Categories</option>
           {issueCategories.map((cat) => (
             <option key={cat} value={cat}>{cat}</option>
           ))}
@@ -354,7 +354,7 @@ export default function EpisodesPage() {
               </th>
               <th className="text-left px-4 py-3 font-medium">Headline</th>
               <th className="text-left px-4 py-3 font-medium cursor-pointer" onClick={() => handleSort('issue_category')}>
-                Category <SortIcon col="issue_category" />
+                QIR Category <SortIcon col="issue_category" />
               </th>
             </tr>
           </thead>
