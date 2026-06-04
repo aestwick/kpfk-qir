@@ -203,7 +203,7 @@ The app is multi-tenant: **one codebase, one database, one deployment** serving 
 
    Resolve/discover are read-only previews and fail visibly if `rss_base_url` is unset. Category comes from each feed's plain `<category>` (e.g. "Español"/"Music"), which is what the ingest exclusion list matches — not the generic `<itunes:category>`. Ingest only pulls **active** `show_keys`, so a station with feed config but no shows pulls nothing.
 3. **Grant access:** `insert into station_users (station_id, user_id, role) values (<station>, <auth.users.id>, 'admin');` (or add to `super_admins` for all-station access).
-4. **Optional overrides:** insert `station_settings` rows (e.g. a station-specific `summarization_prompt`/`compliance_prompt`) — otherwise the global `qir_settings` defaults apply.
+4. **Optional overrides:** insert `station_settings` rows (e.g. a station-specific `summarization_prompt`) — otherwise the global `qir_settings` defaults apply. (Note: `compliance_prompt`/`compliance_blocking` are **global-only** and cannot be overridden per station — see "Compliance config is centralized".)
 5. Workers pick the station up automatically on the next ingest cron tick.
 
 ## Commands
