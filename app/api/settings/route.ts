@@ -1,15 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { withStationAuth, stationErrorResponse } from '@/lib/auth'
 import { invalidateSetting } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const resource = searchParams.get('resource')
@@ -78,16 +76,11 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 })
   }
-}
+})
 
-export async function PUT(request: NextRequest) {
+export const PUT = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { key, value, scope } = body
@@ -108,7 +101,7 @@ export async function PUT(request: NextRequest) {
     // scope:'global' (e.g. a super-admin editing the global DEFAULT for checks).
     // Super-admin only — it changes the setting for EVERY station.
     if (scope === 'global' || GLOBAL_ONLY_KEYS.has(key)) {
-      if (!result.context.isSuperAdmin) {
+      if (!ctx.isSuperAdmin) {
         return stationErrorResponse({ status: 403, error: 'Global settings can only be changed by a super-admin' })
       }
       const { error } = await supabaseAdmin
@@ -138,19 +131,14 @@ export async function PUT(request: NextRequest) {
     console.error('PUT /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to save setting' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
 // POST /api/settings — bulk-create show_keys for the active station.
 // Body: { resource: 'shows', shows: [{ key, show_name, default_category?, primary_language? }] }
 // Upserts on (station_id, key): existing keys are updated, new keys inserted.
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     if (body.resource !== 'shows') {
@@ -200,17 +188,12 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to create shows' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
 // PATCH /api/settings — update show_keys
-export async function PATCH(request: NextRequest) {
+export const PATCH = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { resource, id, ...updates } = body
@@ -247,4 +230,4 @@ export async function PATCH(request: NextRequest) {
     console.error('PATCH /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

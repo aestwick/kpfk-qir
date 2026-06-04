@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth, requireRole, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,11 +7,9 @@ export const dynamic = 'force-dynamic'
 // applies to every station) plus this station's own additions. GET returns both;
 // writing a global-base row requires super-admin, a station row requires editor.
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     // This station's rows + the global base (never other stations' rows, even for
     // a super-admin whose RLS scope is all stations).
@@ -22,18 +20,16 @@ export async function GET(request: NextRequest) {
       .order('word', { ascending: true })
 
     if (error) throw error
-    return NextResponse.json({ words: data, isSuperAdmin: result.context.isSuperAdmin })
+    return NextResponse.json({ words: data, isSuperAdmin: ctx.isSuperAdmin })
   } catch (err) {
     console.error('GET /api/compliance/wordlist failed:', err)
     return NextResponse.json({ error: 'Failed to fetch wordlist' }, { status: 500 })
   }
-}
+})
 
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId, isSuperAdmin } = result.context
+    const { supabase, stationId, isSuperAdmin } = ctx
 
     const body = await request.json()
     const { word, severity, scope } = body
@@ -47,7 +43,7 @@ export async function POST(request: NextRequest) {
         return stationErrorResponse({ status: 403, error: 'Only a super-admin can edit the global compliance wordlist' })
       }
     } else {
-      const denied = requireRole(result.context, 'editor')
+      const denied = requireRole(ctx, 'editor')
       if (denied) return stationErrorResponse(denied)
     }
 
@@ -65,13 +61,11 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/compliance/wordlist failed:', err)
     return NextResponse.json({ error: 'Failed to add word' }, { status: 500 })
   }
-}
+})
 
-export async function PATCH(request: NextRequest) {
+export const PATCH = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId, isSuperAdmin } = result.context
+    const { supabase, stationId, isSuperAdmin } = ctx
 
     const body = await request.json()
     const { id, ...updates } = body
@@ -82,7 +76,7 @@ export async function PATCH(request: NextRequest) {
     // is the backstop on both paths.
     let query = supabase.from('compliance_wordlist').update(updates).eq('id', id)
     if (!isSuperAdmin) {
-      const denied = requireRole(result.context, 'editor')
+      const denied = requireRole(ctx, 'editor')
       if (denied) return stationErrorResponse(denied)
       query = query.eq('station_id', stationId)
     }
@@ -94,13 +88,11 @@ export async function PATCH(request: NextRequest) {
     console.error('PATCH /api/compliance/wordlist failed:', err)
     return NextResponse.json({ error: 'Failed to update word' }, { status: 500 })
   }
-}
+})
 
-export async function DELETE(request: NextRequest) {
+export const DELETE = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId, isSuperAdmin } = result.context
+    const { supabase, stationId, isSuperAdmin } = ctx
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
@@ -108,7 +100,7 @@ export async function DELETE(request: NextRequest) {
 
     let query = supabase.from('compliance_wordlist').delete().eq('id', parseInt(id))
     if (!isSuperAdmin) {
-      const denied = requireRole(result.context, 'editor')
+      const denied = requireRole(ctx, 'editor')
       if (denied) return stationErrorResponse(denied)
       query = query.eq('station_id', stationId)
     }
@@ -120,4 +112,4 @@ export async function DELETE(request: NextRequest) {
     console.error('DELETE /api/compliance/wordlist failed:', err)
     return NextResponse.json({ error: 'Failed to delete word' }, { status: 500 })
   }
-}
+})

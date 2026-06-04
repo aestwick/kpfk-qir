@@ -1,13 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId, isSuperAdmin } = result.context
+    const { supabase, stationId, isSuperAdmin } = ctx
 
     // Cost/spend data is super-admin-only. Non-admins (incl. station admins)
     // get a 403 — the dashboard and activity pages degrade gracefully when this
@@ -95,4 +93,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/usage failed:', err)
     return NextResponse.json({ error: 'Failed to fetch usage data' }, { status: 500 })
   }
-}
+})

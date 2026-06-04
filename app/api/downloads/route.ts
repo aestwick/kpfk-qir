@@ -1,15 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const year = parseInt(searchParams.get('year') ?? '0')
@@ -43,7 +41,7 @@ export async function GET(request: NextRequest) {
       void logAuditEvent({
         action: AUDIT_ACTIONS.DOWNLOADS_EXPORT,
         operation: 'export',
-        actorId: result.context.userId,
+        actorId: ctx.userId,
         stationId,
         resourceType: 'episode',
         metadata: { type, format: 'csv', year, quarter, count: rows.length },
@@ -69,7 +67,7 @@ export async function GET(request: NextRequest) {
         ),
       ]
 
-      return new Response(csvLines.join('\n'), {
+      return new NextResponse(csvLines.join('\n'), {
         headers: {
           'Content-Type': 'text/csv',
           'Content-Disposition': `attachment; filename="episodes_Q${quarter}_${year}.csv"`,
@@ -141,14 +139,14 @@ export async function GET(request: NextRequest) {
       void logAuditEvent({
         action: AUDIT_ACTIONS.DOWNLOADS_EXPORT,
         operation: 'export',
-        actorId: result.context.userId,
+        actorId: ctx.userId,
         stationId,
         resourceType: 'transcript',
         metadata: { type, year, quarter, episodeCount: episodes.length },
         ip: meta.ip,
         userAgent: meta.userAgent,
       })
-      return new Response(combined, {
+      return new NextResponse(combined, {
         headers: {
           'Content-Type': 'text/plain',
           'Content-Disposition': `attachment; filename="${type}_Q${quarter}_${year}.txt"`,
@@ -161,4 +159,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/downloads failed:', err)
     return NextResponse.json({ error: 'Failed to generate download' }, { status: 500 })
   }
-}
+})

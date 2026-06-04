@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { resolveShowDisplayName, resolveShowGroup } from '@/lib/shows'
 
 export const dynamic = 'force-dynamic'
@@ -7,11 +7,9 @@ export const dynamic = 'force-dynamic'
 // List the active station's shows (key + name), for populating filter dropdowns
 // like the one on the transcript search page. Scoped to the active station via
 // the request-scoped RLS client plus an explicit station_id filter.
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const activeOnly = searchParams.get('active') === 'true'
@@ -49,4 +47,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/shows failed:', err)
     return NextResponse.json({ error: 'Failed to fetch shows' }, { status: 500 })
   }
-}
+})

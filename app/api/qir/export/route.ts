@@ -1,14 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
@@ -34,7 +32,7 @@ export async function GET(request: NextRequest) {
       void logAuditEvent({
         action: AUDIT_ACTIONS.REPORT_EXPORT,
         operation: 'export',
-        actorId: result.context.userId,
+        actorId: ctx.userId,
         stationId,
         resourceType: 'qir_draft',
         resourceId: draft.id,
@@ -94,7 +92,7 @@ export async function GET(request: NextRequest) {
         ),
       ]
 
-      return new Response(csvLines.join('\n'), {
+      return new NextResponse(csvLines.join('\n'), {
         headers: {
           'Content-Type': 'text/csv',
           'Content-Disposition': `attachment; filename="QIR_Q${draft.quarter}_${draft.year}_v${draft.version}.csv"`,
@@ -104,7 +102,7 @@ export async function GET(request: NextRequest) {
 
     if (format === 'text') {
       const text = draft.curated_text ?? draft.full_text ?? ''
-      return new Response(text, {
+      return new NextResponse(text, {
         headers: {
           'Content-Type': 'text/plain',
           'Content-Disposition': `attachment; filename="QIR_Q${draft.quarter}_${draft.year}_v${draft.version}.txt"`,
@@ -117,4 +115,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/qir/export failed:', err)
     return NextResponse.json({ error: 'Failed to export draft' }, { status: 500 })
   }
-}
+})

@@ -1,17 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export const GET = withStationAuth(async (ctx, request, { params }: { params: { id: string } }) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const episodeId = parseInt(params.id)
 
@@ -49,7 +44,7 @@ export async function GET(
     void logAuditEvent({
       action: AUDIT_ACTIONS.EPISODE_READ,
       operation: 'read',
-      actorId: result.context.userId,
+      actorId: ctx.userId,
       stationId,
       resourceType: 'episode',
       resourceId: episodeId,
@@ -60,7 +55,7 @@ export async function GET(
       void logAuditEvent({
         action: AUDIT_ACTIONS.TRANSCRIPT_READ,
         operation: 'read',
-        actorId: result.context.userId,
+        actorId: ctx.userId,
         stationId,
         resourceType: 'transcript',
         resourceId: episodeId,
@@ -78,19 +73,11 @@ export async function GET(
     console.error('GET /api/episodes/[id] failed:', err)
     return NextResponse.json({ error: 'Failed to fetch episode' }, { status: 500 })
   }
-}
+})
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export const PATCH = withStationAuth(async (ctx, request, { params }: { params: { id: string } }) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { action, ...updates } = body
@@ -193,4 +180,4 @@ export async function PATCH(
     console.error('PATCH /api/episodes/[id] failed:', err)
     return NextResponse.json({ error: 'Failed to update episode' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

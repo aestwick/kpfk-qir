@@ -1,21 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue, discoverSyncQueue } from '@/lib/queue'
 import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
 import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
 
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const ctx = await getStationContext(request)
-    if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
-
-    const denied = requireRole(ctx.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { action } = body
@@ -159,13 +154,11 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/jobs failed:', err)
     return NextResponse.json({ error: 'Failed to queue job' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx) => {
   try {
-    const ctx = await getStationContext(request)
-    if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
+    const { supabase, stationId } = ctx
 
     const queues = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
     const queueNames = Object.keys(queues) as (keyof typeof queues)[]
@@ -276,7 +269,7 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/jobs failed:', err)
     return NextResponse.json({ error: 'Failed to fetch queue status' }, { status: 500 })
   }
-}
+})
 
 function getQueue(name: string) {
   switch (name) {

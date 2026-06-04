@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 
 export const dynamic = 'force-dynamic'
@@ -16,11 +16,9 @@ export const dynamic = 'force-dynamic'
  *
  * The workers will pick up the episodes on their own.
  */
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { episode_ids } = body as { episode_ids: number[] }
@@ -101,4 +99,4 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/shows/audit/process failed:', err)
     return NextResponse.json({ error: 'Failed to queue processing jobs' }, { status: 500 })
   }
-}
+})

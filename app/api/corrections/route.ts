@@ -1,13 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const scope = searchParams.get('scope')
@@ -36,16 +34,11 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/corrections failed:', err)
     return NextResponse.json({ error: 'Failed to fetch corrections' }, { status: 500 })
   }
-}
+})
 
-export async function POST(request: NextRequest) {
+export const POST = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const contentType = request.headers.get('content-type') ?? ''
 
@@ -145,16 +138,11 @@ export async function POST(request: NextRequest) {
     console.error('POST /api/corrections failed:', err)
     return NextResponse.json({ error: 'Failed to create correction' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
-export async function PATCH(request: NextRequest) {
+export const PATCH = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const body = await request.json()
     const { id, ...updates } = body
@@ -178,16 +166,11 @@ export async function PATCH(request: NextRequest) {
     console.error('PATCH /api/corrections failed:', err)
     return NextResponse.json({ error: 'Failed to update correction' }, { status: 500 })
   }
-}
+}, { role: 'editor' })
 
-export async function DELETE(request: NextRequest) {
+export const DELETE = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
-
-    const denied = requireRole(result.context, 'editor')
-    if (denied) return stationErrorResponse(denied)
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
@@ -211,4 +194,4 @@ export async function DELETE(request: NextRequest) {
     console.error('DELETE /api/corrections failed:', err)
     return NextResponse.json({ error: 'Failed to delete correction' }, { status: 500 })
   }
-}
+}, { role: 'editor' })

@@ -1,13 +1,11 @@
-import { NextResponse, NextRequest } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { NextResponse } from 'next/server'
+import { withStationAuth } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx, request) => {
   try {
-    const result = await getStationContext(request)
-    if (result.error) return stationErrorResponse(result.error)
-    const { supabase, stationId } = result.context
+    const { supabase, stationId } = ctx
 
     const { searchParams } = new URL(request.url)
     const health = searchParams.get('health') === 'true'
@@ -60,4 +58,4 @@ export async function GET(request: NextRequest) {
     console.error('GET /api/episodes/counts failed:', err)
     return NextResponse.json({ error: 'Failed to fetch counts' }, { status: 500 })
   }
-}
+})

@@ -1,7 +1,7 @@
-import { NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { withStationAuth } from '@/lib/auth'
 import { getCurrentQuarterBounds } from '@/lib/quarters'
 
 export const dynamic = 'force-dynamic'
@@ -63,12 +63,10 @@ async function getEpisodeBacklog(supabase: SupabaseClient, stationId: string) {
   }
 }
 
-export async function GET(request: NextRequest) {
+export const GET = withStationAuth(async (ctx) => {
   // Authenticated like every other Phase E route: the client consumes this
   // stream via fetch() (not EventSource), so it can send a Bearer token.
-  const result = await getStationContext(request)
-  if (result.error) return stationErrorResponse(result.error)
-  const { supabase, stationId } = result.context
+  const { supabase, stationId } = ctx
 
   const encoder = new TextEncoder()
 
@@ -126,11 +124,11 @@ export async function GET(request: NextRequest) {
     },
   })
 
-  return new Response(stream, {
+  return new NextResponse(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive',
     },
   })
-}
+})
