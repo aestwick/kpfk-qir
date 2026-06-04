@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { getCurrentQuarterBounds } from '../lib/quarters'
 
 /**
@@ -14,9 +14,9 @@ import { getCurrentQuarterBounds } from '../lib/quarters'
  * the claimed rows (empty when nothing is available or claimable); the
  * per-episode work stays in each worker.
  *
- * Runs on the service-role client (RLS bypassed), so the explicit
- * `.eq('station_id', stationId)` on both the select and the claim is the only
- * tenant guard — kept here in one place for both workers.
+ * Runs on the service-role client (RLS bypassed), so the stationScoped() guard
+ * on both the select and the claim is the only tenant guard — kept here in one
+ * place for both workers.
  *
  * Compliance deliberately does NOT use this: it has no intermediate claim status
  * and a different candidate query (optional per-show re-run), so it stays as-is.
@@ -36,10 +36,10 @@ export async function claimEpisodeBatch(opts: {
 
   // Candidate episodes in fromStatus from the current quarter (including those
   // with null air_date created this quarter — older ingests didn't populate it).
-  const { data: candidates, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('id, category')
-    .eq('station_id', stationId)
+  const { data: candidates, error } = await stationScoped(
+    supabaseAdmin.from('episode_log').select('id, category'),
+    stationId,
+  )
     .eq('status', fromStatus)
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
@@ -62,10 +62,12 @@ export async function claimEpisodeBatch(opts: {
   }
 
   // Atomically claim: only rows still in fromStatus are flipped to toStatus.
-  const { data: episodes, error: claimError } = await supabaseAdmin
-    .from('episode_log')
-    .update({ status: toStatus, updated_at: new Date().toISOString() })
-    .eq('station_id', stationId)
+  const { data: episodes, error: claimError } = await stationScoped(
+    supabaseAdmin
+      .from('episode_log')
+      .update({ status: toStatus, updated_at: new Date().toISOString() }),
+    stationId,
+  )
     .in('id', claimIds)
     .eq('status', fromStatus)
     .select('*')
@@ -87,10 +89,10 @@ export async function claimEpisodeBatch(opts: {
  */
 export async function countRemainingInStatus(stationId: string, status: string): Promise<number> {
   const { start, end } = getCurrentQuarterBounds()
-  const { count } = await supabaseAdmin
-    .from('episode_log')
-    .select('id', { count: 'exact', head: true })
-    .eq('station_id', stationId)
+  const { count } = await stationScoped(
+    supabaseAdmin.from('episode_log').select('id', { count: 'exact', head: true }),
+    stationId,
+  )
     .eq('status', status)
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
   return count ?? 0

@@ -1,6 +1,6 @@
 import { Job } from 'bullmq'
 import { XMLParser } from 'fast-xml-parser'
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { getExcludedCategories, getExcludedShowKeys, isPipelinePaused } from '../lib/settings'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
 import { rssText } from '../lib/rss'
@@ -86,11 +86,10 @@ async function processShow(
     // over it later. Best-effort: only write when it actually changed.
     const channelTitle = rssText(parsed?.rss?.channel?.title)
     if (channelTitle && channelTitle !== (show.feed_name ?? null)) {
-      const { error: feedNameErr } = await supabaseAdmin
-        .from('show_keys')
-        .update({ feed_name: channelTitle })
-        .eq('station_id', station.id)
-        .eq('key', show.key)
+      const { error: feedNameErr } = await stationScoped(
+        supabaseAdmin.from('show_keys').update({ feed_name: channelTitle }),
+        station.id,
+      ).eq('key', show.key)
       if (feedNameErr) {
         console.warn(`[ingest] failed to update feed_name for ${show.key}: ${feedNameErr.message}`)
       }
@@ -116,10 +115,10 @@ async function processShow(
         : null
 
       // Check for existing episode by mp3_url within this station
-      const { data: existing } = await supabaseAdmin
-        .from('episode_log')
-        .select('id')
-        .eq('station_id', station.id)
+      const { data: existing } = await stationScoped(
+        supabaseAdmin.from('episode_log').select('id'),
+        station.id,
+      )
         .eq('mp3_url', mp3Url)
         .limit(1)
 
@@ -269,11 +268,10 @@ export async function processIngest(job: Job) {
   const excludedKeySet = new Set(excludedShowKeys.map((k) => k.trim()))
 
   // Get this station's active shows, excluding Music/Español
-  const { data: shows, error: showsErr } = await supabaseAdmin
-    .from('show_keys')
-    .select('*')
-    .eq('station_id', stationId)
-    .eq('active', true)
+  const { data: shows, error: showsErr } = await stationScoped(
+    supabaseAdmin.from('show_keys').select('*'),
+    stationId,
+  ).eq('active', true)
 
   if (showsErr) throw new Error(`Failed to fetch shows: ${showsErr.message}`)
   if (!shows?.length) return { newEpisodes: 0 }

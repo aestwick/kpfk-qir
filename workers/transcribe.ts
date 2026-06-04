@@ -4,7 +4,7 @@ import { promisify } from 'util'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
-import { supabaseAdmin } from '../lib/supabase'
+import { supabaseAdmin, stationScoped } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
@@ -57,11 +57,10 @@ interface WhisperResponse {
 async function loadCorrections(stationId: string): Promise<
   Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
 > {
-  const { data } = await supabaseAdmin
-    .from('transcript_corrections')
-    .select('wrong, correct, case_sensitive, is_regex')
-    .eq('station_id', stationId)
-    .eq('active', true)
+  const { data } = await stationScoped(
+    supabaseAdmin.from('transcript_corrections').select('wrong, correct, case_sensitive, is_regex'),
+    stationId,
+  ).eq('active', true)
 
   return (data ?? []).map((c) => ({
     wrong: c.wrong,
