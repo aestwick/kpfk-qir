@@ -21,6 +21,55 @@ import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
  * and pulls nothing, and gating it would silently stop peer onboarding whenever
  * KPFK is paused.
  */
+/**
+ * Fill <category> on show_keys rows that never resolved one. Bounded to rows
+ * where category IS NULL, and the UPDATE re-asserts that guard so a value set
+ * concurrently (or any curated category) is never clobbered. The read side is
+ * one archive feed fetch per uncategorized key (resolveShowKeys paces them in
+ * bounded batches), which is why this is an explicit operator-triggered job and
+ * not folded into the recurring sync. A feed that exposes no <category> simply
+ * stays null (re-checked only on the next manual backfill).
+ */
+async function backfillNullCategories(stationId: string, slug: string, rssBaseUrl: string) {
+  const { data: rows, error } = await supabaseAdmin
+    .from('show_keys')
+    .select('key')
+    .eq('station_id', stationId)
+    .is('category', null)
+  if (error) throw new Error(`[discover-sync] backfill: failed to load uncategorized keys: ${error.message}`)
+  if (!rows || rows.length === 0) {
+    console.log(`[discover-sync] ${slug}: no uncategorized shows to backfill`)
+    return { mode: 'backfill', attempted: 0, backfilled: 0 }
+  }
+
+  const resolved = await resolveShowKeys(rssBaseUrl, rows.map((r) => r.key))
+  let backfilled = 0
+  for (const r of resolved) {
+    if (!r.ok || !r.category) continue
+    const { error: upErr } = await supabaseAdmin
+      .from('show_keys')
+      .update({ category: r.category })
+      .eq('station_id', stationId)
+      .eq('key', r.key)
+      .is('category', null)
+    if (upErr) {
+      console.warn(`[discover-sync] backfill: failed to set category for ${r.key}: ${upErr.message}`)
+      continue
+    }
+    backfilled++
+  }
+
+  console.log(`[discover-sync] ${slug}: backfilled category on ${backfilled}/${rows.length} uncategorized show(s)`)
+  void logAuditEvent({
+    action: AUDIT_ACTIONS.DISCOVERY_SYNC_COMPLETE,
+    operation: 'update',
+    stationId,
+    resourceType: 'show_key',
+    metadata: { mode: 'backfill-categories', attempted: rows.length, backfilled },
+  })
+  return { mode: 'backfill', attempted: rows.length, backfilled }
+}
+
 export async function processDiscoverSync(job: Job) {
   const stationId = job.data?.stationId as string | undefined
 
@@ -36,6 +85,19 @@ export async function processDiscoverSync(job: Job) {
 
   const station = await getStation(stationId)
   if (!station) throw new Error(`[discover-sync] station ${stationId} not found`)
+
+  // Explicit operator action (job.data.backfill): re-resolve and fill <category>
+  // on existing rows that never got one — e.g. shows added via the manual
+  // "Discover from archive" path, which carries key+name only and skips the
+  // resolve step. Runs independent of the discovery_sync_enabled gate since it's
+  // manually invoked, and only fills NULLs (a curated category is never touched).
+  if (job.data?.backfill) {
+    if (!station.rss_base_url) {
+      console.warn(`[discover-sync] backfill: ${station.slug} has no rss_base_url — skipping`)
+      return { mode: 'backfill', skipped: 'no rss_base_url' }
+    }
+    return await backfillNullCategories(stationId, station.slug, station.rss_base_url)
+  }
 
   if (!(await getDiscoverySyncEnabled(stationId))) {
     console.log(`[discover-sync] disabled for ${station.slug} — skipping`)

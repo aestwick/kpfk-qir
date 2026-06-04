@@ -132,6 +132,13 @@ export async function POST(request: NextRequest) {
         await discoverSyncQueue.add('manual-discover-sync', { stationId })
         return NextResponse.json({ ok: true, message: 'Archive show-key sync queued' })
       }
+      case 'backfill-categories': {
+        // Re-resolve <category> from each feed for show_keys that never got one
+        // (e.g. added via "Discover from archive", which carries key+name only).
+        // The category is what the excluded_categories pull/coverage filters match.
+        await discoverSyncQueue.add('manual-backfill-categories', { stationId, backfill: true })
+        return NextResponse.json({ ok: true, message: 'Category backfill queued — re-resolving uncategorized shows from their feeds' })
+      }
       case 'compliance': {
         const showKey = body.show_key as string | undefined
         if (showKey) {
