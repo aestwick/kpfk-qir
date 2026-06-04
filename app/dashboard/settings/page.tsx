@@ -191,6 +191,8 @@ export default function SettingsPage() {
   })()
   const excludedKeySet = new Set(excludedShowKeys.map((k) => k.trim()))
 
+  const { toast } = useToast()
+
   const fetchAll = useCallback(async () => {
     const [settingsRes, correctionsRes, wordlistRes, showsRes] = await Promise.all([
       authedFetch('/api/settings'),
@@ -319,8 +321,6 @@ export default function SettingsPage() {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [editValues, savedValues, compliancePrompt, savedCompliancePrompt])
-
-  const { toast } = useToast()
 
   // Load members; a non-admin gets 403, which simply hides the Members tab.
   const fetchMembers = useCallback(async () => {
