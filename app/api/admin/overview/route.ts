@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
-import { getSetting, invalidateSetting, isStationPaused, isPipelinePaused } from '@/lib/settings'
+import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
 
@@ -189,22 +189,65 @@ export async function GET(request: NextRequest) {
       activityByStation.set(j.stationId, a)
     }
 
+    // Spend caps (super-admin-managed): global defaults + per-station overrides.
+    // A positive number is a cap; anything else (missing / ≤ 0) means "no cap".
+    const num = (v: unknown): number | null => {
+      let parsed: unknown = v
+      if (typeof v === 'string') { try { parsed = JSON.parse(v) } catch { parsed = v } }
+      const n = Number(parsed)
+      return Number.isFinite(n) && n > 0 ? n : null
+    }
+    const [globalMonthly, globalQuarterly, overrideRowsRes] = await Promise.all([
+      getSetting<number>('spend_limit_monthly'),
+      getSetting<number>('spend_limit_quarterly'),
+      supabaseAdmin
+        .from('station_settings')
+        .select('station_id, key, value')
+        .in('key', ['spend_limit_monthly', 'spend_limit_quarterly']),
+    ])
+    const budgetDefaults = { monthly: num(globalMonthly), quarterly: num(globalQuarterly) }
+    const overrideByStation = new Map<string, { monthly: number | null; quarterly: number | null }>()
+    for (const row of overrideRowsRes.data ?? []) {
+      const entry = overrideByStation.get(row.station_id) ?? { monthly: null, quarterly: null }
+      if (row.key === 'spend_limit_monthly') entry.monthly = num(row.value)
+      else if (row.key === 'spend_limit_quarterly') entry.quarterly = num(row.value)
+      overrideByStation.set(row.station_id, entry)
+    }
+
     // Tier order = sharing order: production first, then paying, demo, test.
     const TIER_RANK: Record<string, number> = { production: 0, paying: 1, demo: 2, test: 3 }
     const stationsOut = stationList
       .map((s, i) => {
         const paused = stationPauseStates[i]
+        const spend = costByStation.get(s.id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
+        const ov = overrideByStation.get(s.id) ?? { monthly: null, quarterly: null }
+        const effMonthly = ov.monthly ?? budgetDefaults.monthly
+        const effQuarterly = ov.quarterly ?? budgetDefaults.quarterly
+        const overMonthly = effMonthly != null && spend.month >= effMonthly
+        const overQuarterly = effQuarterly != null && spend.total >= effQuarterly
+        const overBudget = overMonthly || overQuarterly
         return {
           id: s.id,
           slug: s.slug,
           name: s.name,
           tier: (s.tier as string | null) ?? 'test',
           paused,
-          effectivePaused: globalPaused || paused,
+          // Over-budget auto-pause folds into effective pause (mirrors the worker
+          // gate). The reason ('overBudget') is only exposed on this super-admin view.
+          effectivePaused: globalPaused || paused || overBudget,
           episodes: episodeCounts[i].counts,
           lastAdvancedAt: episodeCounts[i].lastAdvancedAt,
           activity: activityByStation.get(s.id) ?? { active: 0, waiting: 0, failed: 0 },
-          cost: costByStation.get(s.id) ?? { groq: 0, openai: 0, total: 0, month: 0 },
+          cost: spend,
+          budget: {
+            monthly: effMonthly,
+            quarterly: effQuarterly,
+            // Explicit per-station override (null = inheriting the global default).
+            override: { monthly: ov.monthly, quarterly: ov.quarterly },
+            overMonthly,
+            overQuarterly,
+            overBudget,
+          },
         }
       })
       .sort((a, b) => (TIER_RANK[a.tier] ?? 9) - (TIER_RANK[b.tier] ?? 9) || a.name.localeCompare(b.name))
@@ -236,6 +279,7 @@ export async function GET(request: NextRequest) {
       jobs: { recent: recentJobs, waiting: waitingJobs },
       quarter: { start, end },
       costTotals,
+      budgetDefaults,
     })
   } catch (err) {
     console.error('GET /api/admin/overview failed:', err)
@@ -260,6 +304,57 @@ export async function POST(request: NextRequest) {
       if (error) throw error
       invalidateSetting('pipeline_paused')
       return NextResponse.json({ ok: true, message: paused ? 'All stations paused' : 'All stations resumed', paused })
+    }
+
+    // -- Set spend caps (super-admin only; this whole route is super-admin-gated) --
+    // body: { action:'set_budget', stationId?, monthly?, quarterly? }
+    //   stationId present → per-station override; absent → global default.
+    //   A positive number sets a cap; null / 0 / '' clears it (delete the row).
+    //   A period key omitted from the body is left untouched.
+    if (action === 'set_budget') {
+      const stationId = body.stationId as string | undefined
+      const now = new Date().toISOString()
+      const KEYS = { monthly: 'spend_limit_monthly', quarterly: 'spend_limit_quarterly' } as const
+
+      if (stationId) {
+        const { data: station } = await supabaseAdmin.from('stations').select('id, slug').eq('id', stationId).maybeSingle()
+        if (!station) return NextResponse.json({ error: 'Unknown or missing stationId' }, { status: 400 })
+      }
+
+      for (const period of ['monthly', 'quarterly'] as const) {
+        if (!(period in body)) continue
+        const raw = body[period]
+        const n = Number(raw)
+        const cap = Number.isFinite(n) && n > 0 ? n : null // null = clear
+        const key = KEYS[period]
+
+        if (stationId) {
+          if (cap == null) {
+            const { error } = await supabaseAdmin.from('station_settings').delete().eq('station_id', stationId).eq('key', key)
+            if (error) throw error
+          } else {
+            const { error } = await supabaseAdmin
+              .from('station_settings')
+              .upsert({ station_id: stationId, key, value: JSON.stringify(cap), updated_at: now }, { onConflict: 'station_id,key' })
+            if (error) throw error
+          }
+        } else {
+          if (cap == null) {
+            const { error } = await supabaseAdmin.from('qir_settings').delete().eq('key', key)
+            if (error) throw error
+          } else {
+            const { error } = await supabaseAdmin
+              .from('qir_settings')
+              .upsert({ key, value: JSON.stringify(cap), updated_at: now }, { onConflict: 'key' })
+            if (error) throw error
+          }
+        }
+        invalidateSetting(key)
+      }
+      // Spend caps changed — drop the cached over-budget decisions so enforcement
+      // re-evaluates promptly (rather than lagging up to the 60s budget cache TTL).
+      invalidateBudgetCache()
+      return NextResponse.json({ ok: true, message: stationId ? 'Station spend cap updated' : 'Global spend cap updated' })
     }
 
     // Resolve and validate the target station for the per-station actions below.

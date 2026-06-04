@@ -26,6 +26,16 @@ interface StationRow {
   activity: { active: number; waiting: number; failed: number }
   // Running spend tally: quarter-to-date (groq/openai/total) + month-to-date.
   cost: { groq: number; openai: number; total: number; month: number }
+  // Effective spend caps (override → global) + over-budget state. `override` is
+  // the station's own explicit value (null = inheriting the global default).
+  budget: {
+    monthly: number | null
+    quarterly: number | null
+    override: { monthly: number | null; quarterly: number | null }
+    overMonthly: boolean
+    overQuarterly: boolean
+    overBudget: boolean
+  }
 }
 
 interface JobItem {
@@ -48,10 +58,19 @@ interface Overview {
   jobs: { recent: JobItem[]; waiting: JobItem[] }
   quarter: { start: string; end: string }
   costTotals: { quarter: number; month: number }
+  budgetDefaults: { monthly: number | null; quarterly: number | null }
 }
 
 function fmtCost(n: number): string {
   return '$' + (n ?? 0).toFixed(2)
+}
+
+// Parse a money input to a positive cap, or null (blank/invalid = "no cap").
+function parseCap(s: string): number | null {
+  const t = s.trim()
+  if (t === '') return null
+  const n = Number(t)
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function fmtTime(ms: number | null): string {
@@ -90,6 +109,115 @@ function isProductionDark(s: StationRow): boolean {
   if (s.tier !== 'production' || s.effectivePaused) return false
   if (!s.lastAdvancedAt) return true
   return Date.now() - new Date(s.lastAdvancedAt).getTime() > PRODUCTION_DARK_MS
+}
+
+// Super-admin spend-cap editor: global defaults + per-station overrides. Local
+// draft state keeps inputs stable across the page's background polling; blank
+// clears a cap (per-station blank reverts to the global default).
+function BudgetEditor({
+  defaults,
+  stations,
+  busy,
+  onSave,
+}: {
+  defaults: { monthly: number | null; quarterly: number | null }
+  stations: StationRow[]
+  busy: string | null
+  onSave: (key: string, body: Record<string, unknown>) => void
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const valOf = (k: string, cur: number | null) => (k in drafts ? drafts[k] : cur == null ? '' : String(cur))
+  const setDraft = (k: string, v: string) => setDrafts((d) => ({ ...d, [k]: v }))
+
+  const moneyInput = (k: string, cur: number | null, placeholder: string) => (
+    <span className="relative inline-block">
+      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-warm-400">$</span>
+      <input
+        type="number"
+        min="0"
+        step="1"
+        inputMode="decimal"
+        value={valOf(k, cur)}
+        onChange={(e) => setDraft(k, e.target.value)}
+        placeholder={placeholder}
+        className="w-24 pl-5 pr-2 py-1 text-sm rounded-md border border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 tabular-nums"
+      />
+    </span>
+  )
+
+  return (
+    <div className="bg-white dark:bg-warm-900 rounded-xl border border-warm-200 dark:border-warm-700 overflow-hidden">
+      <div className="px-5 py-3 border-b border-warm-200 dark:border-warm-700">
+        <h3 className="font-semibold">Spend caps</h3>
+        <p className="text-xs text-warm-400">
+          Super-admin only. A station that reaches a cap auto-pauses its paid stages (ingest keeps running; episodes drain when the
+          budget rolls over or is raised). Blank = no cap; a blank per-station value inherits the global default.
+        </p>
+      </div>
+      <div className="p-5 space-y-3">
+        {/* Global defaults */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-medium w-40">Global default</span>
+          <label className="text-xs text-warm-500 flex items-center gap-1.5">Monthly {moneyInput('global:monthly', defaults.monthly, 'none')}</label>
+          <label className="text-xs text-warm-500 flex items-center gap-1.5">Quarterly {moneyInput('global:quarterly', defaults.quarterly, 'none')}</label>
+          <button
+            onClick={() =>
+              onSave('budget:global', {
+                action: 'set_budget',
+                monthly: parseCap(valOf('global:monthly', defaults.monthly)),
+                quarterly: parseCap(valOf('global:quarterly', defaults.quarterly)),
+              })
+            }
+            disabled={busy !== null}
+            className="text-xs font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {busy === 'budget:global' ? '...' : 'Save'}
+          </button>
+        </div>
+
+        {/* Per-station overrides */}
+        <div className="border-t border-warm-100 dark:border-warm-800 pt-3 space-y-2">
+          {stations.map((s) => {
+            const mKey = `st:${s.id}:monthly`
+            const qKey = `st:${s.id}:quarterly`
+            return (
+              <div key={s.id} className="flex items-center gap-3 flex-wrap">
+                <span className="text-sm w-40 truncate" title={s.name}>{s.name}</span>
+                <label className="text-xs text-warm-500 flex items-center gap-1.5">
+                  Monthly {moneyInput(mKey, s.budget.override.monthly, defaults.monthly != null ? `↳ ${defaults.monthly}` : 'none')}
+                </label>
+                <label className="text-xs text-warm-500 flex items-center gap-1.5">
+                  Quarterly {moneyInput(qKey, s.budget.override.quarterly, defaults.quarterly != null ? `↳ ${defaults.quarterly}` : 'none')}
+                </label>
+                <button
+                  onClick={() =>
+                    onSave(`budget:${s.id}`, {
+                      action: 'set_budget',
+                      stationId: s.id,
+                      monthly: parseCap(valOf(mKey, s.budget.override.monthly)),
+                      quarterly: parseCap(valOf(qKey, s.budget.override.quarterly)),
+                    })
+                  }
+                  disabled={busy !== null}
+                  className="text-xs font-medium px-3 py-1.5 rounded-md bg-warm-100 text-warm-700 border border-warm-300 hover:bg-warm-200 dark:bg-warm-800 dark:text-warm-200 dark:border-warm-700 disabled:opacity-50 transition-colors"
+                >
+                  {busy === `budget:${s.id}` ? '...' : 'Save'}
+                </button>
+                <span className="text-xs tabular-nums text-warm-400 ml-auto">
+                  {fmtCost(s.cost.month)}/mo · {fmtCost(s.cost.total)}/qtr
+                </span>
+                {s.budget.overBudget && (
+                  <span className="text-2xs font-semibold px-2 py-0.5 rounded bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                    OVER — auto-paused
+                  </span>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function MasterControlPage() {
@@ -222,7 +350,7 @@ export default function MasterControlPage() {
     s.effectivePaused ? (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-red-600 dark:text-red-400">
         <span className="w-2 h-2 rounded-full bg-red-500" />
-        Paused{!s.paused && s.effectivePaused ? ' (global)' : ''}
+        Paused{s.budget.overBudget ? ' (over budget)' : !s.paused ? ' (global)' : ''}
       </span>
     ) : (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
@@ -319,6 +447,9 @@ export default function MasterControlPage() {
           <span className="text-2xs text-warm-400">Running tally across all stations · {data.quarter.start} → {data.quarter.end}</span>
         </div>
       )}
+
+      {/* Spend caps — super-admin budget management (auto-pause enforcement). */}
+      {data && <BudgetEditor defaults={data.budgetDefaults} stations={stations} busy={busy} onSave={act} />}
 
       {view === 'glance' ? (
         /* ---- GLANCE: staleness-first, tier-ordered cards ---- */

@@ -184,7 +184,13 @@ export async function isPipelinePaused(stationId?: string): Promise<boolean> {
   settingsCache.set(cacheKeyFor('pipeline_paused'), { value: globalPaused, fetchedAt: Date.now() })
   if (globalPaused) return true
 
-  if (stationId) return isStationPaused(stationId)
+  if (stationId) {
+    // Effective per-station pause = own pause flag OR over its spend cap. The
+    // budget check is cached and short-circuits when no cap is set, so this stays
+    // cheap on the hot worker path.
+    if (await isStationPaused(stationId)) return true
+    return isStationOverBudget(stationId)
+  }
   return false
 }
 
@@ -204,9 +210,88 @@ export async function isStationPaused(stationId: string): Promise<boolean> {
   return parseJsonValue(data?.value) === true
 }
 
+// ─── Spend limits (super-admin-managed; auto-pause enforcement) ─────────────
+// Budgets live in the same key-value layers as everything else, so the effective
+// limit resolves per-station override → global default via getSetting():
+//   spend_limit_monthly  / spend_limit_quarterly   (USD; absent or ≤ 0 = no cap)
+// "Global" is a DEFAULT applied to every station; a per-station row overrides it.
+// Enforcement is auto-pause only: a station over EITHER cap is treated as paused
+// by isPipelinePaused(), which stops the paid stages (transcribe/summarize/
+// compliance) and the auto-chain. Ingest is gated globally only, so episodes keep
+// being captured as `pending` and drain once the budget resets (monthly/quarterly
+// rollover) or is raised. The *reason* is never shown to non-super-admins — only
+// the super-admin Master Control surfaces budget status.
+
+function monthAndQuarterStart(): { monthStart: string; quarterStart: string } {
+  const now = new Date()
+  const q = Math.floor(now.getMonth() / 3)
+  return {
+    monthStart: new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
+    quarterStart: new Date(now.getFullYear(), q * 3, 1).toISOString().slice(0, 10),
+  }
+}
+
+/**
+ * Effective spend caps for a station (per-station override → global default).
+ * A non-positive or missing value means "no cap" → null.
+ */
+export async function getEffectiveSpendLimits(stationId: string): Promise<{ monthly: number | null; quarterly: number | null }> {
+  const [m, q] = await Promise.all([
+    getSetting<number>('spend_limit_monthly', stationId),
+    getSetting<number>('spend_limit_quarterly', stationId),
+  ])
+  return {
+    monthly: typeof m === 'number' && m > 0 ? m : null,
+    quarterly: typeof q === 'number' && q > 0 ? q : null,
+  }
+}
+
+/** Month-to-date and quarter-to-date spend for a station (one quarter-spanning read). */
+export async function getStationSpend(stationId: string): Promise<{ month: number; quarter: number }> {
+  const { monthStart, quarterStart } = monthAndQuarterStart()
+  const { data } = await supabaseAdmin
+    .from('usage_log')
+    .select('estimated_cost, created_at')
+    .eq('station_id', stationId)
+    .gte('created_at', quarterStart)
+  let month = 0
+  let quarter = 0
+  for (const r of data ?? []) {
+    const amt = Number(r.estimated_cost) || 0
+    quarter += amt
+    if (typeof r.created_at === 'string' && r.created_at.slice(0, 10) >= monthStart) month += amt
+  }
+  return { month, quarter }
+}
+
+// Cached over-budget check for the hot worker pause path. Spend accrues slowly,
+// so a 60s cache bounds the cost of the usage_log sum (worst case: a station
+// overshoots by ~one job before the next stage skips). Fast path with no spend
+// query at all when no cap is configured — the common case.
+const budgetCache = new Map<string, { over: boolean; fetchedAt: number }>()
+const BUDGET_CACHE_TTL_MS = 60_000
+
+export async function isStationOverBudget(stationId: string): Promise<boolean> {
+  const cached = budgetCache.get(stationId)
+  if (cached && Date.now() - cached.fetchedAt < BUDGET_CACHE_TTL_MS) return cached.over
+
+  const { monthly, quarterly } = await getEffectiveSpendLimits(stationId)
+  let over = false
+  if (monthly != null || quarterly != null) {
+    const { month, quarter } = await getStationSpend(stationId)
+    over = (monthly != null && month >= monthly) || (quarterly != null && quarter >= quarterly)
+  }
+  budgetCache.set(stationId, { over, fetchedAt: Date.now() })
+  return over
+}
+
+/** Drop the cached over-budget results so a limit change takes effect promptly. */
+export function invalidateBudgetCache(): void {
+  budgetCache.clear()
+}
+
 /** Replace the {{STATION_NAME}} placeholder used in parameterized prompts. */
-export function fillStationName(text: string, name: string): string {
-  return text.split('{{STATION_NAME}}').join(name)
+export function fillStationName(text: string, name: string): string {  return text.split('{{STATION_NAME}}').join(name)
 }
 
 async function stationName(stationId: string): Promise<string> {
