@@ -222,7 +222,9 @@ const discoverSyncWorker = new Worker('discover-sync', processDiscoverSync, {
 })
 
 discoverSyncWorker.on('completed', (job) => {
-  const { dispatched, added, discovered, skipped } = job.returnvalue ?? {}
+  const { dispatched, added, discovered, skipped } = (job.returnvalue ?? {}) as {
+    dispatched?: number; added?: number; discovered?: number; skipped?: string
+  }
   if (dispatched != null) console.log(`[discover-sync] dispatched ${dispatched} station(s)`)
   else if (skipped) console.log(`[discover-sync] skipped (${skipped})`)
   else console.log(`[discover-sync] completed — ${added ?? 0} new of ${discovered ?? 0} programs`)
