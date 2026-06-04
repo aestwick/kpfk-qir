@@ -72,6 +72,7 @@ export default function UsagePage() {
   const [entries, setEntries] = useState<UsageEntry[]>([])
   const [totals, setTotals] = useState<Totals | null>(null)
   const [loading, setLoading] = useState(true)
+  const [forbidden, setForbidden] = useState(false)
 
   const fetchUsage = useCallback(async () => {
     setLoading(true)
@@ -79,7 +80,13 @@ export default function UsagePage() {
     if (from) params.set('from', from)
     if (to) params.set('to', `${to}T23:59:59`)
     const res = await authedFetch(`/api/usage?${params}`)
-    if (res.ok) {
+    // Cost/spend data is super-admin-only — the API returns 403 otherwise.
+    if (res.status === 403) {
+      setForbidden(true)
+      setEntries([])
+      setTotals(null)
+    } else if (res.ok) {
+      setForbidden(false)
       const data = await res.json()
       setEntries(data.entries ?? [])
       setTotals(data.totals)
@@ -113,6 +120,20 @@ export default function UsagePage() {
   const avgCostPerEpisode = totals && totals.episodeCount > 0
     ? totals.total / totals.episodeCount
     : 0
+
+  if (forbidden) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-bold">Usage & Costs</h2>
+        <div className="bg-white rounded-lg shadow p-8 text-center dark:bg-surface-raised dark:shadow-card-dark">
+          <p className="text-sm text-gray-600 dark:text-warm-300 font-medium">Restricted to super-admins</p>
+          <p className="text-xs text-gray-400 dark:text-warm-500 mt-1">
+            Cost and spend data is only visible to super-admins.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
