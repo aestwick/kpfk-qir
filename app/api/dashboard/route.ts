@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, isPipelinePaused } from '@/lib/settings'
+import { getIssueCategories, getExcludedCategories, isPipelinePaused } from '@/lib/settings'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
@@ -304,8 +304,12 @@ export async function GET(request: NextRequest) {
     Object.entries(procTimes).map(([op, data]) => [op, data.count > 0 ? data.total / data.count : 0])
   )
 
-  // Coverage gaps
-  const excludedShowCategories = ['Music', 'Español']
+  // Coverage gaps — exclude the station's non-issue formats (music/etc.) so the
+  // gap list stays meaningful. Honor the per-station excluded_categories setting
+  // (so e.g. a station scanning Español still surfaces it as a coverage candidate),
+  // falling back to the standard set when a station hasn't configured its own.
+  const configuredExclusions = await getExcludedCategories(stationId)
+  const excludedShowCategories = configuredExclusions.length ? configuredExclusions : ['Music', 'Español']
   const activeShowsList = (activeShows.data ?? []).filter(
     (s) => !excludedShowCategories.some((exc) => s.category?.includes(exc))
   )

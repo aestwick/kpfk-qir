@@ -260,6 +260,28 @@ export default function SettingsPage() {
     }
   }, [])
 
+  // Re-resolve <category> from each feed for shows that never got one (e.g. added
+  // via "Discover from archive", which carries key+name only). The feed category
+  // is what the excluded_categories pull/coverage filters match on.
+  const [backfilling, setBackfilling] = useState(false)
+  const backfillCategories = useCallback(async () => {
+    setBackfilling(true)
+    try {
+      const res = await authedFetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'backfill-categories' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { toast('error', data.error ?? 'Failed to queue category backfill'); return }
+      toast('success', 'Category backfill queued — refresh in a minute to see resolved categories')
+    } catch {
+      toast('error', 'Network error: could not reach server')
+    } finally {
+      setBackfilling(false)
+    }
+  }, [toast])
+
   // Fetch pipeline health data when pipeline tab is active
   const fetchHealth = useCallback(async () => {
     setHealthLoading(true)
@@ -1217,13 +1239,23 @@ export default function SettingsPage() {
         <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Shows ({shows.length})</h3>
-            <input
-              type="text"
-              value={showSearch}
-              onChange={(e) => setShowSearch(e.target.value)}
-              placeholder="Search shows..."
-              className="border rounded px-3 py-1.5 text-sm w-64 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
-            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={backfillCategories}
+                disabled={backfilling}
+                title="Re-resolve the feed category for shows that don't have one. Needed for the Music/Español exclusion (ingest pull + coverage gaps) to work."
+                className="border rounded px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-800"
+              >
+                {backfilling ? 'Queuing…' : 'Backfill categories'}
+              </button>
+              <input
+                type="text"
+                value={showSearch}
+                onChange={(e) => setShowSearch(e.target.value)}
+                placeholder="Search shows..."
+                className="border rounded px-3 py-1.5 text-sm w-64 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+              />
+            </div>
           </div>
 
           <BulkShowEntry
