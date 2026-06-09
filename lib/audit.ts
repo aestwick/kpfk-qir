@@ -49,6 +49,7 @@ export const AUDIT_ACTIONS = {
   USER_ACCESS_GRANT: 'users.access.grant',
   USER_ACCESS_UPDATE: 'users.access.update',
   USER_ACCESS_REVOKE: 'users.access.revoke',
+  USER_PASSWORD_RESET: 'users.password.reset',
   SUPER_ADMIN_GRANT: 'users.super.grant',
   SUPER_ADMIN_REVOKE: 'users.super.revoke',
 

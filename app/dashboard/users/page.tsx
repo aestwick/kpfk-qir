@@ -77,6 +77,7 @@ export default function UsersPage() {
 
   // Add-user form state.
   const [newEmail, setNewEmail] = useState('')
+  const [newPassword, setNewPassword] = useState('')
   const [newSuper, setNewSuper] = useState(false)
   const [newRoles, setNewRoles] = useState<RoleMap>({})
 
@@ -84,6 +85,7 @@ export default function UsersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editSuper, setEditSuper] = useState(false)
   const [editRoles, setEditRoles] = useState<RoleMap>({})
+  const [resetPassword, setResetPassword] = useState('')
 
   const [removeTarget, setRemoveTarget] = useState<ManagedUser | null>(null)
 
@@ -130,12 +132,12 @@ export default function UsersPage() {
       const res = await authedFetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, super: newSuper, stations: stationsPayload }),
+        body: JSON.stringify({ email, password: newPassword || undefined, super: newSuper, stations: stationsPayload }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { toast('error', data.error ?? 'Failed to add user'); return }
-      toast('success', data.invited ? `Invite sent to ${email}` : `Added ${email}`)
-      setNewEmail(''); setNewSuper(false); setNewRoles({})
+      toast('success', data.created ? `Created ${email}` : `Added ${email}`)
+      setNewEmail(''); setNewPassword(''); setNewSuper(false); setNewRoles({})
       await load()
     } finally {
       setBusy(false)
@@ -148,6 +150,26 @@ export default function UsersPage() {
     const roles: RoleMap = {}
     for (const m of u.memberships) roles[m.station_id] = m.role
     setEditRoles(roles)
+    setResetPassword('')
+  }
+
+  async function resetUserPassword(u: ManagedUser) {
+    const password = resetPassword.trim()
+    if (!password) return
+    setBusy(true)
+    try {
+      const res = await authedFetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: u.user_id, password }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { toast('error', data.error ?? 'Failed to reset password'); return }
+      toast('success', `Password reset for ${u.email ?? 'user'}`)
+      setResetPassword('')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function saveEdit(u: ManagedUser) {
@@ -212,13 +234,24 @@ export default function UsersPage() {
       <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
         <h2 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Add a user</h2>
         <div className="flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[220px]">
+          <div className="flex-1 min-w-[200px]">
             <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Email</label>
             <input
               type="email"
               value={newEmail}
               onChange={(e) => setNewEmail(e.target.value)}
               placeholder="person@example.org"
+              className="w-full text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+            />
+          </div>
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Password</label>
+            <input
+              type="text"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="New accounts only"
+              autoComplete="new-password"
               className="w-full text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
             />
           </div>
@@ -237,7 +270,8 @@ export default function UsersPage() {
         </div>
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-gray-400 dark:text-warm-500">
-            No account yet? An invitation email is sent so they can set a password.
+            Adding an existing account? Leave the password blank. For a new account, set a starting
+            password and share it — no email is sent.
           </p>
           <button
             onClick={addUser}
@@ -321,6 +355,29 @@ export default function UsersPage() {
                     roles={editRoles}
                     onChange={(id, role) => setEditRoles((prev) => ({ ...prev, [id]: role }))}
                   />
+                  <div className="border-t border-gray-200 dark:border-warm-700 pt-3">
+                    <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Reset password</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={resetPassword}
+                        onChange={(e) => setResetPassword(e.target.value)}
+                        placeholder="New password"
+                        autoComplete="new-password"
+                        className="flex-1 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+                      />
+                      <button
+                        onClick={() => resetUserPassword(u)}
+                        disabled={busy || !resetPassword.trim()}
+                        className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-warm-600 dark:text-warm-200 dark:hover:bg-warm-800"
+                      >
+                        Set password
+                      </button>
+                    </div>
+                    <p className="text-2xs text-gray-400 dark:text-warm-500 mt-1">
+                      Takes effect immediately — share the new password with the user. No email is sent.
+                    </p>
+                  </div>
                   <div className="flex justify-end gap-2">
                     <button
                       onClick={() => setEditingId(null)}

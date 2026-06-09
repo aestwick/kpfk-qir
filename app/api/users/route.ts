@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { emailsByUserId, findOrCreateUser, MIN_PASSWORD_LENGTH } from '@/lib/users'
 import { StationRole } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
@@ -33,38 +34,6 @@ async function requireSuperAdmin(
     return { error: NextResponse.json({ error: 'User management is restricted to super-admins' }, { status: 403 }) }
   }
   return { userId: result.context.userId }
-}
-
-// Resolve emails for a set of user ids via the admin auth API. Member counts are
-// tiny, but paginate defensively. Mirrors /api/members#emailsByUserId.
-async function emailsByUserId(userIds: string[]): Promise<Map<string, string | null>> {
-  const map = new Map<string, string | null>()
-  if (userIds.length === 0) return map
-  const wanted = new Set(userIds)
-  let page = 1
-  while (wanted.size > map.size) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 })
-    if (error) throw error
-    for (const u of data.users) {
-      if (wanted.has(u.id)) map.set(u.id, u.email ?? null)
-    }
-    if (data.users.length < 1000) break
-    page++
-  }
-  return map
-}
-
-async function findUserByEmail(email: string): Promise<{ id: string; email: string | null } | null> {
-  const target = email.trim().toLowerCase()
-  let page = 1
-  while (true) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 })
-    if (error) throw error
-    const hit = data.users.find((u) => (u.email ?? '').toLowerCase() === target)
-    if (hit) return { id: hit.id, email: hit.email ?? null }
-    if (data.users.length < 1000) return null
-    page++
-  }
 }
 
 // All user ids that currently hold super-admin (used for last-super protection).
@@ -146,8 +115,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST — add an existing user by email (or invite a new one), grant super-admin
-// if requested, and scope them to any number of stations with a role each.
+// POST — add an existing user by email (or create one with an admin-set
+// password, no email sent), grant super-admin if requested, and scope them to
+// any number of stations with a role each.
 export async function POST(request: NextRequest) {
   try {
     const gate = await requireSuperAdmin(request)
@@ -155,6 +125,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const email = typeof body.email === 'string' ? body.email.trim() : ''
+    const password = typeof body.password === 'string' ? body.password : undefined
     const makeSuper = body.super === true
     const memberships = parseMemberships(body.stations)
     if (!Array.isArray(memberships)) return NextResponse.json({ error: memberships.error }, { status: 400 })
@@ -164,20 +135,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Pick at least one station, or grant super-admin' }, { status: 400 })
     }
 
-    // Find an existing account; otherwise send an invite that creates one.
-    let user = await findUserByEmail(email)
-    let invited = false
-    if (!user) {
-      const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email)
-      if (error) {
-        return NextResponse.json(
-          { error: `Couldn't invite ${email}: ${error.message}. They may need an account created in Supabase first (check that email sending is configured).` },
-          { status: 502 },
-        )
-      }
-      user = { id: data.user.id, email: data.user.email ?? email }
-      invited = true
-    }
+    // Find an existing account, or create one with the admin-set password.
+    const found = await findOrCreateUser(email, password)
+    if ('error' in found) return NextResponse.json({ error: found.error }, { status: found.status })
+    const { user, created } = found
 
     if (makeSuper) {
       const { error } = await supabaseAdmin
@@ -200,12 +161,12 @@ export async function POST(request: NextRequest) {
       actorId: gate.userId,
       resourceType: 'station_users',
       resourceId: user.id,
-      metadata: { email, invited, super: makeSuper, stations: memberships },
+      metadata: { email, created, super: makeSuper, stations: memberships },
       ip: meta.ip,
       userAgent: meta.userAgent,
     })
 
-    return NextResponse.json({ ok: true, invited, user_id: user.id })
+    return NextResponse.json({ ok: true, created, user_id: user.id })
   } catch (err) {
     console.error('POST /api/users failed:', err)
     return NextResponse.json({ error: 'Failed to add user' }, { status: 500 })
@@ -228,8 +189,12 @@ export async function PATCH(request: NextRequest) {
 
     const hasSuper = typeof body.super === 'boolean'
     const hasStations = body.stations !== undefined
-    if (!hasSuper && !hasStations) {
+    const newPassword = typeof body.password === 'string' ? body.password : undefined
+    if (!hasSuper && !hasStations && newPassword === undefined) {
       return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+    }
+    if (newPassword !== undefined && newPassword.length < MIN_PASSWORD_LENGTH) {
+      return NextResponse.json({ error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` }, { status: 400 })
     }
 
     // Super-admin grant/revoke.
@@ -288,17 +253,36 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    // Reset the account password (no email). Logged as its own sensitive event.
+    if (newPassword !== undefined) {
+      const { error } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, { password: newPassword })
+      if (error) return NextResponse.json({ error: `Couldn't reset password: ${error.message}` }, { status: 502 })
+    }
+
     const meta = requestMeta(request)
-    void logAuditEvent({
-      action: hasSuper ? (body.super ? AUDIT_ACTIONS.SUPER_ADMIN_GRANT : AUDIT_ACTIONS.SUPER_ADMIN_REVOKE) : AUDIT_ACTIONS.USER_ACCESS_UPDATE,
-      operation: 'update',
-      actorId: gate.userId,
-      resourceType: 'station_users',
-      resourceId: targetUserId,
-      metadata: { super: hasSuper ? body.super : undefined, stations: hasStations ? body.stations : undefined },
-      ip: meta.ip,
-      userAgent: meta.userAgent,
-    })
+    if (hasSuper || hasStations) {
+      void logAuditEvent({
+        action: hasSuper ? (body.super ? AUDIT_ACTIONS.SUPER_ADMIN_GRANT : AUDIT_ACTIONS.SUPER_ADMIN_REVOKE) : AUDIT_ACTIONS.USER_ACCESS_UPDATE,
+        operation: 'update',
+        actorId: gate.userId,
+        resourceType: 'station_users',
+        resourceId: targetUserId,
+        metadata: { super: hasSuper ? body.super : undefined, stations: hasStations ? body.stations : undefined },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
+    }
+    if (newPassword !== undefined) {
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.USER_PASSWORD_RESET,
+        operation: 'update',
+        actorId: gate.userId,
+        resourceType: 'auth.users',
+        resourceId: targetUserId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      })
+    }
 
     return NextResponse.json({ ok: true })
   } catch (err) {

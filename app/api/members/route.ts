@@ -2,44 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { emailsByUserId, findOrCreateUser } from '@/lib/users'
 import { StationRole } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
 const VALID_ROLES: StationRole[] = ['viewer', 'editor', 'admin']
-
-// Resolve emails for a set of user ids via the admin auth API. Returns a map of
-// user_id -> email. Paginates defensively though member counts are tiny.
-async function emailsByUserId(userIds: string[]): Promise<Map<string, string | null>> {
-  const map = new Map<string, string | null>()
-  if (userIds.length === 0) return map
-  const wanted = new Set(userIds)
-  let page = 1
-  // Stop once we've matched everyone or run out of users.
-  while (wanted.size > map.size) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 })
-    if (error) throw error
-    for (const u of data.users) {
-      if (wanted.has(u.id)) map.set(u.id, u.email ?? null)
-    }
-    if (data.users.length < 1000) break
-    page++
-  }
-  return map
-}
-
-async function findUserByEmail(email: string): Promise<{ id: string; email: string | null } | null> {
-  const target = email.trim().toLowerCase()
-  let page = 1
-  while (true) {
-    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 })
-    if (error) throw error
-    const hit = data.users.find((u) => (u.email ?? '').toLowerCase() === target)
-    if (hit) return { id: hit.id, email: hit.email ?? null }
-    if (data.users.length < 1000) return null
-    page++
-  }
-}
 
 // GET — list members of the active station (admin only).
 export async function GET(request: NextRequest) {
@@ -87,8 +55,8 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST — add an existing user by email (or invite a new one) to the active
-// station with a role (admin only).
+// POST — add an existing user by email (or create one with an admin-set
+// password, no email sent) to the active station with a role (admin only).
 export async function POST(request: NextRequest) {
   try {
     const result = await getStationContext(request)
@@ -99,6 +67,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const email = typeof body.email === 'string' ? body.email.trim() : ''
+    const password = typeof body.password === 'string' ? body.password : undefined
     const role = body.role as StationRole
 
     if (!email) return NextResponse.json({ error: 'email is required' }, { status: 400 })
@@ -106,27 +75,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'role must be viewer, editor, or admin' }, { status: 400 })
     }
 
-    // Find an existing account; otherwise send an invite that creates one.
-    let user = await findUserByEmail(email)
-    let invited = false
-    if (!user) {
-      const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email)
-      if (error) {
-        return NextResponse.json(
-          { error: `Couldn't invite ${email}: ${error.message}. They may need an account created in Supabase first (check that email sending is configured).` },
-          { status: 502 },
-        )
-      }
-      user = { id: data.user.id, email: data.user.email ?? email }
-      invited = true
-    }
+    // Find an existing account, or create one with the admin-set password.
+    const found = await findOrCreateUser(email, password)
+    if ('error' in found) return NextResponse.json({ error: found.error }, { status: found.status })
+    const { user, created } = found
 
     const { error: upsertError } = await supabaseAdmin
       .from('station_users')
       .upsert({ station_id: stationId, user_id: user.id, role }, { onConflict: 'station_id,user_id' })
     if (upsertError) throw upsertError
 
-    return NextResponse.json({ ok: true, invited, user_id: user.id })
+    return NextResponse.json({ ok: true, created, user_id: user.id })
   } catch (err) {
     console.error('POST /api/members failed:', err)
     return NextResponse.json({ error: 'Failed to add member' }, { status: 500 })
