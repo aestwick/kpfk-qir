@@ -340,6 +340,7 @@ export default function SettingsPage() {
   async function addMember() {
     const email = newMember.email.trim()
     if (!email) return
+    const hadPassword = newMember.password.trim().length > 0
     setMemberBusy(true)
     try {
       const res = await authedFetch('/api/members', {
@@ -349,7 +350,8 @@ export default function SettingsPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { toast('error', data.error ?? 'Failed to add member'); return }
-      toast('success', data.created ? `Created ${email}` : `Added ${email}`)
+      // A password is ignored for an existing (shared-auth) account — say so.
+      toast('success', data.created ? `Created ${email}` : hadPassword ? `Added ${email} — existing account, password unchanged` : `Added ${email}`)
       setNewMember({ email: '', password: '', role: 'viewer' })
       await fetchMembers()
     } finally {

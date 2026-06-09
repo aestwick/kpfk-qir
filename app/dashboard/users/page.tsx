@@ -127,6 +127,7 @@ export default function UsersPage() {
       toast('error', 'Pick at least one station, or grant super-admin')
       return
     }
+    const hadPassword = newPassword.trim().length > 0
     setBusy(true)
     try {
       const res = await authedFetch('/api/users', {
@@ -136,7 +137,9 @@ export default function UsersPage() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { toast('error', data.error ?? 'Failed to add user'); return }
-      toast('success', data.created ? `Created ${email}` : `Added ${email}`)
+      // A provided password is ignored when the account already exists (shared
+      // auth — likely the other app's user); make that explicit, don't pretend.
+      toast('success', data.created ? `Created ${email}` : hadPassword ? `Added ${email} — existing account, password unchanged` : `Added ${email}`)
       setNewEmail(''); setNewPassword(''); setNewSuper(false); setNewRoles({})
       await load()
     } finally {
@@ -376,6 +379,7 @@ export default function UsersPage() {
                     </div>
                     <p className="text-2xs text-gray-400 dark:text-warm-500 mt-1">
                       Takes effect immediately — share the new password with the user. No email is sent.
+                      This is their shared login, so it also changes any other app they sign into with it.
                     </p>
                   </div>
                   <div className="flex justify-end gap-2">
