@@ -120,6 +120,16 @@ export default function UsersPage() {
 
   useEffect(() => { load() }, [load])
 
+  async function copyText(text: string, label = 'Password copied') {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      toast('success', label)
+    } catch {
+      toast('error', "Couldn't copy — copy it manually")
+    }
+  }
+
   async function addUser() {
     const email = newEmail.trim()
     if (!email) return
@@ -251,13 +261,24 @@ export default function UsersPage() {
           <div className="flex-1 min-w-[180px]">
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs text-gray-500 dark:text-warm-400">Password</label>
-              <button
-                type="button"
-                onClick={() => setNewPassword(generatePassphrase())}
-                className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
-              >
-                Generate
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setNewPassword(generatePassphrase())}
+                  className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  Generate
+                </button>
+                {newPassword && (
+                  <button
+                    type="button"
+                    onClick={() => copyText(newPassword)}
+                    className="text-2xs text-gray-500 hover:underline dark:text-warm-400"
+                  >
+                    Copy
+                  </button>
+                )}
+              </div>
             </div>
             <input
               type="text"
@@ -385,6 +406,14 @@ export default function UsersPage() {
                         className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-warm-600 dark:text-warm-200 dark:hover:bg-warm-800"
                       >
                         Generate
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => copyText(resetPassword)}
+                        disabled={!resetPassword.trim()}
+                        className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 dark:border-warm-600 dark:text-warm-200 dark:hover:bg-warm-800"
+                      >
+                        Copy
                       </button>
                       <button
                         onClick={() => resetUserPassword(u)}

@@ -338,6 +338,16 @@ export default function SettingsPage() {
 
   useEffect(() => { fetchMembers() }, [fetchMembers])
 
+  async function copyPassword(text: string) {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      toast('success', 'Password copied')
+    } catch {
+      toast('error', "Couldn't copy — copy it manually")
+    }
+  }
+
   async function addMember() {
     const email = newMember.email.trim()
     if (!email) return
@@ -1687,13 +1697,24 @@ export default function SettingsPage() {
               <div className="flex-1 min-w-[160px]">
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs text-gray-500 dark:text-warm-400">Password</label>
-                  <button
-                    type="button"
-                    onClick={() => setNewMember({ ...newMember, password: generatePassphrase() })}
-                    className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    Generate
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewMember({ ...newMember, password: generatePassphrase() })}
+                      className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      Generate
+                    </button>
+                    {newMember.password && (
+                      <button
+                        type="button"
+                        onClick={() => copyPassword(newMember.password)}
+                        className="text-2xs text-gray-500 hover:underline dark:text-warm-400"
+                      >
+                        Copy
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <input
                   type="text"
