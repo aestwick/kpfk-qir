@@ -1265,7 +1265,7 @@ export default function SettingsPage() {
                 type="text"
                 value={showSearch}
                 onChange={(e) => setShowSearch(e.target.value)}
-                placeholder="Search shows..."
+                placeholder="Filter shows..."
                 className="border rounded px-3 py-1.5 text-sm w-64 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
               />
             </div>
@@ -1295,7 +1295,7 @@ export default function SettingsPage() {
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
                   <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
-                    {showSearch ? 'No shows match your search' : 'No shows found'}
+                    {showSearch ? 'No shows match your filter' : 'No shows found'}
                   </td></tr>
                 ) : groupedShows.map((group) => (
                   <Fragment key={group.shows[0].id}>
