@@ -5,6 +5,7 @@ import { authedFetch } from '@/lib/api-client'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { SkeletonTableRows } from '@/app/components/skeleton'
+import { generatePassphrase } from '@/lib/passphrase'
 import type { ManagedUser, StationRole } from '@/lib/types'
 
 interface StationLite {
@@ -248,7 +249,16 @@ export default function UsersPage() {
             />
           </div>
           <div className="flex-1 min-w-[180px]">
-            <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Password</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-gray-500 dark:text-warm-400">Password</label>
+              <button
+                type="button"
+                onClick={() => setNewPassword(generatePassphrase())}
+                className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
+              >
+                Generate
+              </button>
+            </div>
             <input
               type="text"
               value={newPassword}
@@ -370,9 +380,16 @@ export default function UsersPage() {
                         className="flex-1 text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
                       />
                       <button
+                        type="button"
+                        onClick={() => setResetPassword(generatePassphrase())}
+                        className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-warm-600 dark:text-warm-200 dark:hover:bg-warm-800"
+                      >
+                        Generate
+                      </button>
+                      <button
                         onClick={() => resetUserPassword(u)}
                         disabled={busy || !resetPassword.trim()}
-                        className="px-3 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-warm-600 dark:text-warm-200 dark:hover:bg-warm-800"
+                        className="px-3 py-2 text-sm rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-100 dark:text-warm-900"
                       >
                         Set password
                       </button>

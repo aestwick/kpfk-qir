@@ -8,6 +8,7 @@ import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
 import { resolveGroupDisplayName, resolveShowGroup, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
+import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
 import { episodeHref } from '@/lib/nav'
 
@@ -1684,7 +1685,16 @@ export default function SettingsPage() {
                 />
               </div>
               <div className="flex-1 min-w-[160px]">
-                <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Password</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-gray-500 dark:text-warm-400">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setNewMember({ ...newMember, password: generatePassphrase() })}
+                    className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Generate
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={newMember.password}
