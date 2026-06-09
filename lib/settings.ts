@@ -144,12 +144,53 @@ export async function getComplianceChecksEnabled(stationId: string): Promise<Rec
   }
 }
 
+// A station's OWN phone numbers / websites, configured per station in
+// Settings → Compliance. Reading them on air (or asking listeners to call,
+// visit, or become a member via them) is routine station operation, NOT
+// undisclosed commercial promotion — so they're injected into the compliance
+// prompt as an explicit do-not-flag list. Stored per-station (station_settings),
+// support multiple values, default empty.
+export async function getStationPhoneNumbers(stationId: string): Promise<string[]> {
+  return (await getSetting<string[]>('station_phone_numbers', stationId)) ?? []
+}
+
+export async function getStationUrls(stationId: string): Promise<string[]> {
+  return (await getSetting<string[]>('station_urls', stationId)) ?? []
+}
+
+// Append the station's own contact details to the compliance prompt so the AI
+// never flags them as payola/plugola or sponsorship. No-op when none configured.
+export function appendStationContactExemption(
+  prompt: string,
+  stationDisplayName: string,
+  phoneNumbers: string[],
+  urls: string[],
+): string {
+  const phones = phoneNumbers.map((p) => p.trim()).filter(Boolean)
+  const sites = urls.map((u) => u.trim()).filter(Boolean)
+  if (phones.length === 0 && sites.length === 0) return prompt
+  const lines = [
+    '',
+    `IMPORTANT — ${stationDisplayName}'s OWN contact details. The following belong to the station itself. NEVER flag them — or appeals to call, visit, donate, or become a member via them — as payola/plugola or sponsorship; they are routine station operation:`,
+  ]
+  if (phones.length) lines.push(`- Station phone numbers: ${phones.join(', ')}`)
+  if (sites.length) lines.push(`- Station websites: ${sites.join(', ')}`)
+  return prompt + '\n' + lines.join('\n')
+}
+
 export async function getCompliancePrompt(stationId: string): Promise<string> {
   // Centralized (master-level): the FCC review prompt is read GLOBAL-only — no
   // per-station override, since the rules are federal and uniform. The station
   // name is still injected per station via {{STATION_NAME}}.
   const raw = (await getSetting<string>('compliance_prompt')) ?? DEFAULT_COMPLIANCE_PROMPT
-  return fillStationName(raw, await stationName(stationId))
+  const name = await stationName(stationId)
+  const [phones, urls] = await Promise.all([
+    getStationPhoneNumbers(stationId),
+    getStationUrls(stationId),
+  ])
+  // The station's own contact info IS per-station (each station has its own),
+  // so it's layered on top of the uniform federal prompt.
+  return appendStationContactExemption(fillStationName(raw, name), name, phones, urls)
 }
 
 // Centralized FCC safety gate: when on, generate-qir holds back episodes with an
@@ -414,9 +455,9 @@ export const DEFAULT_COMPLIANCE_PROMPT = `You are an FCC compliance reviewer for
 
 Review the following transcript for potential compliance issues. Look for:
 
-1. PAYOLA/PLUGOLA: Undisclosed commercial promotion. Flag if a host promotes a product, service, or business without disclosure. Do NOT flag: pledge drive fundraising, promoting station events, journalistic discussion of books/films/music, or interviews where guests mention their own work in context.
+1. PAYOLA/PLUGOLA: Undisclosed commercial promotion. Flag if a host promotes a product, service, or business without disclosure. Do NOT flag: pledge drive fundraising, promoting station events, the station's own contact information (its phone number, website, mailing address, or social media handles), membership/donation/subscription appeals for the station itself, journalistic discussion of books/films/music, or interviews where guests mention their own work in context.
 
-2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure.
+2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure. Do NOT flag the station identifying or promoting itself — reading its own call sign, frequency, phone number, website, or asking listeners to donate or become members is required/expected station operation, not a sponsored segment.
 
 3. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references that could violate FCC indecency standards during safe harbor restricted hours (6am-10pm). Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault, or academic/documentary context.
 

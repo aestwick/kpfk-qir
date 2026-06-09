@@ -107,6 +107,16 @@ const DEFAULT_CATEGORIES = [
 
 type Tab = 'pipeline' | 'prompts' | 'shows' | 'compliance' | 'corrections' | 'members'
 
+// Coerce a settings value (parsed array, JSON string, or missing) to a clean
+// string[] — used for the multi-value station contact fields.
+function asStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean)
+  if (typeof v === 'string') {
+    try { const p = JSON.parse(v); return Array.isArray(p) ? p.map((x) => String(x).trim()).filter(Boolean) : [] } catch { return [] }
+  }
+  return []
+}
+
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('pipeline')
@@ -124,6 +134,13 @@ export default function SettingsPage() {
   const [complianceChecks, setComplianceChecks] = useState<Record<string, boolean>>({})
   const [compliancePrompt, setCompliancePrompt] = useState('')
   const [savedCompliancePrompt, setSavedCompliancePrompt] = useState('')
+  // Per-station station-owned phone numbers / websites, exempt from
+  // payola/sponsor flagging. Multiple of each; stored in station_settings.
+  const [stationPhones, setStationPhones] = useState<string[]>([])
+  const [newPhone, setNewPhone] = useState('')
+  const [stationUrls, setStationUrls] = useState<string[]>([])
+  const [newUrl, setNewUrl] = useState('')
+  const [savingContact, setSavingContact] = useState(false)
   const [summarizationPrompt, setSummarizationPrompt] = useState('')
   const [savedSummarizationPrompt, setSavedSummarizationPrompt] = useState('')
   const [curationPrompt, setCurationPrompt] = useState('')
@@ -227,6 +244,8 @@ export default function SettingsPage() {
         setCompliancePrompt(data.settings.compliance_prompt as string)
         setSavedCompliancePrompt(data.settings.compliance_prompt as string)
       }
+      setStationPhones(asStringArray(data.settings?.station_phone_numbers))
+      setStationUrls(asStringArray(data.settings?.station_urls))
       const sumPrompt = (data.settings?.summarization_prompt as string) || DEFAULT_SUMMARIZATION_PROMPT
       setSummarizationPrompt(sumPrompt)
       setSavedSummarizationPrompt(sumPrompt)
@@ -567,6 +586,57 @@ export default function SettingsPage() {
       toast('error', 'Network error')
     }
     setSaving(null)
+  }
+
+  // Persist a station contact list (phones or urls) as a per-station override.
+  // Returns true on success; callers update local state only when it sticks.
+  async function saveStationContact(key: 'station_phone_numbers' | 'station_urls', list: string[]): Promise<boolean> {
+    setSavingContact(true)
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value: list }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast('error', data.error ?? 'Failed to save')
+        return false
+      }
+      return true
+    } catch {
+      toast('error', 'Network error')
+      return false
+    } finally {
+      setSavingContact(false)
+    }
+  }
+
+  async function addStationContact(kind: 'phone' | 'url') {
+    const value = (kind === 'phone' ? newPhone : newUrl).trim()
+    if (!value) return
+    const list = kind === 'phone' ? stationPhones : stationUrls
+    if (list.some((v) => v.toLowerCase() === value.toLowerCase())) {
+      toast('error', 'Already in the list')
+      return
+    }
+    const next = [...list, value]
+    const key = kind === 'phone' ? 'station_phone_numbers' : 'station_urls'
+    if (await saveStationContact(key, next)) {
+      if (kind === 'phone') { setStationPhones(next); setNewPhone('') }
+      else { setStationUrls(next); setNewUrl('') }
+      toast('success', 'Saved')
+    }
+  }
+
+  async function removeStationContact(kind: 'phone' | 'url', value: string) {
+    const list = kind === 'phone' ? stationPhones : stationUrls
+    const next = list.filter((v) => v !== value)
+    const key = kind === 'phone' ? 'station_phone_numbers' : 'station_urls'
+    if (await saveStationContact(key, next)) {
+      if (kind === 'phone') setStationPhones(next)
+      else setStationUrls(next)
+    }
   }
 
   async function savePrompt(key: string, value: string, label: string, setSaved: (v: string) => void) {
@@ -1626,6 +1696,84 @@ export default function SettingsPage() {
                 >
                   Reset to saved
                 </button>
+              )}
+            </div>
+          </div>
+
+          {/* Station Contact Info — exempt from payola/sponsor flagging */}
+          <div className="border-t pt-4 dark:border-warm-700">
+            <h4 className="text-sm font-medium text-gray-700 mb-1 dark:text-warm-300">Station Contact Info</h4>
+            <p className="text-xs text-gray-500 mb-3 dark:text-warm-400">
+              This station&apos;s own phone numbers and websites. Reading these on air (or asking listeners to call,
+              visit, or become a member) is routine station operation, so they&apos;re never flagged as payola/plugola or
+              sponsorship. Add as many as you need.
+            </p>
+
+            {/* Phone numbers */}
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-warm-400">Phone numbers</label>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addStationContact('phone')}
+                  placeholder="e.g. 818-985-2711"
+                  className="flex-1 border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                />
+                <button
+                  onClick={() => addStationContact('phone')}
+                  disabled={savingContact || !newPhone.trim()}
+                  className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-700 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+                >
+                  Add
+                </button>
+              </div>
+              {stationPhones.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {stationPhones.map((p) => (
+                    <span key={p} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border bg-gray-50 border-gray-200 text-gray-700 dark:bg-warm-700 dark:border-warm-600 dark:text-warm-200">
+                      {p}
+                      <button onClick={() => removeStationContact('phone', p)} disabled={savingContact} className="hover:opacity-70 disabled:opacity-40">&times;</button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 dark:text-warm-500">No phone numbers added.</p>
+              )}
+            </div>
+
+            {/* Websites */}
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1.5 dark:text-warm-400">Websites</label>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  value={newUrl}
+                  onChange={(e) => setNewUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addStationContact('url')}
+                  placeholder="e.g. kpfk.org"
+                  className="flex-1 border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                />
+                <button
+                  onClick={() => addStationContact('url')}
+                  disabled={savingContact || !newUrl.trim()}
+                  className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-700 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+                >
+                  Add
+                </button>
+              </div>
+              {stationUrls.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {stationUrls.map((u) => (
+                    <span key={u} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border bg-gray-50 border-gray-200 text-gray-700 dark:bg-warm-700 dark:border-warm-600 dark:text-warm-200">
+                      {u}
+                      <button onClick={() => removeStationContact('url', u)} disabled={savingContact} className="hover:opacity-70 disabled:opacity-40">&times;</button>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 dark:text-warm-500">No websites added.</p>
               )}
             </div>
           </div>
