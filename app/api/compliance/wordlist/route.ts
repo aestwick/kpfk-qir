@@ -36,8 +36,11 @@ export async function POST(request: NextRequest) {
     const { supabase, stationId, isSuperAdmin } = result.context
 
     const body = await request.json()
-    const { word, severity, scope } = body
+    const { word, severity, scope, category } = body
     if (!word?.trim()) return NextResponse.json({ error: 'word required' }, { status: 400 })
+    // 'indecency' = the Carlin words; 'profanity' = the amorphous catch-all (default
+    // for new/local additions). Anything else is rejected by the DB check constraint.
+    const cat = category === 'indecency' ? 'indecency' : 'profanity'
 
     // Global-base term applies to every station — super-admin only. Otherwise it's
     // a per-station addition (editor+).
@@ -57,6 +60,7 @@ export async function POST(request: NextRequest) {
         station_id: global ? null : stationId,
         word: word.trim().toLowerCase(),
         severity: severity || 'critical',
+        category: cat,
       })
 
     if (error) throw error

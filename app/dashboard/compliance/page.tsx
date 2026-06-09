@@ -75,7 +75,7 @@ const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
 // Status transitions offered as quick actions, given the flag's current status.
 const STATUS_ACTIONS: ReviewStatus[] = ['investigating', 'violation', 'dismissed', 'suggested']
 
-const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency'] as const
+const FLAG_TYPES = ['profanity', 'indecency', 'obscenity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id'] as const
 const SEVERITIES = ['info', 'warning', 'critical']
 
 // Quarter filter options. Value is `YYYY-Q` (split on `-` below into year/quarter
@@ -92,11 +92,12 @@ const severityColors: Record<string, string> = {
 
 const typeLabels: Record<string, string> = {
   profanity: 'Profanity',
+  indecency: 'Indecency',
+  obscenity: 'Obscenity',
   station_id_missing: 'Station ID Missing',
   technical: 'Technical',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
-  indecency: 'Indecency',
 }
 
 function formatTimestamp(seconds: number | null): string {
@@ -190,7 +191,7 @@ export default function CompliancePage() {
 
   // Check toggles — per-flag-type map matching DB schema
   const [checkToggles, setCheckToggles] = useState<Record<string, boolean>>({
-    profanity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true, indecency: true,
+    profanity: true, indecency: true, obscenity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true,
   })
   const [blocking, setBlocking] = useState(false)
   // Centralized compliance config (prompt, checks default, blocking, global

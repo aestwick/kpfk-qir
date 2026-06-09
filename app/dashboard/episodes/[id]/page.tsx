@@ -72,11 +72,12 @@ interface ComplianceFlag {
 
 const FLAG_TYPE_LABELS: Record<string, string> = {
   profanity: 'Profanity',
+  indecency: 'Indecency',
+  obscenity: 'Obscenity',
   station_id_missing: 'Missing Station ID',
   technical: 'Technical Issue',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID Missing',
-  indecency: 'Indecency',
 }
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -826,8 +827,8 @@ export default function EpisodeDetailPage() {
                       }
                       return null
                     })()}
-                    {/* "Not a real word" shortcut for profanity flags */}
-                    {flag.flag_type === 'profanity' && flag.excerpt && (
+                    {/* "Not a real word" shortcut for wordlist flags (indecency + profanity) */}
+                    {(flag.flag_type === 'profanity' || flag.flag_type === 'indecency') && flag.excerpt && (
                       <button
                         onClick={(e) => {
                           const rect = (e.target as HTMLElement).getBoundingClientRect()

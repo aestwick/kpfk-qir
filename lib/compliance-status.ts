@@ -37,11 +37,12 @@ export const REVIEW_STATUS_LABELS: Record<ReviewStatus, string> = {
 // Human labels for the compliance check types raised by workers/compliance.ts.
 export const FLAG_TYPE_LABELS: Record<string, string> = {
   profanity: 'Profanity',
+  indecency: 'Indecency',
+  obscenity: 'Obscenity',
   station_id_missing: 'Station ID Missing',
   technical: 'Technical Issue',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID Missing',
-  indecency: 'Indecency',
 }
 
 export function flagTypeLabel(type: string): string {

@@ -81,11 +81,12 @@ const STATUS_CELL_BG: Record<string, string> = {
 
 const FLAG_LABELS: Record<string, string> = {
   profanity: 'Profanity',
+  indecency: 'Indecency',
+  obscenity: 'Obscenity',
   station_id_missing: 'Missing Station ID',
   technical: 'Technical',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
-  indecency: 'Indecency',
 }
 
 /* ─── helpers ─── */

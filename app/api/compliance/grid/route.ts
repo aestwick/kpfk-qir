@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
 // The 6 compliance_flags types; `summary_discrepancy` is a synthetic 7th source
 // (episode_log.compliance_report), not a real flag row. See spec §6.1.
 const FLAG_TYPES = new Set([
-  'profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency',
+  'profanity', 'indecency', 'obscenity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id',
 ])
 const DISCREPANCY_TYPE = 'summary_discrepancy'
 

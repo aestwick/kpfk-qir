@@ -239,7 +239,7 @@ export interface QirDraft {
 export interface ComplianceFlag {
   id: number
   episode_id: number
-  flag_type: 'profanity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id' | 'indecency'
+  flag_type: 'profanity' | 'indecency' | 'obscenity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id'
   severity: 'info' | 'warning' | 'critical'
   excerpt: string | null
   timestamp_seconds: number | null
@@ -254,6 +254,10 @@ export interface ComplianceWord {
   id: number
   station_id: string
   word: string
+  // Which FCC content category a wordlist hit raises. 'indecency' = the Carlin
+  // "seven dirty words"; 'profanity' = the amorphous catch-all beyond them (slurs,
+  // extras). Both are safe-harbor-restricted. (Obscenity is AI-detected, not here.)
+  category: 'indecency' | 'profanity'
   severity: 'warning' | 'critical'
   active: boolean
   created_at: string

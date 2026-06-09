@@ -26,16 +26,17 @@ const PRESETS: { label: string; weeks: number }[] = [
   { label: '24w', weeks: 24 },
 ]
 
-const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency'] as const
+const FLAG_TYPES = ['profanity', 'indecency', 'obscenity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id'] as const
 const SEVERITIES = ['info', 'warning', 'critical'] as const
 
 const TYPE_LABELS: Record<string, string> = {
   profanity: 'Profanity',
+  indecency: 'Indecency',
+  obscenity: 'Obscenity',
   station_id_missing: 'Station ID',
   technical: 'Technical',
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
-  indecency: 'Indecency',
   summary_discrepancy: 'Summary Discrepancy',
 }
 

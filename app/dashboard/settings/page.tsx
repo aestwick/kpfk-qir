@@ -1212,7 +1212,7 @@ export default function SettingsPage() {
               <div>
                 <h3 className="font-semibold text-gray-900 dark:text-warm-100">Compliance Prompt</h3>
                 <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
-                  System prompt for AI-powered compliance checks (payola/plugola, sponsor ID, indecency). Also editable from the Compliance tab.
+                  System prompt for AI-powered compliance checks (payola/plugola, sponsor ID, obscenity). Also editable from the Compliance tab.
                 </p>
               </div>
             </div>
@@ -1531,11 +1531,12 @@ export default function SettingsPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {[
               { key: 'profanity', label: 'Profanity Scan', cost: 'Free' },
+              { key: 'indecency', label: 'Indecency (Carlin words)', cost: 'Free' },
               { key: 'station_id_missing', label: 'Station ID Check', cost: 'Free' },
               { key: 'technical', label: 'Technical Issues', cost: 'Free' },
               { key: 'payola_plugola', label: 'Payola/Plugola', cost: '~$0.002/ep' },
               { key: 'sponsor_id', label: 'Sponsor ID', cost: '~$0.002/ep' },
-              { key: 'indecency', label: 'Indecency/Sexual Content', cost: '~$0.002/ep' },
+              { key: 'obscenity', label: 'Obscenity (sexual acts)', cost: '~$0.002/ep' },
             ].map(({ key, label, cost }) => (
               <button
                 key={key}

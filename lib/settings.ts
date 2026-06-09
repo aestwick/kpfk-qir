@@ -136,11 +136,12 @@ export async function getEmbeddingModel(stationId: string): Promise<string> {
 export async function getComplianceChecksEnabled(stationId: string): Promise<Record<string, boolean>> {
   return (await getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId)) ?? {
     profanity: true,
+    indecency: true,
+    obscenity: true,
     station_id_missing: true,
     technical: true,
     payola_plugola: true,
     sponsor_id: true,
-    indecency: true,
   }
 }
 
@@ -418,13 +419,13 @@ Review the following transcript for potential compliance issues. Look for:
 
 2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure.
 
-3. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references that could violate FCC indecency standards during safe harbor restricted hours (6am-10pm). Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault, or academic/documentary context.
+3. OBSCENITY: Patently offensive DESCRIPTIONS of sexual acts (the Miller standard) — appealing to the prurient interest and lacking serious literary, artistic, political, or scientific value. Obscenity is NOT protected by the First Amendment and is prohibited at ALL hours; there is no safe harbor, so always flag it as "critical". Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault, or academic/documentary context that serves a clear informational purpose. (Note: isolated curse words are handled separately as indecency/profanity — only flag graphic descriptions of sexual conduct here.)
 
 Return ONLY valid JSON. If no issues found, return empty flags array.
 {
   "flags": [
     {
-      "type": "payola_plugola" | "sponsor_id" | "indecency",
+      "type": "payola_plugola" | "sponsor_id" | "obscenity",
       "excerpt": "relevant quote from transcript (under 200 chars)",
       "details": "brief explanation of the concern",
       "severity": "warning" | "critical"
