@@ -8,6 +8,7 @@ import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
 import { resolveGroupDisplayName, resolveShowGroup, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
+import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
 import { episodeHref } from '@/lib/nav'
 
@@ -165,7 +166,7 @@ export default function SettingsPage() {
   const [canManageMembers, setCanManageMembers] = useState(false)
   // Cost/spend figures (e.g. per-check pricing hints) are super-admin-only.
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
-  const [newMember, setNewMember] = useState<{ email: string; role: StationRole }>({ email: '', role: 'viewer' })
+  const [newMember, setNewMember] = useState<{ email: string; password: string; role: StationRole }>({ email: '', password: '', role: 'viewer' })
   const [memberBusy, setMemberBusy] = useState(false)
 
   // Auto-save debounce timers
@@ -337,20 +338,32 @@ export default function SettingsPage() {
 
   useEffect(() => { fetchMembers() }, [fetchMembers])
 
+  async function copyPassword(text: string) {
+    if (!text) return
+    try {
+      await navigator.clipboard.writeText(text)
+      toast('success', 'Password copied')
+    } catch {
+      toast('error', "Couldn't copy — copy it manually")
+    }
+  }
+
   async function addMember() {
     const email = newMember.email.trim()
     if (!email) return
+    const hadPassword = newMember.password.trim().length > 0
     setMemberBusy(true)
     try {
       const res = await authedFetch('/api/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, role: newMember.role }),
+        body: JSON.stringify({ email, password: newMember.password || undefined, role: newMember.role }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) { toast('error', data.error ?? 'Failed to add member'); return }
-      toast('success', data.invited ? `Invite sent to ${email}` : `Added ${email}`)
-      setNewMember({ email: '', role: 'viewer' })
+      // A password is ignored for an existing (shared-auth) account — say so.
+      toast('success', data.created ? `Created ${email}` : hadPassword ? `Added ${email} — existing account, password unchanged` : `Added ${email}`)
+      setNewMember({ email: '', password: '', role: 'viewer' })
       await fetchMembers()
     } finally {
       setMemberBusy(false)
@@ -1671,13 +1684,44 @@ export default function SettingsPage() {
           {/* Add / invite a member */}
           <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="flex-1 min-w-[200px]">
+              <div className="flex-1 min-w-[180px]">
                 <label className="block text-xs text-gray-500 dark:text-warm-400 mb-1">Email</label>
                 <input
                   type="email"
                   value={newMember.email}
                   onChange={(e) => setNewMember({ ...newMember, email: e.target.value })}
                   placeholder="person@example.org"
+                  className="w-full text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
+                />
+              </div>
+              <div className="flex-1 min-w-[160px]">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-gray-500 dark:text-warm-400">Password</label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewMember({ ...newMember, password: generatePassphrase() })}
+                      className="text-2xs text-blue-600 hover:underline dark:text-blue-400"
+                    >
+                      Generate
+                    </button>
+                    {newMember.password && (
+                      <button
+                        type="button"
+                        onClick={() => copyPassword(newMember.password)}
+                        className="text-2xs text-gray-500 hover:underline dark:text-warm-400"
+                      >
+                        Copy
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  value={newMember.password}
+                  onChange={(e) => setNewMember({ ...newMember, password: e.target.value })}
+                  placeholder="New accounts only"
+                  autoComplete="new-password"
                   className="w-full text-sm rounded-lg px-3 py-2 border border-gray-300 dark:border-warm-600 dark:bg-warm-800 dark:text-warm-100"
                 />
               </div>
@@ -1702,7 +1746,8 @@ export default function SettingsPage() {
               </button>
             </div>
             <p className="text-xs text-gray-400 dark:text-warm-500 mt-2">
-              No account yet? An invitation email is sent so they can set a password.
+              Adding an existing account? Leave the password blank. For a new account, set a starting
+              password and share it — no email is sent.
             </p>
           </div>
 
