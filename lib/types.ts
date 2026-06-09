@@ -35,6 +35,23 @@ export interface StationMember {
   is_self: boolean
 }
 
+// One station-role assignment for a managed user (super-admin Users page).
+export interface ManagedUserMembership {
+  station_id: string
+  role: StationRole
+}
+
+// A user as returned by the super-admin /api/users route: their email, global
+// super-admin status, and every per-station role they hold. Distinct from
+// StationMember (which is scoped to a single active station for station admins).
+export interface ManagedUser {
+  user_id: string
+  email: string | null
+  is_super_admin: boolean
+  memberships: ManagedUserMembership[]
+  is_self: boolean
+}
+
 export interface StationSetting {
   id: number
   station_id: string

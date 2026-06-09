@@ -40,7 +40,17 @@ export const AUDIT_ACTIONS = {
   EPISODE_READ: 'episode.read',
   TRANSCRIPT_READ: 'transcript.read',
   MEMBERS_READ: 'members.read',
+  USERS_READ: 'users.read',
   REPORT_READ: 'report.read',
+
+  // User / access management (super-admin Users page). Attributes the actor on
+  // the supabaseAdmin (service-role) writes that DB triggers would otherwise log
+  // as 'system'. The grant/revoke of global super-admin is high-sensitivity.
+  USER_ACCESS_GRANT: 'users.access.grant',
+  USER_ACCESS_UPDATE: 'users.access.update',
+  USER_ACCESS_REVOKE: 'users.access.revoke',
+  SUPER_ADMIN_GRANT: 'users.super.grant',
+  SUPER_ADMIN_REVOKE: 'users.super.revoke',
 
   // Exports / downloads
   EPISODES_EXPORT: 'episodes.export',

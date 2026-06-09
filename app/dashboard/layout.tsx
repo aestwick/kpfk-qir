@@ -55,6 +55,11 @@ const icons = {
       <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clipRule="evenodd" />
     </svg>
   ),
+  users: (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+      <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+    </svg>
+  ),
   generate: (
     <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
       <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
@@ -82,6 +87,7 @@ const navItems = [
   { href: '/dashboard/compliance', label: 'Compliance', icon: icons.compliance },
   { href: '/dashboard/jobs', label: 'Jobs', icon: icons.jobs },
   { href: '/dashboard/master', label: 'Master Control', icon: icons.master, superAdminOnly: true },
+  { href: '/dashboard/users', label: 'Users', icon: icons.users, superAdminOnly: true },
   { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
   { href: '/dashboard/usage', label: 'Usage', icon: icons.usage, superAdminOnly: true },
   { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.audit },
