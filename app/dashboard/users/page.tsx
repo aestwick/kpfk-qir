@@ -72,6 +72,7 @@ export default function UsersPage() {
   const [stations, setStations] = useState<StationLite[]>([])
   const [loading, setLoading] = useState(true)
   const [forbidden, setForbidden] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState(false)
 
   // Add-user form state.
@@ -92,19 +93,26 @@ export default function UsersPage() {
   )
 
   const load = useCallback(async () => {
-    const res = await authedFetch('/api/users')
-    if (res.status === 403) {
-      setForbidden(true)
-      setLoading(false)
-      return
-    }
-    if (res.ok) {
+    try {
+      const res = await authedFetch('/api/users')
+      if (res.status === 403) {
+        setForbidden(true)
+        return
+      }
+      if (!res.ok) {
+        setLoadError(true)
+        return
+      }
       const data = await res.json()
       setUsers(data.users ?? [])
       setStations(data.stations ?? [])
       setForbidden(false)
+      setLoadError(false)
+    } catch {
+      setLoadError(true)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
@@ -245,6 +253,11 @@ export default function UsersPage() {
       <div className="bg-white rounded-lg shadow divide-y dark:bg-surface-raised dark:shadow-card-dark dark:divide-warm-700">
         {loading ? (
           <div className="p-3"><SkeletonTableRows rows={4} /></div>
+        ) : loadError ? (
+          <div className="p-4 text-sm text-red-600 dark:text-red-400 flex items-center justify-between gap-3">
+            <span>Couldn&rsquo;t load users.</span>
+            <button onClick={() => { setLoading(true); load() }} className="underline underline-offset-2 hover:opacity-80">Retry</button>
+          </div>
         ) : users.length === 0 ? (
           <div className="p-4 text-sm text-gray-500 dark:text-warm-400">No users yet.</div>
         ) : (
