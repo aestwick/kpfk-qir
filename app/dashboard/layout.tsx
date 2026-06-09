@@ -50,6 +50,14 @@ const icons = {
       <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
     </svg>
   ),
+  // Show Audit is a per-show QA/review workflow — distinct from the Audit Log
+  // (system trail). Clipboard-check keeps it visually separate in the sidebar.
+  showAudit: (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
+      <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+    </svg>
+  ),
   master: (
     <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
       <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clipRule="evenodd" />
@@ -90,7 +98,7 @@ const navItems = [
   { href: '/dashboard/users', label: 'Users', icon: icons.users, superAdminOnly: true },
   { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
   { href: '/dashboard/usage', label: 'Usage', icon: icons.usage, superAdminOnly: true },
-  { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.audit },
+  { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.showAudit },
   { href: '/dashboard/audit', label: 'Audit Log', icon: icons.audit, superAdminOnly: true },
   { href: '/dashboard/generate', label: 'Generate QIR', icon: icons.generate },
   { href: '/dashboard/downloads', label: 'Downloads', icon: icons.downloads },
