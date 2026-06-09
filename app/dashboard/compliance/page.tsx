@@ -851,7 +851,7 @@ export default function CompliancePage() {
               type="text"
               value={filterShow}
               onChange={(e) => { setFilterShow(e.target.value); setPage(1) }}
-              placeholder="Search show..."
+              placeholder="Filter show..."
               className="border rounded-lg px-3 py-1.5 text-sm w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
             />
           </div>

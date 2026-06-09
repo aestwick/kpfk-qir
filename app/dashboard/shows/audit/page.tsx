@@ -430,7 +430,7 @@ export default function ShowAuditPage() {
 
             <input
               type="text"
-              placeholder="Search shows..."
+              placeholder="Filter shows..."
               value={showSearch}
               onChange={(e) => setShowSearch(e.target.value)}
               className="w-full px-3 py-2 text-sm border rounded-lg mb-3 dark:bg-warm-700 dark:border-warm-600 dark:text-warm-200 dark:placeholder-warm-500"

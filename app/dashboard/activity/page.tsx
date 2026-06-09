@@ -269,11 +269,11 @@ export default function ActivityPage() {
           ))}
         </div>
 
-        {/* Show name search */}
+        {/* Show name filter */}
         <div className="flex-1 min-w-[200px] max-w-xs">
           <input
             type="text"
-            placeholder="Search show name..."
+            placeholder="Filter by show name..."
             value={showSearch}
             onChange={(e) => handleShowChange(e.target.value)}
             className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-gray-300 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 dark:placeholder-warm-500 dark:focus:ring-warm-500"
