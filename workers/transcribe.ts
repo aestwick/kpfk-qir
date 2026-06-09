@@ -6,11 +6,12 @@ import * as path from 'path'
 import * as os from 'os'
 import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
-import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused } from '../lib/settings'
+import { getExcludedCategories, getTranscribeBatchSize, getTranscriptionProvider, getTranscriptionModel, isPipelinePaused } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
+import { transcribeRemote, TranscriptionUnavailableError, REMOTE_PROVIDER_MODEL, type TranscriptionSegment } from '../lib/transcription'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -102,23 +103,23 @@ function applyCorrections(
   return result
 }
 
+// Build WebVTT from a flat list of ABSOLUTE-time segments. The groq path
+// flattens its per-chunk segments (adding each chunk's time offset) before
+// calling this; the URL-based providers already return absolute times.
 function buildVtt(
-  allSegments: Array<{ chunkIndex: number; segments: WhisperSegment[] }>,
+  segments: TranscriptionSegment[],
   corrections: Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
 ): string {
   let vtt = 'WEBVTT\n\n'
   let cueIndex = 1
 
-  for (const chunk of allSegments) {
-    const offset = chunk.chunkIndex * CHUNK_DURATION_SECONDS
-    for (const seg of chunk.segments) {
-      const startTime = formatVttTime(seg.start + offset)
-      const endTime = formatVttTime(seg.end + offset)
-      const text = applyCorrections(seg.text.trim(), corrections)
-      if (text) {
-        vtt += `${cueIndex}\n${startTime} --> ${endTime}\n${text}\n\n`
-        cueIndex++
-      }
+  for (const seg of segments) {
+    const startTime = formatVttTime(seg.start)
+    const endTime = formatVttTime(seg.end)
+    const text = applyCorrections(seg.text.trim(), corrections)
+    if (text) {
+      vtt += `${cueIndex}\n${startTime} --> ${endTime}\n${text}\n\n`
+      cueIndex++
     }
   }
 
@@ -141,14 +142,14 @@ function pad3(n: number): string {
   return n.toString().padStart(3, '0')
 }
 
-async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
+async function transcribeChunk(chunkPath: string, model: string): Promise<WhisperResponse> {
   const groqKey = process.env.GROQ_API_KEY
   if (!groqKey) throw new Error('GROQ_API_KEY not set')
 
   const fileData = await fs.readFile(chunkPath)
   const formData = new FormData()
   formData.append('file', new Blob([fileData]), path.basename(chunkPath))
-  formData.append('model', 'whisper-large-v3')
+  formData.append('model', model)
   formData.append('response_format', 'verbose_json')
 
   let lastError: Error | null = null
@@ -256,97 +257,150 @@ async function runTranscribeBatch(job: Job, stationId: string) {
 
   const filteredEpisodes = episodes
   const corrections = await loadCorrections(stationId)
+  // Speech-to-text provider for this station. 'groq' chunks locally with ffmpeg;
+  // 'assemblyai'/'deepgram' fetch the source MP3 by URL (no local chunking).
+  const provider = await getTranscriptionProvider(stationId)
+  const groqModel = await getTranscriptionModel(stationId)
+  console.log(`[transcribe] station ${stationId} provider: ${provider}`)
   let transcribed = 0
 
   for (let i = 0; i < filteredEpisodes.length; i++) {
     const episode = filteredEpisodes[i]
     await job.updateProgress({ current: i + 1, total: filteredEpisodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
-    // Unique temp dir per run — a deterministic per-episode path lets overlapping
-    // jobs (manual retry, continue-chain, BullMQ attempts, cron) delete each other's
-    // chunks mid-transcription, surfacing as ENOENT on a later chunk.
+    // Unique temp dir per run (groq path only) — a deterministic per-episode
+    // path lets overlapping jobs (manual retry, continue-chain, BullMQ attempts,
+    // cron) delete each other's chunks mid-transcription, surfacing as ENOENT on
+    // a later chunk. The URL-based providers fetch the source themselves and
+    // never touch local disk.
     const runId = `${job.id ?? 'job'}-${Math.random().toString(36).slice(2, 10)}`
     const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}-${runId}`)
     try {
-      await fs.mkdir(tmpDir, { recursive: true })
+      // Provider-agnostic transcription result: full text, flat absolute-time
+      // segments (for VTT/cues), audio duration (for cost), detected language.
+      let rawTranscript: string
+      let absSegments: TranscriptionSegment[]
+      let totalDuration: number
+      let detectedLanguage: string | null
+      const usageMeta: Record<string, unknown> = {}
 
-      // Download and chunk with ffmpeg
-      const chunkPattern = path.join(tmpDir, 'chunk_%03d.m4a')
-      try {
-        await execFileAsync('ffmpeg', [
-          '-i', episode.mp3_url,
-          '-f', 'segment',
-          '-segment_time', String(CHUNK_DURATION_SECONDS),
-          '-reset_timestamps', '1',
-          '-vn', '-ac', '1', '-ar', '16000',
-          '-c:a', 'aac', '-b:a', '64k',
-          chunkPattern,
-        ], { timeout: 600_000 }) // 10 min timeout
-      } catch (ffErr: unknown) {
-        const errMsg = ffErr instanceof Error ? ffErr.message : String(ffErr)
-        if (errMsg.includes('404') || errMsg.includes('Server returned')) {
-          await supabaseAdmin
-            .from('episode_log')
-            .update({ status: 'unavailable', error_message: 'MP3 not found (404)', updated_at: new Date().toISOString() })
-            .eq('id', episode.id)
-          console.warn(`[transcribe] episode ${episode.id} unavailable (404)`)
-          continue
+      if (provider === 'groq') {
+        await fs.mkdir(tmpDir, { recursive: true })
+
+        // Download and chunk with ffmpeg
+        const chunkPattern = path.join(tmpDir, 'chunk_%03d.m4a')
+        try {
+          await execFileAsync('ffmpeg', [
+            '-i', episode.mp3_url,
+            '-f', 'segment',
+            '-segment_time', String(CHUNK_DURATION_SECONDS),
+            '-reset_timestamps', '1',
+            '-vn', '-ac', '1', '-ar', '16000',
+            '-c:a', 'aac', '-b:a', '64k',
+            chunkPattern,
+          ], { timeout: 600_000 }) // 10 min timeout
+        } catch (ffErr: unknown) {
+          const errMsg = ffErr instanceof Error ? ffErr.message : String(ffErr)
+          if (errMsg.includes('404') || errMsg.includes('Server returned')) {
+            await supabaseAdmin
+              .from('episode_log')
+              .update({ status: 'unavailable', error_message: 'MP3 not found (404)', updated_at: new Date().toISOString() })
+              .eq('id', episode.id)
+            console.warn(`[transcribe] episode ${episode.id} unavailable (404)`)
+            continue
+          }
+          throw ffErr
         }
-        throw ffErr
+
+        // Find all chunk files
+        const files = await fs.readdir(tmpDir)
+        const chunkFiles = files
+          .filter((f) => f.startsWith('chunk_') && f.endsWith('.m4a'))
+          .sort()
+
+        if (!chunkFiles.length) {
+          throw new Error('ffmpeg produced no chunk files')
+        }
+
+        // Verify chunk sizes — re-chunk if any exceed 25MB
+        for (const chunkFile of chunkFiles) {
+          const stat = await fs.stat(path.join(tmpDir, chunkFile))
+          if (stat.size > MAX_CHUNK_SIZE_BYTES) {
+            console.warn(
+              `[transcribe] chunk ${chunkFile} is ${Math.round(stat.size / 1024 / 1024)}MB, exceeds 25MB limit`
+            )
+            // This shouldn't happen with 15min/64k settings, but flag it
+            throw new Error(`Chunk ${chunkFile} exceeds 25MB — needs shorter segment time`)
+          }
+        }
+
+        // Transcribe each chunk, flattening chunk-relative segment times into
+        // absolute times (chunk index × 15-min segment length).
+        const allTexts: string[] = []
+        const flat: TranscriptionSegment[] = []
+        let duration = 0
+        let language: string | null = null
+
+        for (let c = 0; c < chunkFiles.length; c++) {
+          const chunkPath = path.join(tmpDir, chunkFiles[c])
+          console.log(`[transcribe] ep ${episode.id} chunk ${c + 1}/${chunkFiles.length}`)
+
+          const result = await transcribeChunk(chunkPath, groqModel)
+          allTexts.push(result.text)
+          if (result.segments) {
+            const offset = c * CHUNK_DURATION_SECONDS
+            for (const seg of result.segments) {
+              flat.push({ start: seg.start + offset, end: seg.end + offset, text: seg.text })
+            }
+          }
+          duration += result.duration ?? CHUNK_DURATION_SECONDS
+          // Use language from first chunk as the episode language
+          if (c === 0 && result.language) {
+            language = result.language
+          }
+
+          // Small delay between chunks to respect rate limits
+          if (c < chunkFiles.length - 1) {
+            await new Promise((r) => setTimeout(r, INTER_CHUNK_DELAY_MS))
+          }
+        }
+
+        rawTranscript = allTexts.join(' ')
+        absSegments = flat
+        totalDuration = duration
+        detectedLanguage = language
+        usageMeta.provider = 'groq'
+        usageMeta.model = groqModel
+        usageMeta.chunks = chunkFiles.length
+      } else {
+        // URL-based provider (assemblyai | deepgram): hand the source MP3 URL
+        // straight to the provider — no ffmpeg, no chunking, no local disk.
+        console.log(`[transcribe] ep ${episode.id} via ${provider} (url)`)
+        let remote
+        try {
+          remote = await transcribeRemote(provider, episode.mp3_url)
+        } catch (remoteErr) {
+          if (remoteErr instanceof TranscriptionUnavailableError) {
+            await supabaseAdmin
+              .from('episode_log')
+              .update({ status: 'unavailable', error_message: 'MP3 not found (404)', updated_at: new Date().toISOString() })
+              .eq('id', episode.id)
+            console.warn(`[transcribe] episode ${episode.id} unavailable (${provider}: source unreachable)`)
+            continue
+          }
+          throw remoteErr
+        }
+
+        rawTranscript = remote.text
+        absSegments = remote.segments
+        totalDuration = remote.duration
+        detectedLanguage = remote.language
+        usageMeta.provider = provider
+        usageMeta.model = REMOTE_PROVIDER_MODEL[provider]
       }
 
-      // Find all chunk files
-      const files = await fs.readdir(tmpDir)
-      const chunkFiles = files
-        .filter((f) => f.startsWith('chunk_') && f.endsWith('.m4a'))
-        .sort()
-
-      if (!chunkFiles.length) {
-        throw new Error('ffmpeg produced no chunk files')
-      }
-
-      // Verify chunk sizes — re-chunk if any exceed 25MB
-      for (const chunkFile of chunkFiles) {
-        const stat = await fs.stat(path.join(tmpDir, chunkFile))
-        if (stat.size > MAX_CHUNK_SIZE_BYTES) {
-          console.warn(
-            `[transcribe] chunk ${chunkFile} is ${Math.round(stat.size / 1024 / 1024)}MB, exceeds 25MB limit`
-          )
-          // This shouldn't happen with 15min/64k settings, but flag it
-          throw new Error(`Chunk ${chunkFile} exceeds 25MB — needs shorter segment time`)
-        }
-      }
-
-      // Transcribe each chunk
-      const allTexts: string[] = []
-      const allSegments: Array<{ chunkIndex: number; segments: WhisperSegment[] }> = []
-      let totalDuration = 0
-      let detectedLanguage: string | null = null
-
-      for (let i = 0; i < chunkFiles.length; i++) {
-        const chunkPath = path.join(tmpDir, chunkFiles[i])
-        console.log(`[transcribe] ep ${episode.id} chunk ${i + 1}/${chunkFiles.length}`)
-
-        const result = await transcribeChunk(chunkPath)
-        allTexts.push(result.text)
-        if (result.segments) {
-          allSegments.push({ chunkIndex: i, segments: result.segments })
-        }
-        totalDuration += result.duration ?? CHUNK_DURATION_SECONDS
-        // Use language from first chunk as the episode language
-        if (i === 0 && result.language) {
-          detectedLanguage = result.language
-        }
-
-        // Small delay between chunks to respect rate limits
-        if (i < chunkFiles.length - 1) {
-          await new Promise((r) => setTimeout(r, INTER_CHUNK_DELAY_MS))
-        }
-      }
-
-      // Stitch and apply corrections
-      const rawTranscript = allTexts.join(' ')
+      // Apply corrections and build captions/cues from the (now absolute-time) segments
       const correctedTranscript = applyCorrections(rawTranscript, corrections)
-      const vtt = buildVtt(allSegments, corrections)
+      const vtt = buildVtt(absSegments, corrections)
 
       // Store transcript — check for errors before marking episode as transcribed
       const { error: upsertError } = await supabaseAdmin.from('transcripts').upsert(
@@ -389,13 +443,15 @@ async function runTranscribeBatch(job: Job, stationId: string) {
         console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
       }
 
-      // Log usage
+      // Log usage (provider-aware pricing + model)
       await logTranscriptionUsage(stationId, episode.id, totalDuration, {
-        chunks: chunkFiles.length,
+        provider: usageMeta.provider as string,
+        model: usageMeta.model as string,
+        metadata: usageMeta,
       })
 
       transcribed++
-      console.log(`[transcribe] ep ${episode.id} done (${chunkFiles.length} chunks, ${Math.round(totalDuration)}s)`)
+      console.log(`[transcribe] ep ${episode.id} done via ${usageMeta.provider} (${Math.round(totalDuration)}s)`)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       console.error(`[transcribe] ep ${episode.id} failed:`, errMsg)

@@ -58,11 +58,18 @@ interface Show {
   episode_count: number
 }
 
+interface SettingFieldOption {
+  value: string
+  label: string
+}
+
 interface SettingField {
   key: string
   label: string
-  type: 'text' | 'number' | 'json' | 'textarea'
+  type: 'text' | 'number' | 'json' | 'textarea' | 'select'
   autoSave?: boolean
+  options?: SettingFieldOption[]
+  help?: string
 }
 
 const settingFields: SettingField[] = [
@@ -72,7 +79,19 @@ const settingFields: SettingField[] = [
   { key: 'excluded_categories', label: 'Excluded Categories (JSON array)', type: 'json' },
   { key: 'excluded_show_keys', label: 'Excluded Show Keys (JSON array)', type: 'json' },
   { key: 'summarization_model', label: 'Summarization Model', type: 'text', autoSave: true },
-  { key: 'transcription_model', label: 'Transcription Model', type: 'text', autoSave: true },
+  {
+    key: 'transcription_provider',
+    label: 'Transcription Provider',
+    type: 'select',
+    autoSave: true,
+    options: [
+      { value: 'groq', label: 'Groq (Whisper large-v3)' },
+      { value: 'assemblyai', label: 'AssemblyAI' },
+      { value: 'deepgram', label: 'Deepgram (Nova-2)' },
+    ],
+    help: 'Speech-to-text engine. Groq chunks audio locally; AssemblyAI and Deepgram fetch the source MP3 by URL. The chosen provider’s API key must be set in the environment.',
+  },
+  { key: 'transcription_model', label: 'Transcription Model (Groq only)', type: 'text', autoSave: true },
   { key: 'transcribe_batch_size', label: 'Transcribe Batch Size', type: 'number', autoSave: true },
   { key: 'summarize_batch_size', label: 'Summarize Batch Size', type: 'number', autoSave: true },
 ]
@@ -900,6 +919,16 @@ export default function SettingsPage() {
                         rows={field.type === 'textarea' ? 4 : 3}
                         className="flex-1 border rounded px-2 py-1.5 text-sm font-mono dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                       />
+                    ) : field.type === 'select' ? (
+                      <select
+                        value={editValues[field.key] || field.options?.[0]?.value || ''}
+                        onChange={(e) => handleAutoSaveChange(field.key, e.target.value)}
+                        className="flex-1 border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                      >
+                        {field.options?.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
                     ) : (
                       <input
                         type={field.type === 'number' ? 'number' : 'text'}
@@ -928,6 +957,9 @@ export default function SettingsPage() {
                       </div>
                     )}
                   </div>
+                  {field.help && (
+                    <p className="text-xs text-gray-400 dark:text-warm-500">{field.help}</p>
+                  )}
                 </div>
               )
             })}

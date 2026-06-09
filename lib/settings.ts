@@ -116,6 +116,28 @@ export async function getTranscribeBatchSize(stationId: string): Promise<number>
   return (await getSetting<number>('transcribe_batch_size', stationId)) ?? 5
 }
 
+// Speech-to-text provider, per station (override → global default 'groq').
+//   - groq:       Whisper large-v3, fed locally-chunked 15-min M4A segments
+//   - assemblyai: fetches the source MP3 by URL (no local chunking)
+//   - deepgram:   fetches the source MP3 by URL (no local chunking)
+// An unknown/missing value falls back to 'groq' so a typo can never strand the
+// pipeline on a provider the worker doesn't implement.
+export const TRANSCRIPTION_PROVIDERS = ['groq', 'assemblyai', 'deepgram'] as const
+export type TranscriptionProvider = (typeof TRANSCRIPTION_PROVIDERS)[number]
+
+export async function getTranscriptionProvider(stationId: string): Promise<TranscriptionProvider> {
+  const v = await getSetting<string>('transcription_provider', stationId)
+  return (TRANSCRIPTION_PROVIDERS as readonly string[]).includes(v ?? '')
+    ? (v as TranscriptionProvider)
+    : 'groq'
+}
+
+// Groq Whisper model id (only consulted on the groq path; the URL-based
+// providers use their own fixed default model — see REMOTE_PROVIDER_MODEL).
+export async function getTranscriptionModel(stationId: string): Promise<string> {
+  return (await getSetting<string>('transcription_model', stationId)) ?? 'whisper-large-v3'
+}
+
 export async function getSummarizeBatchSize(stationId: string): Promise<number> {
   return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
 }

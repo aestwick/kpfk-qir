@@ -32,9 +32,9 @@ Background workers (BullMQ + Redis) process episodes through each stage. An hour
 - **Next.js 14** (App Router) — dashboard UI + API routes + public QIR pages
 - **Supabase** (PostgreSQL + Auth) — all persistent state
 - **BullMQ + Redis** — background job queues with hourly cron
-- **Groq API** (whisper-large-v3) — audio transcription
+- **Transcription** (pluggable per station via `transcription_provider`) — **Groq** (whisper-large-v3, default) / **AssemblyAI** / **Deepgram**; see `lib/transcription.ts`
 - **OpenAI API** (gpt-4o-mini) — summarization and curation
-- **ffmpeg** — audio chunking (15-min M4A segments, mono, 16kHz, 64k AAC)
+- **ffmpeg** — audio chunking for the Groq path (15-min M4A segments, mono, 16kHz, 64k AAC); the URL-based providers skip it
 - **Docker Compose** — production deployment on VPS
 - **Tailwind CSS** — styling (no component library)
 
@@ -46,7 +46,9 @@ Background workers (BullMQ + Redis) process episodes through each stage. An hour
 workers/
   index.ts          — BullMQ worker setup, cron scheduling, stage chaining
   ingest.ts         — RSS fetch → parse → dedupe → insert episodes
-  transcribe.ts     — ffmpeg chunk → Groq Whisper → corrections → store transcript + VTT
+  transcribe.ts     — dispatch by transcription_provider: Groq (ffmpeg chunk → Whisper)
+                      or AssemblyAI/Deepgram (URL → lib/transcription.ts) → corrections
+                      → store transcript + VTT
   summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata
   generate-qir.ts   — Group episodes → OpenAI curation → build draft
   discover-sync.ts  — Daily: scrape each station's archive program list →
@@ -60,7 +62,8 @@ lib/
   supabase.ts       — Supabase clients (admin for server, browser for client)
   queue.ts          — BullMQ queue instances (ingest, transcribe, summarize, generate-qir)
   settings.ts       — Settings cache (60s TTL) reading from qir_settings table
-  usage.ts          — Cost logging helpers (Groq per-second, OpenAI per-token)
+  usage.ts          — Cost logging helpers (transcription per-second by provider, OpenAI per-token)
+  transcription.ts  — AssemblyAI/Deepgram URL-based transcription (unified result shape)
   audit.ts          — Append-only audit log helper + the event registry (see Audit Logging)
   types.ts          — TypeScript interfaces for all database tables
   qir-format.ts     — Report formatting and date range helpers

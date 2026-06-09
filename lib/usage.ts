@@ -12,8 +12,17 @@ async function insertUsage(row: Record<string, unknown>, context: string) {
   }
 }
 
-// Groq Whisper pricing: $0.111 per hour of audio
-const GROQ_WHISPER_COST_PER_SECOND = 0.111 / 3600
+// Per-hour audio transcription pricing by provider (USD), converted to per-second.
+//   groq (whisper-large-v3): $0.111/hr
+//   assemblyai (Best/Universal async): ~$0.27/hr
+//   deepgram (Nova-2 prerecorded): ~$0.258/hr ($0.0043/min)
+// These are list-price estimates used only for the cost dashboard, not billing.
+const TRANSCRIPTION_COST_PER_SECOND: Record<string, number> = {
+  groq: 0.111 / 3600,
+  assemblyai: 0.27 / 3600,
+  deepgram: 0.258 / 3600,
+}
+const GROQ_WHISPER_COST_PER_SECOND = TRANSCRIPTION_COST_PER_SECOND.groq
 
 // OpenAI GPT-4o-mini pricing: $0.15/1M input, $0.60/1M output
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
@@ -26,21 +35,23 @@ export async function logTranscriptionUsage(
   stationId: string,
   episodeId: number,
   durationSeconds: number,
-  metadata?: Record<string, unknown>
+  opts?: { provider?: string; model?: string; metadata?: Record<string, unknown> }
 ) {
-  const estimatedCost = durationSeconds * GROQ_WHISPER_COST_PER_SECOND
+  const provider = opts?.provider ?? 'groq'
+  const costPerSecond = TRANSCRIPTION_COST_PER_SECOND[provider] ?? GROQ_WHISPER_COST_PER_SECOND
+  const estimatedCost = durationSeconds * costPerSecond
 
   await insertUsage({
     station_id: stationId,
     episode_id: episodeId,
-    service: 'groq',
-    model: 'whisper-large-v3',
+    service: provider,
+    model: opts?.model ?? 'whisper-large-v3',
     operation: 'transcribe',
     input_tokens: 0,
     output_tokens: 0,
     duration_seconds: durationSeconds,
     estimated_cost: estimatedCost,
-    metadata: metadata ?? {},
+    metadata: opts?.metadata ?? {},
   }, 'transcription')
 }
 

@@ -47,7 +47,9 @@ npm run workers      # Background workers (separate terminal)
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (server-side only) |
-| `GROQ_API_KEY` | Groq API key for Whisper transcription |
+| `GROQ_API_KEY` | Groq API key for Whisper transcription (default provider) |
+| `ASSEMBLYAI_API_KEY` | AssemblyAI key — required only if `transcription_provider` is set to `assemblyai` |
+| `DEEPGRAM_API_KEY` | Deepgram key — required only if `transcription_provider` is set to `deepgram` |
 | `OPENAI_API_KEY` | OpenAI API key for GPT-4o-mini |
 | `REDIS_URL` | Redis connection URL (default: `redis://qir-redis:6379`) |
 | `NEXT_PUBLIC_APP_URL` | Public URL of the application |
