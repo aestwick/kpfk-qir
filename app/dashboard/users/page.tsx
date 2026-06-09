@@ -233,7 +233,7 @@ export default function UsersPage() {
         </p>
       </div>
 
-      {/* Add / invite a user */}
+      {/* Add a user */}
       <div className="bg-white rounded-lg shadow p-4 space-y-4 dark:bg-surface-raised dark:shadow-card-dark">
         <h2 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Add a user</h2>
         <div className="flex flex-wrap items-end gap-3">

@@ -11,10 +11,10 @@ export const dynamic = 'force-dynamic'
 // Super-admin user management. The one place that grants access across every
 // station and grants/revokes global super-admin. Station admins manage their own
 // station's members via /api/members; this route is the broader, super-admin-only
-// tool: invite a user, scope them to MULTIPLE stations at once, and toggle the
-// global super-admin flag. Hard-gates on isSuperAdmin (RLS would otherwise scope
-// reads to memberships) and writes via the service-role client, attributing the
-// actor through app-layer audit events.
+// tool: add (or create) a user, scope them to MULTIPLE stations at once, toggle
+// the global super-admin flag, and reset passwords. Hard-gates on isSuperAdmin
+// (RLS would otherwise scope reads to memberships) and writes via the
+// service-role client, attributing the actor through app-layer audit events.
 // ===========================================================================
 
 const VALID_ROLES: StationRole[] = ['viewer', 'editor', 'admin']
