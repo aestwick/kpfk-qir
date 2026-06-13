@@ -62,33 +62,124 @@ function toPacificDate(utcDateStr: string): {
   }
 }
 
-async function processShow(
-  show: { key: string; show_name: string; category: string; feed_name?: string | null },
-  station: { id: string; rssBaseUrl: string; mp3Prefix: string }
-): Promise<number> {
+// A feed episode normalized to just what the shared insert loop needs, so the
+// RSS and nu_do adapters are interchangeable. parseMp3Url-based date refinement
+// (archive filename ground-truth) still runs in the loop and simply no-ops when
+// a URL doesn't match the station's mp3 prefix (e.g. nu_do audio URLs).
+type NormalizedEpisode = {
+  mp3Url: string
+  title: string | null
+  pubDate: string | null
+  durationMinutes: number | null
+}
+
+// The outcome of one adapter fetch: the episodes plus a health signal recorded
+// onto show_keys so a silently-empty/broken feed is visible, not swallowed.
+type FeedResult = {
+  feedName: string | null // auto-derived display name (RSS channel title); null if none
+  episodes: NormalizedEpisode[]
+  status: string // ok | empty | http_<code> | error
+  error?: string | null
+}
+
+type ShowRow = {
+  key: string
+  show_name: string
+  category: string
+  feed_name?: string | null
+  source?: string | null
+}
+type StationCtx = {
+  id: string
+  rssBaseUrl: string
+  mp3Prefix: string
+  nudoBaseUrl: string | null
+}
+
+// --- RSS adapter: the original ingest path, unchanged in behavior ------------
+async function fetchRssEpisodes(show: ShowRow, station: StationCtx): Promise<FeedResult> {
+  // rss_base_url is stored as the full prefix up to '?id=' (see migration 012),
+  // so the show key is simply appended.
+  const rssUrl = `${station.rssBaseUrl}${show.key}`
+  const response = await fetch(rssUrl, { signal: AbortSignal.timeout(30000) })
+
+  if (!response.ok) {
+    console.warn(`[ingest] RSS fetch failed for ${show.key}: ${response.status}`)
+    return { feedName: null, episodes: [], status: `http_${response.status}`, error: `RSS ${response.status}` }
+  }
+
+  const xml = await response.text()
+  const parsed = parser.parse(xml)
+
+  // The feed's display name from the RSS channel <title> (auto-derived,
+  // display-only; a manual display_name override can win over it later).
+  const channelTitle = rssText(parsed?.rss?.channel?.title)
+  const items = parsed?.rss?.channel?.item
+
+  const episodes: NormalizedEpisode[] = []
+  for (const item of items ?? []) {
+    const mp3Url = item.enclosure?.['@_url'] || item.enclosure?.url || null
+    if (!mp3Url) continue
+    const itunesDuration = item['itunes:duration'] || item.duration || null
+    episodes.push({
+      mp3Url,
+      title: rssText(item.title),
+      pubDate: item.pubDate || null,
+      durationMinutes: itunesDuration ? Math.round(Number(itunesDuration) / 60) : null,
+    })
+  }
+
+  return {
+    feedName: channelTitle || null,
+    episodes,
+    status: episodes.length ? 'ok' : 'empty',
+  }
+}
+
+// --- nu_do adapter: backup source for shows not exposed as archive RSS -------
+// NOTE: the body is intentionally unimplemented — it's the one piece that can't
+// be written without the nu_do API contract (auth scheme, the endpoint that
+// lists a show's episodes, how a show maps to a nu_do program id, and the
+// response shape locating the audio URL / air date / duration / title). Once
+// that's known, populate `episodes` (normalized exactly like the RSS adapter)
+// and the entire downstream pipeline — dedupe, insert, transcribe, summarize,
+// compliance — works unchanged. Config plumbing (per-station nudo_base_url +
+// the NUDO_API_KEY secret) is wired so this is a drop-in.
+async function fetchNudoEpisodes(show: ShowRow, station: StationCtx): Promise<FeedResult> {
+  const apiKey = process.env.NUDO_API_KEY
+  if (!station.nudoBaseUrl || !apiKey) {
+    const missing = [!station.nudoBaseUrl && 'station.nudo_base_url', !apiKey && 'NUDO_API_KEY env']
+      .filter(Boolean)
+      .join(' + ')
+    return { feedName: null, episodes: [], status: 'error', error: `nu_do not configured (${missing})` }
+  }
+
+  // TODO(nu_do contract): replace the throw below with the real fetch.
+  //   1. const res = await fetch(`${station.nudoBaseUrl}/<list-endpoint>?show=${show.key}`,
+  //        { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(30000) })
+  //   2. map each returned episode -> NormalizedEpisode { mp3Url, title, pubDate, durationMinutes }
+  //   3. return { feedName: <program title or null>, episodes, status: episodes.length ? 'ok' : 'empty' }
+  throw new Error(`nu_do adapter not yet implemented for ${show.key} — awaiting API contract`)
+}
+
+async function processShow(show: ShowRow, station: StationCtx): Promise<number> {
   let newCount = 0
+  let health: { status: string; itemCount: number; error: string | null } = {
+    status: 'error',
+    itemCount: 0,
+    error: null,
+  }
   try {
-    // rss_base_url is stored as the full prefix up to '?id=' (see migration 012),
-    // so the show key is simply appended.
-    const rssUrl = `${station.rssBaseUrl}${show.key}`
-    const response = await fetch(rssUrl, { signal: AbortSignal.timeout(30000) })
+    const fetcher = show.source === 'nudo' ? fetchNudoEpisodes : fetchRssEpisodes
+    const result = await fetcher(show, station)
+    health = { status: result.status, itemCount: result.episodes.length, error: result.error ?? null }
 
-    if (!response.ok) {
-      console.warn(`[ingest] RSS fetch failed for ${show.key}: ${response.status}`)
-      return 0
-    }
-
-    const xml = await response.text()
-    const parsed = parser.parse(xml)
-
-    // Capture the feed's display name from the RSS channel <title>. This is the
-    // auto-derived name (display-only); a manual display_name override can win
-    // over it later. Best-effort: only write when it actually changed.
-    const channelTitle = rssText(parsed?.rss?.channel?.title)
-    if (channelTitle && channelTitle !== (show.feed_name ?? null)) {
+    // Persist the auto-derived feed name (display-only). Best-effort; only write
+    // when it actually changed.
+    if (result.feedName && result.feedName !== (show.feed_name ?? null)) {
       const { error: feedNameErr } = await supabaseAdmin
         .from('show_keys')
-        .update({ feed_name: channelTitle })
+        .update({ feed_name: result.feedName })
         .eq('station_id', station.id)
         .eq('key', show.key)
       if (feedNameErr) {
@@ -96,24 +187,9 @@ async function processShow(
       }
     }
 
-    const items = parsed?.rss?.channel?.item
-
-    if (!items?.length) return 0
-
-    for (const item of items) {
-      const mp3Url =
-        item.enclosure?.['@_url'] || item.enclosure?.url || null
-
-      if (!mp3Url) continue
-
-      const title = rssText(item.title)
-
-      const pubDate = item.pubDate || null
-      const itunesDuration =
-        item['itunes:duration'] || item.duration || null
-      const durationMinutes = itunesDuration
-        ? Math.round(Number(itunesDuration) / 60)
-        : null
+    for (const ep of result.episodes) {
+      const mp3Url = ep.mp3Url
+      const { title, pubDate, durationMinutes } = ep
 
       // Check for existing episode by mp3_url within this station
       const { data: existing } = await supabaseAdmin
@@ -218,7 +294,23 @@ async function processShow(
       newCount++
     }
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
     console.error(`[ingest] error processing show ${show.key}:`, err)
+    health = { status: 'error', itemCount: 0, error: msg }
+  } finally {
+    // Record ingest health so a silently-empty/broken feed surfaces in Master
+    // Control instead of being swallowed. Best-effort — never fail ingest on it.
+    const { error: healthErr } = await supabaseAdmin
+      .from('show_keys')
+      .update({
+        last_ingest_at: new Date().toISOString(),
+        last_ingest_status: health.status,
+        last_item_count: health.itemCount,
+        last_ingest_error: health.error,
+      })
+      .eq('station_id', station.id)
+      .eq('key', show.key)
+    if (healthErr) console.warn(`[ingest] health write failed for ${show.key}: ${healthErr.message}`)
   }
   return newCount
 }
@@ -259,6 +351,7 @@ export async function processIngest(job: Job) {
     id: station.id,
     rssBaseUrl: station.rss_base_url,
     mp3Prefix: station.mp3_filename_prefix ?? 'kpfk',
+    nudoBaseUrl: station.nudo_base_url ?? null,
   }
   console.log(`[ingest] starting RSS fetch for ${station.slug}...`)
 

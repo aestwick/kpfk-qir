@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
 
     const queueNames = Object.keys(QUEUES) as QueueName[]
 
-    const [globalPaused, mode, stationPauseStates, episodeCounts, queueData, usageRows] = await Promise.all([
+    const [globalPaused, mode, stationPauseStates, episodeCounts, queueData, usageRows, unhealthyShowsRes] = await Promise.all([
       // Global master flag.
       getSetting<boolean>('pipeline_paused').then((v) => v === true),
       getSetting<string>('pipeline_mode').then((v) => v ?? 'steady'),
@@ -161,7 +161,33 @@ export async function GET(request: NextRequest) {
         .from('usage_log')
         .select('station_id, service, estimated_cost, created_at')
         .gte('created_at', start),
+      // Feed health: active shows whose last attempted ingest came back empty or
+      // broke (status set, not 'ok'). Category-excluded / never-fetched shows
+      // have a null status and are correctly omitted. Surfaces silently-dead
+      // feeds — the exact failure that left shows registered with zero episodes.
+      supabaseAdmin
+        .from('show_keys')
+        .select('station_id, key, display_name, feed_name, show_name, source, last_ingest_at, last_ingest_status, last_item_count, last_ingest_error')
+        .eq('active', true)
+        .not('last_ingest_status', 'is', null)
+        .neq('last_ingest_status', 'ok'),
     ])
+
+    // Group unhealthy feeds by station for attachment below.
+    const unhealthyByStation = new Map<string, Array<Record<string, unknown>>>()
+    for (const row of unhealthyShowsRes.data ?? []) {
+      const list = unhealthyByStation.get(row.station_id) ?? []
+      list.push({
+        key: row.key,
+        name: row.display_name ?? row.feed_name ?? row.show_name ?? row.key,
+        source: row.source ?? 'rss',
+        status: row.last_ingest_status,
+        lastIngestAt: row.last_ingest_at,
+        itemCount: row.last_item_count,
+        error: row.last_ingest_error,
+      })
+      unhealthyByStation.set(row.station_id, list)
+    }
 
     // Per-station spend: quarter-to-date (groq/openai/total) + month-to-date total.
     type StationCost = { groq: number; openai: number; total: number; month: number }
@@ -253,6 +279,8 @@ export async function GET(request: NextRequest) {
           episodes: episodeCounts[i].counts,
           lastAdvancedAt: episodeCounts[i].lastAdvancedAt,
           activity: activityByStation.get(s.id) ?? { active: 0, waiting: 0, failed: 0 },
+          // Silently-dead/broken feeds for this station (empty list = all healthy).
+          unhealthyFeeds: unhealthyByStation.get(s.id) ?? [],
           cost: spend,
           budget: {
             monthly: effMonthly,

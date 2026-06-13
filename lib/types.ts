@@ -10,6 +10,8 @@ export interface Station {
   rss_base_url: string | null
   mp3_filename_prefix: string | null
   station_id_patterns: string[] | null
+  /** Per-station nu_do API endpoint root (mirrors rss_base_url). Null = nu_do not configured. The API key is a secret in NUDO_API_KEY, not here. */
+  nudo_base_url: string | null
   /** Prefixes stripped from auto-derived show display names (e.g. ["KPFK -"]). Display-only. */
   show_name_strip_prefixes: string[] | null
   /** Sharing-policy class — sets scheduling priority and (Layer B) demo allowance. */
@@ -106,6 +108,16 @@ export interface ShowKey {
   primary_language: string | null
   active: boolean
   email: string | null
+  /** Ingest adapter: 'rss' (default) or 'nudo' (pull via the nu_do API). */
+  source: 'rss' | 'nudo'
+  /** Most recent ingest fetch timestamp (null = never attempted). */
+  last_ingest_at: string | null
+  /** Outcome of the last fetch: ok | empty | http_<code> | error. */
+  last_ingest_status: string | null
+  /** Items the feed returned last fetch (feed-health signal, not new-row count). */
+  last_item_count: number | null
+  /** Error detail from the last failed fetch, if any. */
+  last_ingest_error: string | null
   created_at: string
   updated_at: string | null
 }
