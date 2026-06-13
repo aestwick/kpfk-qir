@@ -136,30 +136,67 @@ async function fetchRssEpisodes(show: ShowRow, station: StationCtx): Promise<Fee
   }
 }
 
-// --- nu_do adapter: backup source for shows not exposed as archive RSS -------
-// NOTE: the body is intentionally unimplemented — it's the one piece that can't
-// be written without the nu_do API contract (auth scheme, the endpoint that
-// lists a show's episodes, how a show maps to a nu_do program id, and the
-// response shape locating the audio URL / air date / duration / title). Once
-// that's known, populate `episodes` (normalized exactly like the RSS adapter)
-// and the entire downstream pipeline — dedupe, insert, transcribe, summarize,
-// compliance — works unchanged. Config plumbing (per-station nudo_base_url +
-// the NUDO_API_KEY secret) is wired so this is a drop-in.
+// --- nu_do adapter: Confessor _nu_do_api.php — the archive source for shows not
+// exposed as a getrss feed. Public API, no auth (CORS open) — see the legacy
+// systems docs. `req=fil&id=<altid>&num=<n>&json=1` returns a show's recent
+// archive entries, each with a direct mp3 URL, def_time (unix air timestamp,
+// seconds) and lsecs (duration, seconds). station.nudoBaseUrl is the full
+// _nu_do_api.php endpoint (e.g. https://confessor.kpfk.org/_nu_do_api.php);
+// show.key is the altid/idkey (same slug QIR already keys shows by).
+const NUDO_FETCH_NUM = 0 // 0 = all currently-available entries (archive prunes by expiry)
+
+type NudoEntry = {
+  mp3?: string
+  def_time?: number | string
+  lsecs?: number | string
+  title?: string
+  date?: string
+}
+
+// PHP json_encode can emit a bare array, a single object, or a numeric-keyed
+// map depending on the result set — normalize all three to a list of entries.
+function nudoEntries(raw: unknown): NudoEntry[] {
+  if (Array.isArray(raw)) return raw as NudoEntry[]
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>
+    if (typeof obj.mp3 === 'string') return [obj as NudoEntry] // single entry
+    const vals = Object.values(obj)
+    if (vals.length && vals.every((v) => v && typeof v === 'object')) return vals as NudoEntry[]
+  }
+  return []
+}
+
 async function fetchNudoEpisodes(show: ShowRow, station: StationCtx): Promise<FeedResult> {
-  const apiKey = process.env.NUDO_API_KEY
-  if (!station.nudoBaseUrl || !apiKey) {
-    const missing = [!station.nudoBaseUrl && 'station.nudo_base_url', !apiKey && 'NUDO_API_KEY env']
-      .filter(Boolean)
-      .join(' + ')
-    return { feedName: null, episodes: [], status: 'error', error: `nu_do not configured (${missing})` }
+  if (!station.nudoBaseUrl) {
+    return { feedName: null, episodes: [], status: 'error', error: 'nu_do not configured (station.nudo_base_url is null)' }
+  }
+  const sep = station.nudoBaseUrl.includes('?') ? '&' : '?'
+  const url = `${station.nudoBaseUrl}${sep}req=fil&id=${encodeURIComponent(show.key)}&num=${NUDO_FETCH_NUM}&json=1`
+  const response = await fetch(url, { signal: AbortSignal.timeout(30000) })
+  if (!response.ok) {
+    console.warn(`[ingest] nu_do fetch failed for ${show.key}: ${response.status}`)
+    return { feedName: null, episodes: [], status: `http_${response.status}`, error: `nu_do ${response.status}` }
   }
 
-  // TODO(nu_do contract): replace the throw below with the real fetch.
-  //   1. const res = await fetch(`${station.nudoBaseUrl}/<list-endpoint>?show=${show.key}`,
-  //        { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(30000) })
-  //   2. map each returned episode -> NormalizedEpisode { mp3Url, title, pubDate, durationMinutes }
-  //   3. return { feedName: <program title or null>, episodes, status: episodes.length ? 'ok' : 'empty' }
-  throw new Error(`nu_do adapter not yet implemented for ${show.key} — awaiting API contract`)
+  const entries = nudoEntries(await response.json())
+  let feedName: string | null = null
+  const episodes: NormalizedEpisode[] = []
+  for (const entry of entries) {
+    const mp3Url = typeof entry.mp3 === 'string' ? entry.mp3.trim() : ''
+    if (!mp3Url) continue
+    if (!feedName && entry.title) feedName = String(entry.title)
+    // def_time is a unix timestamp in SECONDS; pubDate just needs to be a
+    // parseable date string — the archive mp3 filename (kpfk_YYMMDD_HHMMSS…)
+    // refines air_date/air_start downstream as the ground-truth, same as RSS.
+    const def = Number(entry.def_time)
+    const pubDate =
+      Number.isFinite(def) && def > 0 ? new Date(def * 1000).toISOString() : entry.date ? String(entry.date) : null
+    const lsecs = Number(entry.lsecs)
+    const durationMinutes = Number.isFinite(lsecs) && lsecs > 0 ? Math.round(lsecs / 60) : null
+    episodes.push({ mp3Url, title: entry.title ? String(entry.title) : null, pubDate, durationMinutes })
+  }
+
+  return { feedName, episodes, status: episodes.length ? 'ok' : 'empty' }
 }
 
 async function processShow(show: ShowRow, station: StationCtx): Promise<number> {
@@ -371,11 +408,17 @@ export async function processIngest(job: Job) {
   if (showsErr) throw new Error(`Failed to fetch shows: ${showsErr.message}`)
   if (!shows?.length) return { newEpisodes: 0 }
 
-  const activeShows = shows.filter(
-    (s) =>
-      !excludedCategories.some((exc) => s.category?.includes(exc)) &&
-      !excludedKeySet.has((s.key ?? '').trim())
-  )
+  const activeShows = shows.filter((s) => {
+    // An explicit per-key exclusion always wins, even over a nu_do opt-in.
+    if (excludedKeySet.has((s.key ?? '').trim())) return false
+    // Flagging a show source='nudo' is a deliberate "pull this one" — it bypasses
+    // the blanket category exclusion (Music/Español), which only exists to keep
+    // the automatic RSS bulk focused on issue-responsive programming. Without
+    // this, the nu_do backup couldn't reach the music/spirituality shows it was
+    // built for (their feeds are RSS-dead AND category-excluded).
+    if (s.source === 'nudo') return true
+    return !excludedCategories.some((exc) => s.category?.includes(exc))
+  })
 
   // Process shows in parallel batches of 5
   const CONCURRENCY = 5

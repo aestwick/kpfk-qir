@@ -5,11 +5,12 @@
 --
 --   1. A per-show ingest SOURCE. Until now every show was pulled one way:
 --      fetch(rss_base_url || key) and parse the RSS <item> enclosures. Shows
---      whose audio isn't exposed as archive RSS (only via the nu_do API) could
---      never be ingested — they sat as active show_keys with zero episodes.
---      `source` lets a show declare where it's pulled from ('rss' default |
---      'nudo' backup). Per-show (not per-station) because a single station
---      mixes both — KPFK has RSS shows AND nu_do-only shows side by side.
+--      whose audio isn't exposed as a getrss feed (only via the Confessor
+--      _nu_do_api.php archive API) could never be ingested — they sat as active
+--      show_keys with zero episodes. `source` lets a show declare where it's
+--      pulled from ('rss' default | 'nudo' backup). Per-show (not per-station)
+--      because a single station mixes both — KPFK has RSS shows AND nu_do-only
+--      shows side by side.
 --
 --   2. Per-show ingest HEALTH. A feed that 404s or returns no items was
 --      previously swallowed (console.warn + return 0) — invisible, which is why
@@ -17,9 +18,9 @@
 --      outcome of each fetch so the Master Control overview can surface feeds
 --      that were attempted but came back empty/broken.
 --
--- Plus a per-station nu_do base URL, mirroring stations.rss_base_url. The nu_do
--- API KEY is intentionally NOT stored here (it's a secret; it lives in the
--- NUDO_API_KEY env var) — this column is only the non-secret endpoint root.
+-- Plus a per-station nu_do base URL, mirroring stations.rss_base_url. nu_do is
+-- the Pacifica-wide Confessor archive API (_nu_do_api.php) — public, no auth
+-- (CORS open), so there's no secret to store; this is just the endpoint root.
 --
 -- All additive and backfill-safe: source defaults to 'rss', so every existing
 -- show keeps its current behavior; health columns start null (= never attempted).
@@ -38,7 +39,14 @@ COMMENT ON COLUMN show_keys.last_ingest_status IS 'Outcome of the most recent in
 COMMENT ON COLUMN show_keys.last_item_count IS 'Items the feed returned on the last fetch (feed-health signal — distinguishes a healthy feed with nothing new from a feed returning nothing).';
 
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS nudo_base_url TEXT;
-COMMENT ON COLUMN stations.nudo_base_url IS 'Per-station nu_do API endpoint root (mirrors rss_base_url). The nu_do API key is a secret and lives in NUDO_API_KEY, not here. Null = nu_do not configured for this station.';
+COMMENT ON COLUMN stations.nudo_base_url IS 'Per-station Confessor _nu_do_api.php endpoint (e.g. https://confessor.kpfk.org/_nu_do_api.php). Public API, no auth. The ingest adapter appends ?req=fil&id=<key>&num=&json=1. Null = nu_do not configured for this station.';
+
+-- Seed KPFK's Confessor endpoint (known). Other Pacifica stations have their own
+-- Confessor instance (confessor.<slug>.org) — left null until confirmed, exactly
+-- as rss_base_url was rolled out station by station.
+UPDATE stations
+  SET nudo_base_url = 'https://confessor.kpfk.org/_nu_do_api.php'
+  WHERE slug = 'kpfk' AND nudo_base_url IS NULL;
 
 -- Surfacing query support: find active shows whose last attempted fetch failed.
 CREATE INDEX IF NOT EXISTS idx_show_keys_ingest_health

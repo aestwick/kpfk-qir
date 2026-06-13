@@ -10,7 +10,7 @@ export interface Station {
   rss_base_url: string | null
   mp3_filename_prefix: string | null
   station_id_patterns: string[] | null
-  /** Per-station nu_do API endpoint root (mirrors rss_base_url). Null = nu_do not configured. The API key is a secret in NUDO_API_KEY, not here. */
+  /** Per-station Confessor _nu_do_api.php endpoint (mirrors rss_base_url). Public API, no auth. Null = nu_do not configured. */
   nudo_base_url: string | null
   /** Prefixes stripped from auto-derived show display names (e.g. ["KPFK -"]). Display-only. */
   show_name_strip_prefixes: string[] | null
