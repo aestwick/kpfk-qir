@@ -71,6 +71,17 @@ are the primary evidence. Rationale is grounded in the commit message and
   locks. *When:* 2026-06-02. *Commits:* `4aa16a4`, `b5bba3e`, `ff04341`,
   `4092e4b` (Master Control glance/cockpit). Spec: `d7f9110`, `2cbfa53`.
 
+- **A1.8 — Show Audit: per-show, per-period review-and-reprocess.** *Why:*
+  operators need to inspect and re-run a single show over a date window
+  independent of the global pipeline (catch gaps, re-transcribe, re-summarize),
+  with quarter awareness and a pre-flight + stale-worker check. *When:*
+  2026-03-17 → 03-19. *Commits:* `1417215`, `055736e`, `6ce2e85`, `f7c0e7c`.
+
+- **A1.9 — Pipeline health monitoring & stale-worker detection.** *Why:* silent
+  stalls were the dominant failure mode of the old n8n flows; surface worker
+  liveness and a pre-flight check rather than discovering a stuck queue by absence
+  of output. *When:* 2026-03-09 / 03-19. *Commits:* `7fd3320`, `f7c0e7c`.
+
 ### A2. Multi-station (multi-tenancy)
 
 - **A2.1 — One codebase / one DB / one deployment, isolated by `station_id` +
@@ -122,6 +133,11 @@ are the primary evidence. Rationale is grounded in the commit message and
   operators needed to see offense concentration by day/time and by show. *When:*
   2026-05-30. *Commits:* `3596703`, `0dcdd44` (drill-through). Spec: `90db1ef`,
   `06f8d40`.
+
+- **A3.5 — Compliance report page: shareable URL + PDF export, playable.** *Why:*
+  the report must be sharable outside the dashboard and resolve a flag to its
+  audio via VTT-excerpt lookup ("Listen at"). *When:* 2026-03-19 → 06-01.
+  *Commits:* `f83df3f`, `a25304c`, `930b809`, `b69beac`.
 
 ### A4. Transcript search
 
@@ -175,6 +191,70 @@ are the primary evidence. Rationale is grounded in the commit message and
   badge + permission-gated Web Notification covers it. *When:* 2026-06-02.
   *Commits:* `5891dba`, `366274f`. *Supersedes* the Resend decision (`3e2d3df`,
   `781aa73`) — Resend was locked in, then dropped for v1.
+
+- **A2.6 — Per-station Members management UI; roles enforced server-side.**
+  *Why:* station admins manage their own roster (viewer/editor/admin) without
+  super-admin involvement; role is enforced on the API, not just hidden in UI.
+  *When:* 2026-05-29. *Commit:* `a81de03`, migration 019.
+
+- **A2.7 — Authenticate the SSE activity stream like every other route.** *Why:*
+  the live event stream is data egress; it must carry the same auth/RLS as the
+  REST routes, not be an open side-channel. *When:* 2026-05-29. *Commits:*
+  `f8c916a`, `b28655c`.
+
+### A9. Settings & configuration philosophy
+
+- **A9.1 — Config lives in the database, editable from the dashboard — not env
+  vars.** *Why:* categories, batch sizes, models, and **all AI prompts** must be
+  tunable without a redeploy; the Prompts tab surfaces every prompt pre-populated
+  with its default. *When:* 2026-03-19 → 03-30. *Commits:* `befb636`, `60c71df`.
+
+- **A9.2 — Settings values are type-coerced; string `'false'` is not truthy.**
+  *Why:* DB-stored config round-trips as strings; a naive truthiness check made
+  `'false'` enable features. *When:* 2026-03-19. *Commit:* `abf8e50`.
+
+- **A9.3 — Settings cache (60s TTL) invalidated on write.** *Why:* edits should
+  feel immediate; pause/resume especially can't wait out the TTL (see also A1.6,
+  which reads the pause flag fully uncached). *When:* 2026-05-29. *Commit:*
+  `24c0427`.
+
+### A10. Dashboard & UX conventions
+
+- **A10.1 — Job/queue counts come from the DB (episode status), not BullMQ job
+  counts.** *Why:* BullMQ counts drift from reality (completed/cleaned jobs);
+  episode status is the source of truth operators care about. *When:* 2026-03-10
+  → 03-19. *Commits:* `65e9262`, `ee60619`, `8958c03`.
+
+- **A10.2 — Jobs dashboard color discipline: one color = one meaning.** *Why:*
+  inconsistent status colors made the board unreadable; dedupe and reclaim space.
+  *When:* 2026-05-31. *Commit:* `111bb34` (redesign `2989ba4`).
+
+- **A10.3 — Quarter filters default to the current quarter; never show future
+  quarters.** *Why:* the report is quarterly; future quarters are meaningless and
+  a wrong default wastes operator attention. *When:* 2026-06-01. *Commit:*
+  `ffc7931`.
+
+- **A10.4 — Origin-aware back link / breadcrumb (return to where you came
+  from).** *Why:* episode/compliance detail is reached from several lists; the
+  back action should restore the prior filtered view, not a fixed page. *When:*
+  2026-06-01. *Commit:* `3ee6734`, `3da1d1b`.
+
+- **A10.5 — Audio player auto-scroll defaults off.** *Why:* auto-scrolling
+  captions fight the user when scrubbing/reading; opt-in, not default. *When:*
+  2026-03-09. *Commit:* `4e3a56b`.
+
+### A11. Downloads & notifications
+
+- **A11.1 — Source-file bundle downloads (transcripts + VTT + MP3 + CSV).**
+  *Why:* staff need the raw artifacts for archival/FCC alongside the generated
+  report. *When:* 2026-06-01. *Commit:* `63ac89d` (spec). (Email delivery deferred
+  — see A8.2.)
+
+### A12. Deployment
+
+- **A12.1 — DB migrations are applied during deploy.** *Why:* schema and code
+  must land together; a manual migration step is a foot-gun for a self-running
+  app. *When:* 2026-05-29. *Commit:* `0012807`.
 
 ---
 
