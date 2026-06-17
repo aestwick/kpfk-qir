@@ -53,6 +53,11 @@ export const AUDIT_ACTIONS = {
   SUPER_ADMIN_GRANT: 'users.super.grant',
   SUPER_ADMIN_REVOKE: 'users.super.revoke',
 
+  // API key lifecycle (programmatic read API). Attributes the actor on the
+  // service-role writes that DB triggers would otherwise record as 'system'.
+  API_KEY_CREATE: 'api_key.create',
+  API_KEY_REVOKE: 'api_key.revoke',
+
   // Exports / downloads
   EPISODES_EXPORT: 'episodes.export',
   REPORT_EXPORT: 'report.export',

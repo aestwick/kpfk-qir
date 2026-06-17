@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { bumpCacheVersion } from '@/lib/api-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,6 +116,8 @@ export async function PATCH(request: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
+      // Invalidate the public read API's QIR cache so the new final report shows.
+      await bumpCacheVersion(stationId, 'qir')
       return NextResponse.json({ ok: true, status: 'final' })
     }
 
@@ -128,6 +131,7 @@ export async function PATCH(request: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
+      await bumpCacheVersion(stationId, 'qir')
       return NextResponse.json({ ok: true, status: 'draft' })
     }
 
@@ -146,6 +150,7 @@ export async function PATCH(request: NextRequest) {
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
+      await bumpCacheVersion(stationId, 'qir')
       return NextResponse.json({ ok: true })
     }
 
