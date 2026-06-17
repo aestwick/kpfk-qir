@@ -1,4 +1,4 @@
-import IORedis from 'ioredis'
+import { getRedis as redis } from './redis'
 
 // ===========================================================================
 // Per-(station, stage) chain lock — the load-bearing primitive of the
@@ -16,17 +16,8 @@ import IORedis from 'ioredis'
 // BullMQ's `delayed` set, where the zero-progress backoff parks jobs.
 // ===========================================================================
 
-// Lazy single client, separate from BullMQ's pool, opened on first use (mirrors
-// the lazy pattern in lib/queue.ts so importing this never opens a connection).
-let client: IORedis | null = null
-function redis(): IORedis {
-  if (!client) {
-    client = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
-      maxRetriesPerRequest: null,
-    })
-  }
-  return client
-}
+// The Redis client is the shared lazy one from lib/redis.ts (imported as
+// `redis`), separate from BullMQ's pool but a single connection across the app.
 
 export type PipelineStage = 'transcribe' | 'summarize' | 'compliance'
 

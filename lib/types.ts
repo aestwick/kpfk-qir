@@ -236,6 +236,27 @@ export interface QirDraft {
   updated_at: string
 }
 
+// A station-scoped API key for the programmatic read API (app/api/v1/*). The raw
+// secret is never stored — only key_hash (sha256) and a non-secret key_prefix for
+// UI identification. `scopes` gates which resources the key may read. See
+// migration 033 and lib/api-auth.ts.
+export interface ApiKey {
+  id: number
+  station_id: string
+  name: string
+  key_prefix: string
+  key_hash: string
+  scopes: string[]
+  rate_limit_per_min: number
+  active: boolean
+  last_used_at: string | null
+  created_by: string | null
+  created_at: string
+}
+
+// The read scopes a key may carry. Each /api/v1 endpoint requires one.
+export type ApiScope = 'qir' | 'episodes' | 'transcripts' | 'shows' | 'usage'
+
 export interface ComplianceFlag {
   id: number
   episode_id: number

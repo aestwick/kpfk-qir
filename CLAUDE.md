@@ -64,6 +64,11 @@ lib/
   audit.ts          — Append-only audit log helper + the event registry (see Audit Logging)
   types.ts          — TypeScript interfaces for all database tables
   qir-format.ts     — Report formatting and date range helpers
+  redis.ts          — Shared lazy ioredis client (used by locks, ratelimit, api-cache)
+  api-auth.ts       — API-key auth for the public read API (hash lookup + scopes)
+  ratelimit.ts      — Redis sliding-window rate limiter (per key)
+  api-cache.ts      — Redis response cache with versioned invalidation
+  api-handler.ts    — withApiKey() wrapper: auth → scope → rate-limit → cache → ETag
 ```
 
 ### API Routes
@@ -87,6 +92,17 @@ app/api/
   admin/overview/route.ts   — GET all-station pipeline overview / POST master controls
                               (super-admin only: pause_all, pause/resume_station,
                               advance, retry/clear failed; see Pipeline Pause)
+  keys/route.ts             — CRUD for API keys (JWT auth, admin-gated): POST mint
+                              (raw secret returned once), GET list (prefix only),
+                              PATCH revoke/activate, DELETE
+  v1/                       — Public read API (API-key auth, GET-only). See "Public Read API".
+    qir/route.ts                  — finalized reports (filter year/quarter/status)
+    qir/[year]/q[quarter]/route.ts — one finalized report + curated entries
+    episodes/route.ts             — paginated episodes (?since cursor for sync)
+    episodes/[id]/route.ts        — episode detail (?include=transcript)
+    episodes/[id]/transcript/route.ts — captions: VTT (?format=vtt) or JSON
+    shows/route.ts                — program list
+    usage/route.ts                — AI cost/usage summary
 ```
 
 ### Dashboard Pages (all `'use client'`)
@@ -139,6 +155,9 @@ supabase/migrations/
   014_rls.sql                   — user_station_ids() + RLS policies on all
                                   tenant tables
   015_seed_pacifica_stations.sql — Seeds KPFA, WPFW, KPFT, WBAI
+  ...
+  033_api_keys.sql              — api_keys table (station-scoped) + RLS
+                                  (admin-write, member-read) + audit trigger
 ```
 
 **Key tables:**
@@ -150,6 +169,7 @@ supabase/migrations/
 - `qir_drafts` — Versioned QIR reports (draft/final; `station_id`-scoped)
 - `transcript_corrections` — Find-and-replace rules applied post-transcription (`station_id`-scoped)
 - `stations` / `station_users` / `super_admins` / `station_settings` — multi-tenant tables (see Multi-Station Model)
+- `api_keys` — Station-scoped keys for the public read API. Stores `key_hash` (sha256 of the secret — never the secret), `key_prefix` (non-secret, for UI), `scopes[]`, `rate_limit_per_min`, `active`, `last_used_at`. RLS: members read their station's key metadata, only admins/super-admins write (migration 033).
 
 ### Config & Deploy
 
@@ -179,6 +199,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 **Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.
 
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
+
+**Public Read API (`/api/v1/*`)** is a versioned, read-only (GET) API for external consumers (e.g. a sibling podcast app pulling captions/VTT and generating tags). Every route is built from `lib/api-handler.ts#withApiKey(handler, { scope, cache })`, which runs the request through, in order: **API-key auth** (`lib/api-auth.ts` — sha256 hash lookup against `api_keys`, no Supabase JWT) → **scope gate** (`requireScope`) → **per-key rate limit** (`lib/ratelimit.ts` — atomic Redis sliding window, fails *open*) → **Redis response cache** (`lib/api-cache.ts` — versioned invalidation, fails *open*) → the handler, then sets `ETag` (with `If-None-Match` → 304), `Cache-Control: private`, `X-RateLimit-*`, and `X-Cache`. Handlers run as **service-role** (`supabaseAdmin`) with an explicit `.eq('station_id', ctx.stationId)` as the tenancy guard (the worker convention) — RLS on `api_keys` and the tenant tables is the backstop. Keys are **station-scoped** and carry **scopes**: `qir`, `episodes`, `transcripts` (captions — opt-in, *not* in the default scope set), `shows`, `usage`. The cache is invalidated on QIR finalize via `bumpCacheVersion(stationId, 'qir')` in `app/api/qir/route.ts`; volatile resources (episodes/usage) rely on short TTLs and the `?since` updated_at cursor instead. Keys are minted/revoked by station admins at `/dashboard/api-keys` (→ `app/api/keys/route.ts`); the raw secret is shown **once** at creation and only its hash is stored. **When you add a new v1 endpoint, reuse `withApiKey`; when you add a scope, add it to `ApiScope` in `lib/types.ts` and `VALID_SCOPES` in `app/api/keys/route.ts`.**
 
 **Audit logging** is hybrid and append-only (`audit_log`, migration 028; super-admin-only at `/dashboard/audit`). DB triggers (`audit_row_change()`) capture *every* mutation on tenant tables — user-attributed via `auth.uid()`, or `system` for worker/service-role writes. App-layer `lib/audit.ts#logAuditEvent` captures what triggers can't: reads/views, auth events, exports/downloads, and worker stage-completion events. Retention is **permanent** (no TTL/cron cleanup); the dashboard shows a trailing 30-day window with a "full history retained" banner. **When you add a new app-layer event type, register it in `lib/audit.ts` — `AUDIT_OPERATIONS` (must also match the DB `operation` CHECK) and `AUDIT_ACTIONS` are the single source of truth; client-postable events go in `CLIENT_AUDIT_EVENTS`. When you add a new tenant table, add it to the trigger loop in migration 028.** Heavy strings (>2000 chars) are redacted to `<redacted: N chars>` markers at capture so the permanent table stays lean.
 
