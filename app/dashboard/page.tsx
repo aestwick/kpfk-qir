@@ -152,6 +152,7 @@ export default function DashboardOverview() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [gapsCollapsed, setGapsCollapsed] = useState(false)
+  const [coverageCollapsed, setCoverageCollapsed] = useState(true)
   const [nextIngest, setNextIngest] = useState(getNextIngestMinutes())
   const { toast } = useToast()
 
@@ -273,7 +274,8 @@ export default function DashboardOverview() {
 
   if (!data) return <div className="text-red-600 card p-6">Failed to load dashboard data.</div>
 
-  const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
+  const { counts, queues, cost, categories, shows, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
+  const coveredShows = shows.filter((s) => s.summarized > 0)
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -639,6 +641,39 @@ export default function DashboardOverview() {
                     </a>
                   ))}
                 </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══ 7. SHOW COVERAGE ═══ */}
+      {coveredShows.length > 0 && (
+        <div className="card overflow-hidden">
+          <button
+            onClick={() => setCoverageCollapsed(!coverageCollapsed)}
+            className="w-full px-5 py-3.5 flex items-center justify-between hover:bg-warm-50 dark:hover:bg-warm-700/50 transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <h3 className="section-header">Show Coverage</h3>
+              <span className="badge bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 tabular-nums">{coveredShows.length}</span>
+            </div>
+            <span className={`text-warm-400 text-xs transition-transform duration-200 ${coverageCollapsed ? '' : 'rotate-90'}`}>▶</span>
+          </button>
+          {!coverageCollapsed && (
+            <div className="px-5 pb-5 animate-fade-in">
+              <p className="text-xs text-warm-500 mb-2.5">Shows with summarized episodes this quarter (episode count shown):</p>
+              <div className="flex flex-wrap gap-1.5">
+                {coveredShows.map((s) => (
+                  <a
+                    key={s.name}
+                    href={`/dashboard/episodes?show=${encodeURIComponent(s.name)}&quarter=${data.quarter.year}-Q${data.quarter.quarter}`}
+                    className="text-xs px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:border-emerald-800/40 dark:text-emerald-300 dark:hover:bg-emerald-900/30 transition-colors inline-flex items-center gap-1.5"
+                  >
+                    <span>{s.name}</span>
+                    <span className="tabular-nums font-semibold bg-emerald-100 dark:bg-emerald-800/40 rounded px-1">{s.summarized}</span>
+                  </a>
+                ))}
               </div>
             </div>
           )}
