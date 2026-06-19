@@ -50,16 +50,32 @@ export async function processSummarize(job: Job) {
   const embeddingModel = await getEmbeddingModel(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
-  // Get candidate transcribed episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
-  const { data: candidates, error } = await supabaseAdmin
+  // Targeted recovery: a job carrying an explicit episodeId summarizes that single
+  // episode regardless of quarter. The batch path is quarter-scoped, so a
+  // previous quarter's transcribed straggler (e.g. one just recovered by a
+  // targeted re-transcribe) can ONLY be summarized this way. Drives the
+  // per-episode "Re-summarize" action and the transcribe→summarize recovery chain.
+  const targetId = typeof job.data?.episodeId === 'number' ? (job.data.episodeId as number) : undefined
+
+  // Get candidate transcribed episodes. Targeted: just the requested id (any
+  // quarter). Batch: current quarter only (including null air_date created this
+  // quarter — older ingests didn't populate it).
+  let candidateQuery = supabaseAdmin
     .from('episode_log')
     .select('id, category')
     .eq('station_id', stationId)
     .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-    .order('created_at', { ascending: true })
-    .limit(batchSize)
+
+  if (targetId) {
+    candidateQuery = candidateQuery.eq('id', targetId)
+  } else {
+    candidateQuery = candidateQuery
+      .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+      .order('created_at', { ascending: true })
+      .limit(batchSize)
+  }
+
+  const { data: candidates, error } = await candidateQuery
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
   if (!candidates?.length) {
@@ -67,10 +83,13 @@ export async function processSummarize(job: Job) {
     return { summarized: 0 }
   }
 
-  // Drop excluded categories before claiming so they stay transcribed (not stuck mid-stage)
-  const claimIds = candidates
-    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
-    .map((ep) => ep.id)
+  // Drop excluded categories before claiming so they stay transcribed (not stuck
+  // mid-stage). A targeted recovery is an explicit operator request, so it
+  // bypasses the exclusion filter.
+  const claimIds = (targetId
+    ? candidates
+    : candidates.filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
+  ).map((ep) => ep.id)
 
   if (!claimIds.length) {
     console.log('[summarize] only excluded-category episodes transcribed')
@@ -243,6 +262,21 @@ ${transcriptText}`
         })
         .eq('id', episode.id)
     }
+  }
+
+  // A targeted single-episode recovery doesn't drive the quarter-batch continue
+  // chain (it's one episode, already done above).
+  if (targetId) {
+    if (summarized > 0) {
+      void logAuditEvent({
+        action: AUDIT_ACTIONS.SUMMARIZE_COMPLETE,
+        operation: 'update',
+        stationId,
+        resourceType: 'episode',
+        metadata: { summarized, remaining: false, episodeId: targetId },
+      })
+    }
+    return { summarized, remaining: false }
   }
 
   // Check if more transcribed episodes remain after this batch (this station only —

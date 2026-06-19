@@ -210,16 +210,32 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   const batchSize = await getTranscribeBatchSize(stationId)
   const { start, end } = getCurrentQuarterBounds()
 
-  // Get candidate pending episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
-  const { data: candidates, error } = await supabaseAdmin
+  // Targeted recovery: a job carrying an explicit episodeId re-transcribes that
+  // single episode regardless of quarter. The batch path below is quarter-scoped,
+  // so out-of-quarter stragglers (a previous quarter's failed/transcript_missing
+  // episodes) can ONLY be reprocessed this way. Drives the per-episode
+  // "Re-transcribe" action and bulk error recovery.
+  const targetId = typeof job.data?.episodeId === 'number' ? (job.data.episodeId as number) : undefined
+
+  // Get candidate pending episodes. Targeted: just the requested id (any quarter).
+  // Batch: current quarter only (including null air_date created this quarter —
+  // older ingests didn't populate it).
+  let candidateQuery = supabaseAdmin
     .from('episode_log')
     .select('id, category')
     .eq('station_id', stationId)
     .eq('status', 'pending')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-    .order('created_at', { ascending: true })
-    .limit(batchSize)
+
+  if (targetId) {
+    candidateQuery = candidateQuery.eq('id', targetId)
+  } else {
+    candidateQuery = candidateQuery
+      .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+      .order('created_at', { ascending: true })
+      .limit(batchSize)
+  }
+
+  const { data: candidates, error } = await candidateQuery
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
   if (!candidates?.length) {
@@ -227,10 +243,13 @@ async function runTranscribeBatch(job: Job, stationId: string) {
     return { transcribed: 0 }
   }
 
-  // Drop excluded categories before claiming so they stay pending (not stuck mid-stage)
-  const claimIds = candidates
-    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
-    .map((ep) => ep.id)
+  // Drop excluded categories before claiming so they stay pending (not stuck
+  // mid-stage). A targeted recovery is an explicit operator request, so it
+  // bypasses the exclusion filter.
+  const claimIds = (targetId
+    ? candidates
+    : candidates.filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
+  ).map((ep) => ep.id)
 
   if (!claimIds.length) {
     console.log('[transcribe] only excluded-category episodes pending')
@@ -419,6 +438,12 @@ async function runTranscribeBatch(job: Job, stationId: string) {
         // ignore cleanup errors
       }
     }
+  }
+
+  // A targeted single-episode recovery doesn't drive the quarter-batch continue
+  // chain; it hands off to a targeted summarize instead (see workers/index.ts).
+  if (targetId) {
+    return { transcribed, remaining: false }
   }
 
   // Check if more pending episodes remain after this batch (this station only —

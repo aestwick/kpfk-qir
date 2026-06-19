@@ -93,7 +93,12 @@ export function invalidateSetting(key?: string): void {
 }
 
 export async function getExcludedCategories(stationId: string): Promise<string[]> {
-  return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
+  // Single source of truth: the configured list (station_settings → global
+  // qir_settings). No hidden code default — an absent or empty config means
+  // "exclude nothing", which is exactly what the Settings UI renders for an unset
+  // list, so the displayed config and what the workers enforce can never disagree.
+  // To exclude formats like Music/Español, set them explicitly in the dashboard.
+  return (await getSetting<string[]>('excluded_categories', stationId)) ?? []
 }
 
 // Whether the scheduled archive show-key discovery sync runs for a station.
