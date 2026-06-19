@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { transcribeQueue } from '@/lib/queue'
 
 export const dynamic = 'force-dynamic'
 
@@ -107,17 +108,52 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
 
     if (body.action === 'bulk-retry') {
+      // Recover every stranded error state, not just 'failed': 'transcript_missing'
+      // (transcribed-but-no-transcript) and 'dead' (retry-exhausted) episodes were
+      // previously orphaned — the button skipped them and there was no other bulk
+      // path. Grab the ids first so each can be re-queued individually.
+      const RETRYABLE_STATUSES = ['failed', 'transcript_missing', 'dead']
+      const { data: toRetry, error: selErr } = await supabase
+        .from('episode_log')
+        .select('id')
+        .eq('station_id', stationId)
+        .in('status', RETRYABLE_STATUSES)
+
+      if (selErr) {
+        return NextResponse.json({ error: selErr.message }, { status: 500 })
+      }
+
+      const ids = (toRetry ?? []).map((e) => e.id)
+      if (ids.length === 0) {
+        return NextResponse.json({ ok: true, message: 'No error episodes to retry', count: 0 })
+      }
+
+      // Reset to pending and clear the retry counter so a fresh run isn't
+      // immediately re-killed by the auto-retry dead threshold.
       const { error } = await supabase
         .from('episode_log')
-        .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
+        .update({ status: 'pending', error_message: null, retry_count: 0, updated_at: new Date().toISOString() })
         .eq('station_id', stationId)
-        .eq('status', 'failed')
+        .in('id', ids)
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
 
-      return NextResponse.json({ ok: true, message: 'All failed episodes reset to pending' })
+      // Re-queue each as a TARGETED transcribe (carries episodeId) so it runs
+      // regardless of quarter — most stranded episodes are from past quarters, which
+      // the quarter-scoped batch workers never pick up. A targeted transcribe chains
+      // into a targeted summarize on success (see workers/index.ts), so each is
+      // driven end-to-end without re-running the whole archive.
+      await transcribeQueue.addBulk(
+        ids.map((episodeId) => ({ name: 're-transcribe', data: { episodeId, stationId } }))
+      )
+
+      return NextResponse.json({
+        ok: true,
+        message: `Re-queued ${ids.length} error episode(s) for reprocessing`,
+        count: ids.length,
+      })
     }
 
     if (body.action === 'bulk-fix-dates') {

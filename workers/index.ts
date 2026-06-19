@@ -128,6 +128,14 @@ transcribeWorker.on('completed', async (job) => {
     console.log(`[transcribe] ${job.data.source} auto-chain → summarize`)
     await summarizeQueue.add('chain-summarize', { stationId, source: job.data.source, chain: true }, { priority })
   }
+  // Targeted recovery hand-off: a single-episode re-transcribe (carries episodeId,
+  // not a quarter batch) flows straight into a targeted summarize for the same
+  // episode, which also bypasses the quarter window. Keeps cross-quarter recovery
+  // moving end-to-end (transcript_missing → transcribed → summarized).
+  if (job.data?.episodeId && count > 0 && !(await isPipelinePaused(stationId))) {
+    console.log(`[transcribe] targeted recovery → summarize ep ${job.data.episodeId}`)
+    await summarizeQueue.add('re-summarize', { stationId, episodeId: job.data.episodeId }, { priority })
+  }
 })
 transcribeWorker.on('failed', (job, err) => {
   console.error(`[transcribe] failed:`, err.message)

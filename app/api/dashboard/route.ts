@@ -304,12 +304,12 @@ export async function GET(request: NextRequest) {
     Object.entries(procTimes).map(([op, data]) => [op, data.count > 0 ? data.total / data.count : 0])
   )
 
-  // Coverage gaps — exclude the station's non-issue formats (music/etc.) so the
-  // gap list stays meaningful. Honor the per-station excluded_categories setting
-  // (so e.g. a station scanning Español still surfaces it as a coverage candidate),
-  // falling back to the standard set when a station hasn't configured its own.
-  const configuredExclusions = await getExcludedCategories(stationId)
-  const excludedShowCategories = configuredExclusions.length ? configuredExclusions : ['Music', 'Español']
+  // Coverage gaps — drop only the formats the station has explicitly excluded
+  // (excluded_categories), so the gap list matches what the pipeline actually
+  // pulls. No hidden fallback set: if nothing is configured, every active show
+  // (including Music/Español) is a coverage candidate — same single source of
+  // truth the workers use (see lib/settings#getExcludedCategories).
+  const excludedShowCategories = await getExcludedCategories(stationId)
   const activeShowsList = (activeShows.data ?? []).filter(
     (s) => !excludedShowCategories.some((exc) => s.category?.includes(exc))
   )
