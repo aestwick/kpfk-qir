@@ -92,8 +92,11 @@ export function invalidateSetting(key?: string): void {
   }
 }
 
+// Categories to skip at ingest, matched against show_keys.category. Defaults to
+// none — stations include everything (incl. Music/Español) unless they
+// explicitly set an exclusion list via station_settings/qir_settings.
 export async function getExcludedCategories(stationId: string): Promise<string[]> {
-  return (await getSetting<string[]>('excluded_categories', stationId)) ?? ['Music', 'Español']
+  return (await getSetting<string[]>('excluded_categories', stationId)) ?? []
 }
 
 // Whether the scheduled archive show-key discovery sync runs for a station.
