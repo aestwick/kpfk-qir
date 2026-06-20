@@ -36,6 +36,7 @@ async function backfillNullCategories(stationId: string, slug: string, rssBaseUr
     .select('key')
     .eq('station_id', stationId)
     .is('category', null)
+    .is('archived_at', null) // don't waste feed fetches re-resolving archived shows
   if (error) throw new Error(`[discover-sync] backfill: failed to load uncategorized keys: ${error.message}`)
   if (!rows || rows.length === 0) {
     console.log(`[discover-sync] ${slug}: no uncategorized shows to backfill`)

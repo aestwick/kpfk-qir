@@ -53,6 +53,7 @@ interface Show {
   primary_language: string | null
   active: boolean
   email: string | null
+  archived_at: string | null
   created_at: string
   updated_at: string | null
   episode_count: number
@@ -142,6 +143,9 @@ export default function SettingsPage() {
   // Per-station prefixes stripped from auto-derived show names (e.g. "KPFK -").
   const [stripPrefixes, setStripPrefixes] = useState<string[] | null>(null)
   const [showSearch, setShowSearch] = useState('')
+  // Which lifecycle state to show: live working set (all = active+inactive),
+  // just active, just inactive, or archived (soft-deleted) shows.
+  const [showStatusFilter, setShowStatusFilter] = useState<'all' | 'active' | 'inactive' | 'archived'>('all')
   const [editingShow, setEditingShow] = useState<{ id: number; field: string } | null>(null)
   const [editingShowValue, setEditingShowValue] = useState('')
   const [savingShow, setSavingShow] = useState<number | null>(null)
@@ -710,6 +714,31 @@ export default function SettingsPage() {
     setSavingShow(null)
   }
 
+  // Archive (soft-delete) or restore a show key. Archiving hides it from the
+  // default grid, stops it ingesting, and keeps discovery sync from re-importing
+  // it; restoring clears the tombstone (leaving it inactive to re-activate).
+  async function toggleShowArchived(show: Show) {
+    const archiving = !show.archived_at
+    setSavingShow(show.id)
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resource: 'show', id: show.id, archived: archiving }),
+      })
+      if (res.ok) {
+        setShows(prev => prev.map(s => s.id === show.id
+          ? { ...s, archived_at: archiving ? new Date().toISOString() : null, active: archiving ? false : s.active }
+          : s))
+      } else {
+        toast('error', archiving ? 'Failed to archive show' : 'Failed to restore show')
+      }
+    } catch {
+      toast('error', 'Network error')
+    }
+    setSavingShow(null)
+  }
+
   // Add/remove a single feed from the excluded_show_keys blocklist (by show key).
   // Per-feed: excluding dn9 leaves the sibling dn6 untouched.
   async function toggleShowExcluded(show: Show) {
@@ -772,8 +801,25 @@ export default function SettingsPage() {
     if (csvFileRef.current) csvFileRef.current.value = ''
   }
 
+  // ── Status counts (drive the Active/Inactive/Archived toggle) ──
+  const statusCounts = {
+    all: shows.filter((s) => !s.archived_at).length,
+    active: shows.filter((s) => s.active && !s.archived_at).length,
+    inactive: shows.filter((s) => !s.active && !s.archived_at).length,
+    archived: shows.filter((s) => !!s.archived_at).length,
+  }
+
   // ── Filtered shows ──
   const filteredShows = shows.filter(s => {
+    // Lifecycle filter. Archived shows only appear in the 'archived' view; every
+    // other view hides them (soft-deleted = out of the working set).
+    if (showStatusFilter === 'archived') {
+      if (!s.archived_at) return false
+    } else {
+      if (s.archived_at) return false
+      if (showStatusFilter === 'active' && !s.active) return false
+      if (showStatusFilter === 'inactive' && s.active) return false
+    }
     if (!showSearch) return true
     const q = showSearch.toLowerCase()
     return [s.show_name, s.display_name, s.feed_name, s.key, s.show_group]
@@ -1286,6 +1332,32 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          {/* Lifecycle filter: live working set, just active/inactive, or the
+              archived (soft-deleted) shows. */}
+          <div className="inline-flex rounded-md border overflow-hidden text-sm dark:border-warm-600">
+            {([
+              { key: 'all', label: 'All' },
+              { key: 'active', label: 'Active' },
+              { key: 'inactive', label: 'Inactive' },
+              { key: 'archived', label: 'Archived' },
+            ] as const).map((f) => (
+              <button
+                key={f.key}
+                onClick={() => setShowStatusFilter(f.key)}
+                className={`px-3 py-1.5 border-l first:border-l-0 dark:border-warm-600 transition-colors ${
+                  showStatusFilter === f.key
+                    ? 'bg-gray-900 text-white dark:bg-warm-100 dark:text-warm-900'
+                    : 'text-gray-600 hover:bg-gray-50 dark:text-warm-300 dark:hover:bg-warm-800'
+                }`}
+              >
+                {f.label}
+                <span className={`ml-1.5 text-xs ${showStatusFilter === f.key ? 'opacity-80' : 'text-gray-400 dark:text-warm-500'}`}>
+                  {statusCounts[f.key]}
+                </span>
+              </button>
+            ))}
+          </div>
+
           <BulkShowEntry
             existingKeys={shows.map((s) => s.key)}
             onAdded={refreshShows}
@@ -1305,12 +1377,13 @@ export default function SettingsPage() {
                   <th className="text-center px-3 py-2 font-medium">Active</th>
                   <th className="text-center px-3 py-2 font-medium" title="Exclude this feed (show key) from ingest. Only this key is dropped — other airings of the same show keep running.">Exclude</th>
                   <th className="text-right px-3 py-2 font-medium">Episodes</th>
+                  <th className="text-center px-3 py-2 font-medium" title="Archive (soft-delete) a show key: hides it here, stops ingest, and keeps discovery sync from re-importing it. Restore brings it back.">Archive</th>
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-warm-700">
                 {filteredShows.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
-                    {showSearch ? 'No shows match your filter' : 'No shows found'}
+                  <tr><td colSpan={10} className="px-3 py-6 text-center text-gray-500 dark:text-warm-400">
+                    {showSearch || showStatusFilter !== 'all' ? 'No shows match your filter' : 'No shows found'}
                   </td></tr>
                 ) : groupedShows.map((group) => (
                   <Fragment key={group.shows[0].id}>
@@ -1520,6 +1593,27 @@ export default function SettingsPage() {
                       >
                         {show.episode_count}
                       </a>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {show.archived_at ? (
+                        <button
+                          onClick={() => toggleShowArchived(show)}
+                          disabled={savingShow === show.id}
+                          className="text-xs px-2.5 py-1 rounded-full font-medium bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+                          title="Restore this show key (undelete)"
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => toggleShowArchived(show)}
+                          disabled={savingShow === show.id}
+                          className="text-xs px-2.5 py-1 rounded-full font-medium text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:text-warm-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                          title="Archive (soft-delete) this show key"
+                        >
+                          Archive
+                        </button>
+                      )}
                     </td>
                   </tr>
                     ))}

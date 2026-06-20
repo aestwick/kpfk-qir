@@ -106,6 +106,8 @@ export interface ShowKey {
   primary_language: string | null
   active: boolean
   email: string | null
+  /** Soft-delete tombstone. NULL = live; set = archived (hidden, not ingested, never re-imported). */
+  archived_at: string | null
   created_at: string
   updated_at: string | null
 }
