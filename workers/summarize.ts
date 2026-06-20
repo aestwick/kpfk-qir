@@ -183,15 +183,18 @@ ${transcriptText}`
         throw new Error(`OpenAI returned incomplete summary (missing headline or summary): ${content.slice(0, 200)}`)
       }
 
-      // Update episode with summary data
+      // Human-authored metadata (from the Confessor pubfile, pre-filled at
+      // ingest) is authoritative — the AI only fills what a human left blank.
+      // human_summary is a hand-written narrative/rundown and wins over the AI
+      // summary entirely when present.
       await supabaseAdmin
         .from('episode_log')
         .update({
           headline: parsed.headline || null,
-          summary: parsed.summary || null,
-          host: parsed.host || episode.host || null,
-          guest: parsed.guest || null,
-          issue_category: parsed.issue_category || null,
+          summary: episode.human_summary || parsed.summary || null,
+          host: episode.host || parsed.host || null,
+          guest: episode.guest || parsed.guest || null,
+          issue_category: episode.issue_category || parsed.issue_category || null,
           compliance_report: parsed.discrepancy || null,
           status: 'summarized',
           error_message: null,

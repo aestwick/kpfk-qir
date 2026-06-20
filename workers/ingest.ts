@@ -7,6 +7,7 @@ import { rssText } from '../lib/rss'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { fetchConfessorEpisodes, projectPubfile } from '../lib/confessor'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -62,11 +63,119 @@ function toPacificDate(utcDateStr: string): {
   }
 }
 
+/** Has this station already ingested an episode with this MP3 URL? (cross-source dedupe key) */
+async function episodeExists(stationId: string, mp3Url: string): Promise<boolean> {
+  const { data } = await supabaseAdmin
+    .from('episode_log')
+    .select('id')
+    .eq('station_id', stationId)
+    .eq('mp3_url', mp3Url)
+    .limit(1)
+  return !!data?.length
+}
+
+const PACIFIC = 'America/Los_Angeles'
+
+/** Pacific-time wall-clock for an end instant derived from start + duration. */
+function computeEnd(startMs: number, durationMinutes: number | null): { endTime: string; airEnd: string } {
+  if (!durationMinutes) return { endTime: '', airEnd: '' }
+  const end = new Date(startMs + durationMinutes * 60 * 1000)
+  const endTime = new Intl.DateTimeFormat('en-US', {
+    timeZone: PACIFIC, hour: 'numeric', minute: '2-digit', hour12: true,
+  }).format(end)
+  const airEnd = new Intl.DateTimeFormat('en-GB', {
+    timeZone: PACIFIC, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).format(end)
+  return { endTime, airEnd }
+}
+
+/**
+ * Pull a show's recent episodes from the Confessor API (`?req=fil`), preserving
+ * the human-entered pubfile metadata. Returns { count, ok }: ok=false signals a
+ * fetch/parse failure so the caller can fall back to RSS for this show. ok=true
+ * with count=0 means Confessor answered but the show has nothing new.
+ */
+async function processShowConfessor(
+  show: { key: string; show_name: string; category: string },
+  station: { id: string; confessorBase: string },
+  num: number
+): Promise<{ count: number; ok: boolean }> {
+  let rows
+  try {
+    rows = await fetchConfessorEpisodes(station.confessorBase, show.key, num)
+  } catch (err) {
+    console.warn(`[ingest] confessor fetch failed for ${show.key}:`, err instanceof Error ? err.message : err)
+    return { count: 0, ok: false }
+  }
+
+  let newCount = 0
+  for (const row of rows) {
+    const mp3Url = row.mp3
+    // `fil` only returns non-expired rows, but a row past its window reports
+    // mp3="expired" instead of a URL — skip those (no audio to process).
+    if (!mp3Url || mp3Url === 'expired') continue
+    if (await episodeExists(station.id, mp3Url)) continue
+
+    const durationMinutes = row.lsecs ? Math.round(row.lsecs / 60) : null
+    // def_time is the airing's unix timestamp (seconds) — ground truth.
+    const startMs = row.def_time ? row.def_time * 1000 : null
+    const startStr = startMs != null ? toPacificDate(new Date(startMs).toISOString()) : null
+    const end = startMs != null ? computeEnd(startMs, durationMinutes) : { endTime: '', airEnd: '' }
+
+    const proj = projectPubfile(row.pubfile)
+
+    const { error: insertErr } = await supabaseAdmin
+      .from('episode_log')
+      .insert({
+        station_id: station.id,
+        show_key: show.key,
+        show_name: show.show_name,
+        category: row.category || show.category,
+        title: row.title || null,
+        date: startStr?.date ?? null,
+        start_time: startStr?.startTime ?? null,
+        end_time: end.endTime || null,
+        duration: durationMinutes,
+        mp3_url: mp3Url,
+        status: 'pending',
+        air_date: startStr?.airDate ?? null,
+        air_start: startStr?.airStart ?? null,
+        air_end: end.airEnd || null,
+        // Human-authored fields from the Confessor pubfile. Stored as the
+        // authoritative seed; the AI summarizer only fills what's missing.
+        ingest_source: 'confessor',
+        confessor_meta: row.pubfile && row.pubfile.length ? row.pubfile : null,
+        host: proj.host,
+        guest: proj.guest,
+        issue_category: proj.issueCategory,
+        human_summary: proj.humanSummary,
+        headline: null,
+        summary: null,
+        transcript_url: null,
+        compliance_status: null,
+        compliance_report: null,
+        error_message: null,
+        retry_count: 0,
+      })
+
+    if (insertErr) {
+      if (insertErr.code === '23505') continue
+      console.warn(`[ingest] confessor insert error for ${mp3Url}:`, insertErr.message)
+      continue
+    }
+    newCount++
+  }
+  return { count: newCount, ok: true }
+}
+
 async function processShow(
   show: { key: string; show_name: string; category: string; feed_name?: string | null },
   station: { id: string; rssBaseUrl: string; mp3Prefix: string }
 ): Promise<number> {
   let newCount = 0
+  // No RSS feed configured for this station — nothing to pull (used as the
+  // Confessor fallback target, which may be unset).
+  if (!station.rssBaseUrl) return 0
   try {
     // rss_base_url is stored as the full prefix up to '?id=' (see migration 012),
     // so the show key is simply appended.
@@ -197,6 +306,7 @@ async function processShow(
           air_date: dateInfo.airDate,
           air_start: dateInfo.airStart,
           air_end: dateInfo.airEnd,
+          ingest_source: 'rss',
           headline: null,
           host: null,
           guest: null,
@@ -248,19 +358,31 @@ export async function processIngest(job: Job) {
 
   const station = await getStation(stationId)
   if (!station) throw new Error(`[ingest] station ${stationId} not found`)
-  // rss_base_url is required to know where to pull feeds from. Skip visibly
-  // (not silently) for stations that haven't been configured yet.
-  if (!station.rss_base_url) {
-    console.warn(`[ingest] station ${station.slug} has no rss_base_url configured — skipping`)
-    return { newEpisodes: 0, skipped: 'no rss_base_url' }
+
+  // Source selection. Confessor is the richer source (carries human-entered
+  // host/guest/issue metadata) but is configured per station; when it's the
+  // primary AND has a host, we pull from it and fall back to RSS per show on
+  // failure. Otherwise it's RSS-only.
+  const useConfessor = station.ingest_primary === 'confessor' && !!station.confessor_base_url
+
+  // A station needs at least one usable source. Skip visibly (not silently) for
+  // stations that haven't been configured yet.
+  if (!useConfessor && !station.rss_base_url) {
+    console.warn(`[ingest] station ${station.slug} has no ingest source configured — skipping`)
+    return { newEpisodes: 0, skipped: 'no source configured' }
   }
   // mp3_filename_prefix defaults to 'kpfk' for backward compatibility (documented).
+  // rssBaseUrl may be '' when Confessor-only — processShow no-ops on an empty base.
   const stationCtx = {
     id: station.id,
-    rssBaseUrl: station.rss_base_url,
+    rssBaseUrl: station.rss_base_url ?? '',
     mp3Prefix: station.mp3_filename_prefix ?? 'kpfk',
   }
-  console.log(`[ingest] starting RSS fetch for ${station.slug}...`)
+  const confessorCtx = { id: station.id, confessorBase: station.confessor_base_url ?? '' }
+  // How many recent episodes to request per show from Confessor (matches the
+  // RSS feed depth roughly; archive only returns non-expired rows anyway).
+  const CONFESSOR_NUM = 10
+  console.log(`[ingest] starting ${useConfessor ? 'Confessor' : 'RSS'} fetch for ${station.slug}...`)
 
   const excludedCategories = await getExcludedCategories(stationId)
   const excludedShowKeys = await getExcludedShowKeys(stationId)
@@ -284,13 +406,24 @@ export async function processIngest(job: Job) {
       !excludedKeySet.has((s.key ?? '').trim())
   )
 
+  // Per-show ingest: Confessor first (when primary), RSS as the per-show
+  // fallback so one show's Confessor outage doesn't starve the rest.
+  const ingestOneShow = async (show: typeof activeShows[number]): Promise<number> => {
+    if (useConfessor) {
+      const res = await processShowConfessor(show, confessorCtx, CONFESSOR_NUM)
+      if (res.ok) return res.count
+      console.warn(`[ingest] confessor unavailable for ${show.key} — falling back to RSS`)
+    }
+    return processShow(show, stationCtx)
+  }
+
   // Process shows in parallel batches of 5
   const CONCURRENCY = 5
   let totalNew = 0
 
   for (let i = 0; i < activeShows.length; i += CONCURRENCY) {
     const batch = activeShows.slice(i, i + CONCURRENCY)
-    const results = await Promise.allSettled(batch.map((show) => processShow(show, stationCtx)))
+    const results = await Promise.allSettled(batch.map((show) => ingestOneShow(show)))
     for (const result of results) {
       if (result.status === 'fulfilled') totalNew += result.value
     }
@@ -304,7 +437,7 @@ export async function processIngest(job: Job) {
       operation: 'insert',
       stationId,
       resourceType: 'episode',
-      metadata: { newEpisodes: totalNew },
+      metadata: { newEpisodes: totalNew, source: useConfessor ? 'confessor' : 'rss' },
     })
   }
   return { newEpisodes: totalNew }
