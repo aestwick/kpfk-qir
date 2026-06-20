@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KPFK / Pacifica Confessor + Archive API Reference</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --border:#2a3340;
+    --ink:#e6edf3; --muted:#8b98a8; --accent:#4ca3ff; --accent2:#7ee787;
+    --warn:#f0b429; --red:#ff6b6b; --green:#3fb950; --pill:#22303f;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;font-size:15px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.88em;background:#0b0f14;border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:#cdd9e5}
+  pre{margin:0;font-family:var(--mono);font-size:12.5px;background:#0b0f14;border:1px solid var(--border);border-radius:8px;padding:12px 14px;overflow:auto;color:#cdd9e5}
+  .wrap{display:flex;max-width:1280px;margin:0 auto}
+  /* sidebar */
+  nav{position:sticky;top:0;align-self:flex-start;width:240px;height:100vh;overflow:auto;padding:22px 14px 60px;border-right:1px solid var(--border);background:var(--panel)}
+  nav h1{font-size:14px;letter-spacing:.3px;margin:0 0 4px}
+  nav .sub{color:var(--muted);font-size:11.5px;margin-bottom:18px}
+  nav a{display:block;color:var(--muted);font-size:13px;padding:4px 8px;border-radius:6px}
+  nav a:hover{background:var(--panel2);color:var(--ink);text-decoration:none}
+  nav .grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:#5b6878;margin:16px 8px 4px}
+  main{flex:1;min-width:0;padding:30px 40px 120px}
+  header.top{margin-bottom:28px}
+  header.top h1{font-size:25px;margin:0 0 6px}
+  header.top p{color:var(--muted);margin:4px 0;max-width:760px}
+  .tag{display:inline-block;font-size:10.5px;font-family:var(--mono);padding:2px 8px;border-radius:20px;background:var(--pill);border:1px solid var(--border);color:var(--accent);margin-right:6px}
+  section{margin:36px 0;scroll-margin-top:16px}
+  h2{font-size:19px;border-bottom:1px solid var(--border);padding-bottom:8px;margin:0 0 14px}
+  h3{font-size:15px;margin:22px 0 8px}
+  p{max-width:820px}
+  table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13.5px}
+  th,td{border:1px solid var(--border);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-weight:600;color:#cdd9e5}
+  td code{white-space:nowrap}
+  .callout{border:1px solid var(--border);border-left:3px solid var(--accent);background:var(--panel);border-radius:8px;padding:12px 16px;margin:14px 0}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.red{border-left-color:var(--red)}
+  .callout.good{border-left-color:var(--green)}
+  .callout b{color:var(--ink)}
+  /* endpoint cards */
+  .ep{border:1px solid var(--border);border-radius:10px;margin:14px 0;overflow:hidden;background:var(--panel)}
+  .ep .hd{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--panel2);cursor:pointer;flex-wrap:wrap}
+  .ep .hd .req{font-family:var(--mono);font-weight:700;color:var(--accent2);font-size:14px}
+  .ep .hd .desc{color:var(--muted);font-size:13px;flex:1;min-width:160px}
+  .ep .hd .badge{font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:20px;border:1px solid var(--border)}
+  .badge.nu{color:var(--accent);background:#10243a}
+  .badge.both{color:var(--accent2);background:#11261a}
+  .badge.broken{color:var(--red);background:#2a1414;border-color:#4a2020}
+  .badge.flaky{color:var(--warn);background:#2a2410;border-color:#4a3f15}
+  .ep .body{padding:14px 16px;display:none}
+  .ep.open .body{display:block}
+  .ep .body h4{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  .urlbar{flex:1;min-width:280px;font-family:var(--mono);font-size:12px;background:#0b0f14;border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:#cdd9e5;overflow:auto;white-space:nowrap}
+  button{font-family:var(--sans);font-size:13px;border:1px solid var(--border);background:var(--panel2);color:var(--ink);border-radius:7px;padding:7px 13px;cursor:pointer}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);color:#04101f;border-color:var(--accent);font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  .testout{margin-top:10px;display:none}
+  .testout.show{display:block}
+  .status{font-family:var(--mono);font-size:12px;margin-bottom:6px}
+  .status .ok{color:var(--green)} .status .err{color:var(--red)}
+  /* console */
+  .console{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:18px;margin:16px 0}
+  .console .ctl{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .console input[type=text]{flex:1;min-width:280px;font-family:var(--mono);font-size:12.5px;background:#0b0f14;border:1px solid var(--border);border-radius:7px;padding:9px 11px;color:#cdd9e5}
+  .bar{height:7px;background:#0b0f14;border-radius:20px;overflow:hidden;margin:10px 0;border:1px solid var(--border)}
+  .bar>div{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s}
+  .muted{color:var(--muted)}
+  .small{font-size:12px}
+  .pill2{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  hr{border:none;border-top:1px solid var(--border);margin:30px 0}
+  footer{color:var(--muted);font-size:12px;margin-top:40px;border-top:1px solid var(--border);padding-top:16px}
+  @media(max-width:880px){nav{display:none}main{padding:22px 18px 90px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>Confessor + Archive API</h1>
+  <div class="sub">KPFK / Pacifica broadcast API</div>
+  <a href="#overview">Overview</a>
+  <a href="#encoding">Output encoding ⚠</a>
+  <a href="#engines">Engines: old vs nu</a>
+  <a href="#clients">Client wrappers</a>
+  <a href="#console">Live test console</a>
+  <div class="grp">Schedule &amp; Shows</div>
+  <div id="nav-schedule"></div>
+  <div class="grp">Now Playing</div>
+  <div id="nav-now"></div>
+  <div class="grp">Playlists</div>
+  <div id="nav-playlist"></div>
+  <div class="grp">Schedule Ranges</div>
+  <div id="nav-range"></div>
+  <div class="grp">Fund Drive</div>
+  <div id="nav-pledge"></div>
+  <div class="grp">Archive</div>
+  <div id="nav-archive"></div>
+  <div class="grp">Reference</div>
+  <a href="#issues">Known issues</a>
+  <a href="#fields">Field glossary</a>
+</nav>
+
+<main>
+<header class="top">
+  <h1>KPFK / Pacifica — Confessor &amp; Archive API Reference</h1>
+  <p><span class="tag">v1 draft</span><span class="tag">read-only</span><span class="tag">GET only</span></p>
+  <p>Single-endpoint HTTP API for show schedules, "now playing" data, playlists, fund-drive config, and on-demand audio. Powers the broadcast side of the Pacifica network and is the upstream that <b>Beacon (Otis)</b> reads from to link donations to whatever show is on air. Everything is dispatched off one query parameter: <code>?req=&lt;endpoint&gt;</code>.</p>
+  <p class="small muted">This page is both the documentation <em>and</em> a working test harness. Shapes marked <span class="pill2" style="color:var(--green)">✓ verified live 2026-06-17</span> were confirmed against the deployed <code>confessor.kpfk.org</code> server (all 26 endpoints). The remaining few are labeled <span class="pill2">from source</span>. See <code>CAVEATS.md</code> for the full evidence ledger.</p>
+</header>
+
+<section id="overview">
+  <h2>Overview</h2>
+  <p>Two PHP scripts implement the same API, one per generation. Each station runs its own host; the path and the <code>?req=</code> contract are identical across stations.</p>
+  <table>
+    <tr><th>Concept</th><th>Value</th></tr>
+    <tr><td>Current base URL (KPFK)</td><td><code>https://confessor.kpfk.org/_nu_do_api.php</code></td></tr>
+    <tr><td>Legacy base URL</td><td><code>http://confessor.kpft.org/_do_api.php</code> (KPFT host in old config)</td></tr>
+    <tr><td>Other stations</td><td><code>confessor.&lt;station&gt;.org</code> — e.g. <code>kpft.org</code>, <code>wpfw.org</code>. Same paths.</td></tr>
+    <tr><td>Method</td><td><code>GET</code> only. No auth. No write operations.</td></tr>
+    <tr><td>Dispatch</td><td><code>?req=&lt;name&gt;</code> selects the endpoint. Unknown/empty <code>req</code> → empty body (or literal <code>bad</code> on nu).</td></tr>
+    <tr><td>Default response</td><td><b>base64-encoded PHP <code>serialize()</code></b> — not JSON. See below.</td></tr>
+    <tr><td>JSON response</td><td>Append <code>&amp;json=1</code> to any request. <b>Always do this</b> from non-PHP clients.</td></tr>
+  </table>
+  <div class="callout">
+    <b>Why this exists for Beacon.</b> Beacon never writes here. It reads three things: which show is on air now (for live-show donation attribution), the show list for dropdowns, and archive MP3 links. Beacon's <code>programs.slug</code> maps to Confessor's <code>sh_altid</code> — that slug is the join key between the two systems.
+  </div>
+</section>
+
+<section id="encoding">
+  <h2>Output encoding — read this first ⚠</h2>
+  <div class="callout red"><b>Source vs. production drift (verified live 2026-06-17).</b> The PHP in this repo defaults to <code>base64_encode(serialize($array))</code> and switches to JSON on <code>&amp;json=1</code>. But the <b>deployed</b> <code>confessor.kpfk.org</code> server was observed returning <b>plain JSON even without <code>&amp;json=1</code></b> (confirmed on <code>getnow</code> and <code>special</code> with no flag). Production is running a newer build than this export. <b>Takeaway: always send <code>&amp;json=1</code> anyway</b> — it's correct against both the old serialize-default and the new JSON-default, so your client never has to care which build it hits.</div>
+  <p>So depending on which build answers you:</p>
+  <table>
+    <tr><th>Build</th><th>No <code>json=1</code></th><th>With <code>&amp;json=1</code></th></tr>
+    <tr><td>This repo's source</td><td><code>base64(serialize(...))</code></td><td>JSON</td></tr>
+    <tr><td>Deployed KPFK (observed)</td><td>JSON</td><td>JSON</td></tr>
+  </table>
+  <div class="callout warn"><b>Gotcha:</b> the JSON path uses <code>JSON_NUMERIC_CHECK</code>, so numeric strings come back as numbers. IDs and timestamps may be JSON numbers, not strings — don't assume string types when parsing.</div>
+  <h4>Decoding the serialized form (only needed against the old build)</h4>
+  <pre>// PHP (the intended path)
+$buf = file_get_contents("https://confessor.kpfk.org/_nu_do_api.php?req=getday&amp;day=2");
+$ary = unserialize(base64_decode($buf));
+
+// JSON path — preferred everywhere else
+curl -s "https://confessor.kpfk.org/_nu_do_api.php?req=getday&amp;day=2&amp;json=1"</pre>
+  <pre>// JavaScript (browser / Node) — always use json=1
+const r = await fetch(URL + "?req=getnow&amp;json=1");
+const data = await r.json();</pre>
+  <div class="callout red"><b>Header caveat:</b> several endpoints emit PHP notices/warnings <em>before</em> the body when something is off (see <a href="#issues">Known issues</a>). That text is prepended to the JSON, so a strict <code>JSON.parse</code> can fail. Defensive clients should trim to the first <code>{</code>/<code>[</code>.</div>
+</section>
+
+<section id="engines">
+  <h2>Two engines: <code>_do_api.php</code> (old) vs <code>_nu_do_api.php</code> (nu)</h2>
+  <p>The <b>nu</b> engine is the current, more comprehensive one and is what the KPFK base URL points at. The old engine is a strict subset still deployed at some hosts. Document and build against <b>nu</b>; treat old as deprecated/fallback.</p>
+  <table>
+    <tr><th>Difference</th><th><code>_do_api.php</code> (old)</th><th><code>_nu_do_api.php</code> (nu) — current</th></tr>
+    <tr><td>Endpoint count</td><td>~24</td><td>~28</td></tr>
+    <tr><td>nu-only endpoints</td><td>—</td><td><code>special</code>, <code>fil</code>, <code>jsched</code></td></tr>
+    <tr><td><code>getshows</code> window</td><td>no params (fixed window)</td><td>accepts <code>before</code> / <code>after</code> (weeks)</td></tr>
+    <tr><td><code>sched</code></td><td><code>stdte</code>/<code>endte</code> only</td><td>also <code>wks</code> + <code>plistid</code></td></tr>
+    <tr><td>Archive audio</td><td>separate host <code>archive.kpft.org/_sh_do_api.php?req=&lt;idkey&gt;</code></td><td>same engine: <code>?req=fil&amp;id=&lt;altid&gt;</code></td></tr>
+    <tr><td>Empty <code>req</code></td><td>empty output</td><td>exits with literal <code>bad</code></td></tr>
+  </table>
+</section>
+
+<section id="clients">
+  <h2>PHP client wrappers (3 generations)</h2>
+  <p>If you're writing PHP, don't hand-roll URLs — one of these wrapper files probably already has your function. They map 1:1 onto the endpoints below.</p>
+  <table>
+    <tr><th>File</th><th>Era</th><th>Targets</th><th>Notes</th></tr>
+    <tr><td><code>confessor_api.inc.php</code></td><td>oldest</td><td><code>_do_api.php</code> + <code>archive.kpft.org/_sh_do_api.php</code></td><td>5 functions: <code>get_all_shows</code>, <code>get_show_by_time</code>, <code>get_day</code>, <code>get_filnam</code>, <code>get_nowplaying</code>. Archive on a separate host.</td></tr>
+    <tr><td><code>confessor_api.php</code></td><td>middle</td><td><code>_nu_do_api.php</code></td><td>Full <code>confessor_*</code> set. Has a duplicate <code>confessor_get_all_shows</code> def — second one wins.</td></tr>
+    <tr><td><code>php:nu_confessor_api.php</code></td><td>newest ✓</td><td><code>https://confessor.kpfk.org/_nu_do_api.php</code></td><td>Canonical wrapper. Adds <code>pledge</code>, <code>sched</code>, <code>special</code>, <code>nowary</code>, <code>nowshort</code>, <code>fil</code>. The odd <code>:</code> in the filename looks like a copy artifact of <code>php/nu_confessor_api.php</code>.</td></tr>
+  </table>
+  <div class="callout">Each wrapper function takes a trailing <code>$json_flag</code> argument. When set it appends <code>&amp;json=1</code> and returns the raw JSON string instead of an unserialized array.</div>
+</section>
+
+<section id="console">
+  <h2>Live test console</h2>
+  <p>Set the base URL, then expand any endpoint below and hit <b>Test</b>, or run the whole suite here. <span class="muted small">Note: this fetches cross-origin from wherever you open the file — if the browser blocks it with CORS, open the page from a KPFK-hosted location, or use the <code>curl</code> lines shown on each endpoint.</span></p>
+  <div class="console">
+    <div class="ctl">
+      <input type="text" id="baseUrl" value="https://confessor.kpfk.org/_nu_do_api.php">
+      <button class="primary" id="runAll">▶ Run all &amp; copy results</button>
+      <button id="copyAll">Copy last results</button>
+    </div>
+    <div class="bar"><div id="prog"></div></div>
+    <div id="runStatus" class="muted small">Idle. "Run all" hits every endpoint with <code>&amp;json=1</code> and copies a single JSON bundle to your clipboard — paste that back to me to confirm the real response shapes.</div>
+  </div>
+</section>
+
+<div id="endpoints"></div>
+
+<section id="issues">
+  <h2>Known issues &amp; quirks <span class="small muted">(live-verified 2026-06-17)</span></h2>
+  <table>
+    <tr><th>Endpoint</th><th>Issue</th><th>Workaround</th></tr>
+    <tr><td><code>getary</code> <span class="badge broken">broken</span></td><td><b>Hard-broken.</b> Undefined constant <code>sh_day_mask</code> (prod line 640) <em>and</em> a SQL error <code>Unknown column 'info'</code> (AllDb.php:667). No payload.</td><td>For a full catalog use <code>getalfa</code> or <code>list</code>. For the by-time-slot view getary was meant to give, use <code>jsched</code> (by-day, minute-keyed) or <code>getshows</code> (weekday-keyed with times).</td></tr>
+    <tr><td><code>show</code> (by id) <span class="badge broken">broken</span></td><td><b>Broken.</b> <code>Undefined index: sh_plistid</code> (prod line 1425) — emits a notice, no usable JSON.</td><td>Use <code>key&amp;key=&lt;altid&gt;</code> (by slug) — richer data and it works. Map id→slug via <code>altids</code> / <code>memsys</code> / <code>getalfa</code> (all carry both <code>sh_id</code> and <code>sh_altid</code>).</td></tr>
+    <tr><td><code>getalfa</code></td><td>Works, but prepends two PHP notices ("non well formed numeric value", <code>pl_config_functs.php:130-131</code>) before the JSON array.</td><td>Trim to the first <code>[</code> before <code>JSON.parse</code>. Or use <code>list</code> (same data, keyed by slug, no notice observed).</td></tr>
+    <tr><td><code>special</code> (weeks form)</td><td>Confirmed: <code>wks=…</code> without <code>endte</code> prepends <code>Undefined variable: endte</code> (prod line 2085). Payload is still valid after the notice.</td><td>Always pass <code>endte</code> explicitly.</td></tr>
+    <tr><td><code>shotimes</code> / <code>mostrecent</code></td><td>Empty (0 bytes) for <b>talk</b> shows by design — both join playlist tables that exclude <code>sh_talk</code>. Not an error.</td><td>For talk-show airing times use <code>key&amp;key=&lt;altid&gt;</code> → <code>dates[]</code>, or <code>fil&amp;id=&lt;altid&gt;</code> for archived episodes.</td></tr>
+    <tr><td><code>playlist</code></td><td>Empty when nothing logged for the slot (talk shows, gaps). Normal.</td><td>Expected — handle empty as "no playlist."</td></tr>
+    <tr><td><code>all</code></td><td>Can be very large — <code>folkscene</code> returned ~2&nbsp;MB.</td><td>Cache; or pull a single airing via <code>playlist&amp;phid=</code> instead of the whole history.</td></tr>
+    <tr><td><code>nowshort</code> / <code>nowshow</code></td><td>Historically flagged as timing out; <b>did not reproduce</b> in this probe (both fast). Treat the timeout note as unconfirmed.</td><td>Still wise to cache + use a generous timeout under fund-drive load.</td></tr>
+  </table>
+</section>
+
+<section id="fields">
+  <h2>Field glossary (show object)</h2>
+  <table>
+    <tr><th>Field</th><th>Meaning</th></tr>
+    <tr><td><code>sh_id</code></td><td>Numeric internal show id</td></tr>
+    <tr><td><code>sh_altid</code></td><td>Short slug, e.g. <code>folkscene</code>. <b>Join key to Beacon <code>programs.slug</code>.</b></td></tr>
+    <tr><td><code>sh_memsysid</code></td><td>Membership-system id (links show to donation system)</td></tr>
+    <tr><td><code>sh_caid</code> / <code>sh_itid</code></td><td>Category id / "item" (archive) id the show belongs to</td></tr>
+    <tr><td><code>sh_name</code> / <code>sh_metaname</code></td><td>Show title / SEO meta title</td></tr>
+    <tr><td><code>sh_djname</code></td><td>Host name (HTML-entity encoded)</td></tr>
+    <tr><td><code>sh_desc</code> / <code>sh_shortdesc</code></td><td>Long / short description</td></tr>
+    <tr><td><code>sh_keywords</code></td><td>Search/SEO keywords</td></tr>
+    <tr><td><code>sh_instagram</code>, <code>sh_facebook</code>, <code>sh_twitter</code>, <code>sh_tumblr</code></td><td>Social links</td></tr>
+    <tr><td><code>sh_pubemail</code> / <code>sh_email</code></td><td>Public-facing / internal contact email</td></tr>
+    <tr><td><code>sh_startdte</code></td><td>Date the show started on the schedule (unix)</td></tr>
+    <tr><td><code>sh_interval</code> / <code>sh_days</code></td><td>Recurrence interval / days-of-week the show airs</td></tr>
+    <tr><td><code>sh_pitch1</code> / <code>sh_pitch2</code> / <code>sh_default_issue</code></td><td>Fund-drive pitch text and default issue tag</td></tr>
+    <tr><td><code>cat</code>, <code>cat_color</code>, <code>cat_bgcolor</code>, <code>ca_*</code>, <code>cf_*</code></td><td>Category + confessor (station) name and UI colors</td></tr>
+    <tr><td><code>sh_shour</code></td><td>Start time as seconds-since-midnight</td></tr>
+    <tr><td><code>sh_len</code></td><td>Duration in seconds</td></tr>
+    <tr><td><code>sh_start_time</code></td><td>Unix timestamp of the airing</td></tr>
+    <tr><td><code>sh_info</code></td><td>Bit-mask (day mask + flags). <code>type</code> "Talk"/"Music" derives from it.</td></tr>
+    <tr><td><code>start</code>/<code>end</code>, <code>sh_ampm</code></td><td>Human-readable clock strings</td></tr>
+    <tr><td><code>sh_photo</code></td><td>Image URL (or filename relative to <code>/pix</code>)</td></tr>
+    <tr><td><code>mp3</code></td><td>Archive audio URL (archive endpoints)</td></tr>
+    <tr><td><code>ph_id</code> / <code>phid</code></td><td>Playlist-header id for a specific airing</td></tr>
+    <tr><td><code>pf_host</code>, <code>pf_gname</code>, <code>pf_gtopic</code>, <code>pf_issue1..3</code></td><td>Archive "pubfile" metadata: host, guest name, topic, issue tags</td></tr>
+  </table>
+</section>
+
+<footer>
+  Generated from source: <code>_do_api.php</code>, <code>_nu_do_api.php</code>, <code>confessor_api.php</code>, <code>confessor_api.inc.php</code>, <code>php:nu_confessor_api.php</code>, <code>api-tester.html</code>.
+  Shapes labeled <span class="pill2" style="color:var(--green)">✓ verified live</span> were confirmed against <code>confessor.kpfk.org</code> on 2026-06-17 (probe-results.json). <span class="pill2">from source</span> = read from PHP, not yet probed. Evidence ledger in <code>CAVEATS.md</code>. Old/legacy details from <code>legacy.md</code>.
+</footer>
+</main>
+</div>
+
+<script>
+// ============================================================
+// Endpoint catalog — single source of truth for docs + console
+// ============================================================
+const NOW = () => Math.floor(Date.now()/1000);
+const EP = [
+  // ---- Schedule & Shows ----
+  {g:'schedule', req:'getshows', engine:'both', desc:'Full schedule — every show with airing times', slow:true, verified:true,
+    params:[['before','int (weeks)','no','1','nu only — weeks of history'],['after','int (weeks)','no','1','nu only — weeks ahead']],
+    sample:'req=getshows&before=1&after=1',
+    shape:`// object keyed by weekday "0"(Sun)–"6"(Sat); each weekday is an OBJECT keyed by a
+// running count (NOT a 0-based array — indices are global, so they're sparse per day)
+{
+  "3": {
+    "0":  { "sh_id":104, "sh_altid":"ftv", "sh_name":"From The Vault", "sh_djname":"...",
+            "sh_photo":".../pix/...", "sh_info":16385, "type":"Music",
+            "sh_start_time":..., "sh_hour":..., "starts":"3:00 AM", "ends":"4:00 AM",
+            "day":"Wednesday", "fulldate":"...", "sh_len":3600, "ph_id":.., "mp3":".../mp3/..." },
+    "1":  { ... }, ... "21": { ... }, "146": { ... }   // count keys are non-contiguous
+  },
+  "4": { ... }, ... "2": { ... }   // weekday order starts at today, wraps around
+}`,
+    note:'✓ Large (~290 KB) + slow. Top keys are weekdays; weekday order starts at the current day and wraps (e.g. 3,4,5,6,0,1,2). Inner keys are a global running count, so they jump (0–21 then 146…). Treat as Object.values(), not a dense array.'},
+
+  {g:'schedule', req:'getday', engine:'both', desc:'All shows for one weekday', verified:true,
+    params:[['day','int 0–6','no','today','0=Sun … 6=Sat; >6 wraps mod 7']],
+    sample:'req=getday&day=3',
+    shape:`// flat array, ordered by start time
+[
+  {
+    "sh_altid":"backgroundbriefing", "sh_memsysid":"...", "sh_name":"Background Briefing",
+    "sh_desc":"", "sh_url":"", "sh_facebook":"", "sh_twitter":"", "sh_tumblr":"",
+    "sh_photo":"https://confessor.kpfk.org/pix/...", "sh_it_photo":"", "sh_med_photo":"",
+    "sh_djname":"Ian Masters", "sh_email":"",
+    "starts":"11:00 AM", "sh_shour":39600, "ends":"12:00 PM", "sh_len":3600,
+    "day":"Wednesday", "sh_info":16446, "days":"Sun", "type":"Talk"
+  },
+  ...
+]`,
+    note:'Drops sh_id/sh_days; adds starts/ends/day/days/type. Includes talk shows (type-tagged).'},
+
+  {g:'schedule', req:'getshow', engine:'both', desc:'The single show airing at a given time', verified:true,
+    params:[['dte','unix ts','no','now','timestamp to resolve; defaults to now']],
+    sample:'req=getshow&dte='+'NOW',
+    shape:`{
+  "sh_id":24, "sh_name":"Democracy Now! PM", "sh_altid":"dnpm", "sh_memsysid":"...",
+  "sh_photo":".../pix/...", "sh_med_photo":"...", "sh_djname":"Amy Goodman",
+  "sh_desc":"", "sh_shortdesc":"", "sh_info":16446,
+  "sh_shour":61200, "sh_stime":"17:00:00", "sh_ampm":"5:00 PM",
+  "sh_days":"Mon Tue Wed Thu Fri", "sh_big_days":"Monday Tuesday Wednesday Thursday Friday",
+  "sh_ends":"18:00:00", "sh_ampm_ends":"6:00 PM", "sh_len":3600,
+  "sh_url":"", "sh_facebook":"", "sh_twitter":"", "sh_tumblr":"",
+  "cat":"Public Affairs", "cat_color":"#...", "cat_bgcolor":"#...", "sh_start_time":1365199200
+}`,
+    note:'Same object shape used by getcurrent (current/next) and the show core of nowshow.'},
+
+  {g:'schedule', req:'getnext', engine:'both', desc:'The show after the one airing at a given time', verified:true,
+    params:[['dte','unix ts','no','now','reference time']],
+    sample:'req=getnext&dte='+'NOW',
+    shape:`// trimmed show object (getday-style whitelist) + hour/day/days/type
+{
+  "sh_altid":"...", "sh_memsysid":"...", "sh_name":"...", "sh_desc":"", "sh_url":"",
+  "sh_facebook":"", "sh_twitter":"", "sh_tumblr":"",
+  "sh_photo":".../pix/...", "sh_it_photo":"", "sh_med_photo":"",
+  "sh_djname":"...", "sh_email":"",
+  "hour":"6:00 PM", "sh_shour":64800, "day":"Wednesday", "days":"...", "sh_info":..., "type":"Talk"
+}`,
+    note:'Live shape is the slim whitelist (NOT the full sh_* row the local source suggests — version drift). No sh_id/sh_len/ph_* fields; adds hour/day/days/type.'},
+
+  {g:'schedule', req:'getcurrent', engine:'both', desc:'Current + next show in one call', verified:true,
+    params:[['dte','unix ts','no','now','reference time']],
+    sample:'req=getcurrent&dte='+'NOW',
+    shape:`{
+  "current": { ...full getshow object: sh_id, sh_name, sh_altid, sh_memsysid, sh_photo,
+               sh_med_photo, sh_djname, sh_desc, sh_shortdesc, sh_info, sh_shour, sh_stime,
+               sh_ampm, sh_days, sh_big_days, sh_ends, sh_ampm_ends, sh_len, sh_url,
+               sh_facebook, sh_twitter, sh_tumblr, cat, cat_color, cat_bgcolor, type },
+  "next":    { ...same getshow object... }
+}`,
+    note:'✓ ~1.5 KB, fast. Both current and next use the full getshow object — richer than the slim standalone getnext shape.'},
+
+  {g:'schedule', req:'getalfa', engine:'both', desc:'All shows, alphabetical (full rows)', verified:true,
+    params:[], sample:'req=getalfa',
+    shape:`// array of 163 full show rows (SELECT * + computed time/type), A→Z
+[
+  { "sh_id":.., "sh_altid":"..", "sh_memsysid":"..", "sh_caid":.., "sh_itid":..,
+    "sh_name":"..", "sh_metaname":"..", "sh_desc":"..", "sh_shortdesc":"..", "sh_time":"..",
+    "sh_url":"..", "sh_keywords":"..", "sh_facebook":"..", "sh_twitter":"..", "sh_tumblr":"..",
+    "sh_instagram":"..", "sh_photo":"..", "sh_it_photo":"..", "sh_med_photo":"..",
+    "sh_djname":"..", "sh_email":"..", "sh_pubemail":"..", "sh_startdte":.., "sh_shour":..,
+    "sh_len":.., "sh_default_issue":"..", "sh_interval":.., "sh_days":"..",
+    "sh_pitch1":"..", "sh_pitch2":".." , ... },
+  ...
+]`,
+    note:'Returns the FULL show schema (30+ cols). ⚠ Prepends two PHP notices ("non well formed numeric value", pl_config_functs.php:130-131) before the JSON — trim to first [ before parsing.'},
+
+  {g:'schedule', req:'getary', engine:'both', desc:'Shows by time slot', broken:true, verified:true,
+    params:[], sample:'req=getary',
+    shape:`// BROKEN — no JSON payload. Verbatim from live:
+//   Warning: Use of undefined constant sh_day_mask ... line 640
+//   Warning: mysqli_query(): Unknown column 'info' in 'where clause' (AllDb.php:667)`,
+    note:'Double-broken: undefined constant AND a bad SQL column. Avoid entirely; use getalfa or list.'},
+
+  {g:'schedule', req:'list', engine:'both', desc:'All shows, keyed by slug (full rows)', verified:true,
+    params:[], sample:'req=list',
+    shape:`// object keyed by sh_altid -> full show row (same 30+ col schema as getalfa)
+{
+  "backgroundbriefing": { "sh_id":.., "sh_altid":"backgroundbriefing", "sh_name":"...", ... },
+  "democracynow":       { ... },
+  ...
+}`,
+    note:'Map keyed by slug (handy for direct lookups). Same per-row schema as getalfa/memsys.'},
+
+  {g:'schedule', req:'altids', engine:'both', desc:'All show slugs (altids)', verified:true,
+    params:[], sample:'req=altids',
+    shape:`// array of 163 entries
+[
+  { "sh_altid":"backgroundbriefing", "sh_name":"Background Briefing" },
+  { "sh_altid":"dn",                 "sh_name":"Democracy Now!" },
+  ...
+]`,
+    note:'Cheapest way to enumerate valid slugs for other calls.'},
+
+  {g:'schedule', req:'memsys', engine:'both', desc:'Full show rows incl. membership ids', verified:true,
+    params:[], sample:'req=memsys',
+    shape:`// array of 163 FULL show rows (SELECT *), each carrying sh_memsysid
+[ { "sh_id":24, "sh_altid":"dn", "sh_memsysid":"...", "sh_caid":.., "sh_name":"Democracy Now!",
+    ...full 30+ col schema... }, ... ]`,
+    note:'Not a slim id map — returns every show column. sh_memsysid bridges to the donation/membership system.'},
+
+  {g:'schedule', req:'getgone', engine:'both', desc:'Discontinued / archived-off shows', verified:true,
+    params:[], sample:'req=getgone',
+    shape:`// array of 87 full show rows (same schema as getalfa)
+[ { "sh_id":71, "sh_altid":"nightsounds", "sh_name":"Pat & Rosie's Night Sounds", ... }, ... ]`},
+
+  {g:'schedule', req:'key', engine:'both', desc:'Full show detail by slug (incl. recent airings + MP3s)', verified:true,
+    params:[['key','altid','yes','—','show slug, max 35 chars']],
+    sample:'req=key&key=dn',
+    shape:`{
+  "sh_id":24, "sh_altid":"dn", "sh_memsysid":"...", "sh_name":"Democracy Now!",
+  "sh_desc":"", "sh_url":"", "sh_facebook":"", "sh_twitter":"", "sh_tumblr":"",
+  "sh_photo":".../pix/...", "sh_it_photo":"...", "sh_med_photo":"...",
+  "sh_djname":"Amy Goodman", "sh_email":"", "sh_plistid":"...", "sh_info":16446,
+  "type":"Talk", "days":"Mon Tue Wed Thu Fri",
+  "dates": [                       // real past airings (ph_table), 8 wks back -> 1 wk ahead
+    { "starts":"6:00 AM", "ends":"7:00 AM", "day":"Monday", "fulldate":"June 16, 2025",
+      "sh_start_time":1750000000, "sh_len":3600, "mp3":".../mp3/..." },   // mp3 only if archived
+    ...
+  ]
+}`,
+    note:'✓ Works for BOTH talk and music (talk dn returned a full dates[] in the probe). This is how you get talk-show airing times — shotimes/mostrecent exclude talk, key does not.'},
+
+  {g:'schedule', req:'show', engine:'both', desc:'Show detail by numeric id', broken:true, verified:true,
+    params:[['id','int','yes','—','sh_id']],
+    sample:'req=show&id=24',
+    shape:`// BROKEN on the deployed build. Verbatim from live (id=24):
+//   Notice: Undefined index: sh_plistid in _nu_do_api.php on line 1425
+// -> emits the notice, no usable JSON payload.`,
+    note:'Broken in production. Use req=key&key=<altid> (by slug) instead — that path works.'},
+
+  // ---- Now Playing ----
+  {g:'now', req:'getnow', engine:'both', desc:'Currently-playing track', verified:true,
+    params:[['time','unix ts','no','now','resolve song at this time']],
+    sample:'req=getnow',
+    shape:`{ "pl_artist":"John Coltrane", "pl_song":"A Love Supreme",
+  "pl_album":"A Love Supreme", "pl_label":"Impulse!" }
+// returns all-empty strings when nothing is logged for that moment (talk/gaps)`,
+    note:'Smallest endpoint (~57 bytes). pl_info is queried but not emitted.'},
+
+  {g:'now', req:'nowshow', engine:'both', desc:'Current show, full detail + next', verified:true,
+    params:[], sample:'req=nowshow',
+    shape:`// full sh_* row (SELECT *, 30+ cols) + normalized sh_djname + next show
+{ ...all sh_* fields (see memsys schema)..., "sh_djname":"Amy Goodman",
+  "next": { ...next show... } }`,
+    note:'Returned fast in the probe (~1.5KB) — the old "times out" warning did not reproduce.'},
+
+  {g:'now', req:'nowshort', engine:'both', desc:'Current show, condensed + next', verified:true,
+    params:[], sample:'req=nowshort',
+    shape:`{
+  "sh_name":"Democracy Now!", "sh_djname":"Amy Goodman",   // sh_djname falls back to pf_host
+  "ph_date":1750000000, "ph_shlen":3600,
+  "day":"Monday", "date":"June 16", "year":"2025", "time":"6:00", "ampm":"AM",
+  "next": { "sh_name":"...", "day":"Monday", "date":"June 16", "time":"...", ... }
+}`,
+    note:'Returned fast in the probe (~350 bytes) — timeout warning did not reproduce. pf_host overrides sh_djname when a guest host is set.'},
+
+  {g:'now', req:'nowary', engine:'nu', desc:'Station config + current + next', verified:true,
+    params:[], sample:'req=nowary',
+    shape:`{
+  "global": {            // the station's gl_ config row
+    "gl_id":.., "gl_station":"KPFK", "gl_call":"KPFK", "gl_city":"Los Angeles",
+    "gl_freq":"90.7", "gl_phone":"...", "gl_onair":.., "gl_stapix":"...",
+    "gl_homeurl":"...", "gl_archurl":"...", "gl_pledgeurl":"...", "gl_pledgeimage":"...", ... },
+  "current": { ...current show... },
+  "next":    { ...next show... }
+}`,
+    note:'nu only. Bundles station identity + now/next in one call. Useful single fetch for a "now playing" widget.'},
+
+  // ---- Playlists ----
+  {g:'playlist', req:'playlist', engine:'both', desc:'Track-by-track playlist for an airing', verified:true,
+    params:[['date','unix ts or string','no','now','resolve by date'],['phid','int','no','—','playlist-header id (exact)'],['dt + key','date + altid','no','—','resolve header from slug+date']],
+    sample:'req=playlist&date='+'NOW',
+    shape:`// map keyed by pl_sort (play order). Empty (0 bytes) if nothing logged.
+{
+  "1": { "start":"8:05", "start_dt":1750003500, "title":"Blue in Green", "artist":"Miles Davis",
+         "album":"Kind of Blue", "label":"Columbia", "length":"5:37", "row":{ ...full pl_* row... } },
+  "2": { ... }, ...
+}`,
+    note:'Only the track map is returned — the show-header block is computed then discarded (unlike mostrecent). Talk content filtered out. Empty for talk/unlogged slots — not an error (probe returned 0 bytes for the current slot).'},
+
+  {g:'playlist', req:'all', engine:'both', desc:'Every logged playlist for a slug', verified:true, slow:true,
+    params:[['key','altid','yes','—','show slug']],
+    sample:'req=all&key=folkscene',
+    shape:`{
+  "show":"FolkScene", "desc":"...", "shortdesc":"...", "djname":"...",
+  "1781485200": { ...playlist for that airing... },   // keyed by airing unix timestamp
+  "1780880400": { ... },
+  ...
+}`,
+    note:'⚠ Can be HUGE — folkscene returned ~2 MB. Header (show/desc/shortdesc/djname) plus one entry per airing keyed by unix timestamp. Page or cache it.'},
+
+  {g:'playlist', req:'mostrecent', engine:'both', desc:'Latest logged playlist for a slug (with header)', verified:true,
+    params:[['altid','altid','yes','—','show slug, max 30 chars']],
+    sample:'req=mostrecent&altid=folkscene',
+    shape:`{
+  "show": { "pix":"...", "med_pix":"...", "big_pix":"...", "date":"Monday, June 16, 2025",
+            "time":"8:00 PM", "name":"FolkScene", "dj":"...", "desc":"...", "short_desc":"...",
+            "row": { ...full sh_+ph row... } },
+  "2": { ...track (keyed by pl_sort)... }, "3": { ... }, ...
+}`,
+    note:'✓ Unlike playlist, this KEEPS the "show" header. Empty (0 bytes) for talk shows — only music logs playlists.'},
+
+  {g:'playlist', req:'shotimes', engine:'both', desc:'Recent airing dates for a MUSIC slug', verified:true,
+    params:[['key','altid','yes','—','show slug, max 35 chars']],
+    sample:'req=shotimes&key=folkscene',
+    shape:`[
+  { "dt":1750003500, "phid":55903, "key":"folkscene", "name":"FolkScene",
+    "producer":"Roz & Howard Larman", "date":"Mon 16 Jun, 2025", "time":"8:00 PM", "type":"Music" },
+  ...  // folkscene returned 831 entries
+]`,
+    note:'✓ EMPTY (0 bytes) for talk shows by design — the query excludes sh_talk. For talk-show dates use key (dates[]) or fil.'},
+
+  // ---- Schedule ranges ----
+  {g:'range', req:'sched', engine:'both', desc:'Schedule across a date range or N weeks', verified:true,
+    params:[['wks','int','no','—','nu only — weeks back from now'],['stdte','unix/str','no','—','range start'],['endte','unix/str','no','—','range end'],['plistid','string','no','—','filter to one playlist id (max 36)']],
+    sample:'req=sched&wks=1',
+    shape:`// object keyed by sh_altid
+{
+  "backgroundbriefing": {
+    "sh_altid":"backgroundbriefing", "sh_name":"...", "sh_djname":"...", "sh_email":"...",
+    "ca_color":"#..", "ca_bgcolor":"#..", "cf_color":"#..", "cf_bgcolor":"#..", "cf_name":"KPFK",
+    "sh_plistid":"...", "sh_info":16446, "def_time": { ...airing time block... }
+  },
+  ...
+}`,
+    note:'nu accepts wks+plistid OR stdte/endte; old only stdte/endte. Carries category (ca_*) and confessor (cf_*) colors for UI.'},
+
+  {g:'range', req:'special', engine:'nu', desc:'Special / one-off programming in a range', verified:true,
+    params:[['wks','int','no','—','weeks back'],['endte','unix/str','no','—','range end — pass explicitly (bug workaround)'],['stdte','unix/str','no','—','range start'],['plistid','string','no','—','playlist id filter']],
+    sample:'req=special&wks=1&endte='+'NOW',
+    shape:`// flat array of airings (291 in the 1-week probe)
+[ { "sh_altid":"...", "sh_name":"...", "ph_date":1750003500,
+    "ph_shlen":3600, "ph_shour":73800, "ph_day":1 }, ... ]`,
+    note:'nu only. ⚠ Confirmed bug: calling with wks but no endte prepends "Undefined variable: endte" (prod line 2085). Always pass endte. The payload itself is still valid once you trim the notice.'},
+
+  {g:'range', req:'jsched', engine:'nu', desc:'Pre-built by-day schedule (works)', verified:true,
+    params:[], sample:'req=jsched',
+    shape:`// array of 7 (weekday 0–6); each day keyed by minute-of-day -> show(s)
+[
+  { "0":{...}, "120":{...}, "150":{...}, "360":{...}, "420":{...}, ... "1380":{...} },  // Sunday
+  ... 6 more days
+]`,
+    note:'✓ Returns real content (~53 KB). Served from a prebuilt JSON file, so the json=1 flag makes no difference. Minute keys = minutes since midnight (e.g. 360 = 6:00 AM).'},
+
+  // ---- Fund drive ----
+  {g:'pledge', req:'pledge', engine:'both', desc:'Current fund-drive / pledge config', verified:true,
+    params:[], sample:'req=pledge',
+    shape:`{
+  "url": "https://give.kpfk.org/pledge?id=<current-altid>",   // donation link bound to the live show
+  "tipjar": "<a href=\\"...?id=...\\" target=\\"_blank\\"> ...HTML snippet (anchor+table)... </a>"
+}`,
+    note:'tipjar is ready-to-embed HTML, NOT structured data. Returns {} if no pledge URL configured or no show on air.'},
+
+  // ---- Archive ----
+  {g:'archive', req:'fil', engine:'nu', desc:'Recent archived episodes (MP3s) for a slug', verified:true,
+    params:[['id','altid','yes','—','show slug, max 35'],['num','int','no','5','how many episodes']],
+    sample:'req=fil&id=dn&num=3',
+    shape:`[
+  {
+    "pubfile": [ { "pf_host":"...", "pf_gname":"...", "pf_gtopic":"...", "pf_gurl":"",
+                   "pf_issue1":"...", "pf_issue2":"...", "pf_issue3":"", "pf_notes":"" } ],
+    "idkey":"dn", "title":"Democracy Now!", "days":60, "category":"Public Affairs",
+    "producer":"Amy Goodman", "link":"", "facebook":"", "twitter":"", "tumblr":"",
+    "mp3":"https://archive.kpfk.org/mp3/kpfk_..._dn.mp3",   // or "expired"
+    "day":"Wednesday", "date":"December 19, 2012", "time":"9:30 AM", "def_time":1355931000,
+    "eday":"February 17, 2013", "expires":1361115000, "txt":"", "lsecs":1811, "length":"30:11",
+    "type":"Talk"
+  },
+  ...
+]`,
+    note:'✓ Works for talk AND music (no talk filter on the archive). nu only; defaults to 5; only non-expired rows; mp3="expired" past the window. Oldest era used a separate host: archive.kpft.org/_sh_do_api.php?req=<idkey>&num=<n>.'},
+];
+
+const GROUPS = {schedule:'nav-schedule',now:'nav-now',playlist:'nav-playlist',range:'nav-range',pledge:'nav-pledge',archive:'nav-archive'};
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const baseEl = () => document.getElementById('baseUrl').value.trim().replace(/\?$/,'');
+const fullURL = (sample) => baseEl()+'?'+sample.replace(/NOW/g,NOW())+'&json=1';
+
+// render
+const epRoot = document.getElementById('endpoints');
+let lastResults = null;
+EP.forEach((e,i)=>{
+  // nav link
+  const a=document.createElement('a'); a.href='#ep-'+e.req; a.textContent=e.req;
+  document.getElementById(GROUPS[e.g]).appendChild(a);
+
+  const badge = e.broken?'<span class="badge broken">broken</span>'
+    : e.slow?'<span class="badge flaky">slow</span>'
+    : e.engine==='nu'?'<span class="badge nu">nu only</span>'
+    :'<span class="badge both">old+nu</span>';
+
+  const paramRows = e.params.length ? e.params.map(p=>
+     `<tr><td><code>${esc(p[0])}</code></td><td>${esc(p[1])}</td><td>${p[2]}</td><td>${esc(p[3])}</td><td>${esc(p[4])}</td></tr>`).join('')
+     : '<tr><td colspan="5" class="muted">none</td></tr>';
+
+  const card=document.createElement('div');
+  card.className='ep'; card.id='ep-'+e.req;
+  card.innerHTML=`
+    <div class="hd">
+      <span class="req">?req=${e.req}</span>
+      ${badge}
+      <span class="desc">${esc(e.desc)}</span>
+    </div>
+    <div class="body">
+      <h4>Parameters</h4>
+      <table><tr><th>Param</th><th>Type</th><th>Req?</th><th>Default</th><th>Notes</th></tr>${paramRows}</table>
+      <h4>Request</h4>
+      <div class="row">
+        <span class="urlbar" id="url-${i}">${esc(fullURL(e.sample))}</span>
+        <button data-i="${i}" class="testbtn">Test ▸</button>
+      </div>
+      <pre>curl -s "${esc(fullURL(e.sample))}"</pre>
+      <h4>Response shape ${e.verified?'<span class="pill2" style="color:var(--green)">✓ verified live 2026-06-17</span>':e.inferred?'<span class="pill2">inferred — confirm via Test</span>':'<span class="pill2">from source</span>'}</h4>
+      <pre>${esc(e.shape)}</pre>
+      ${e.note?`<div class="callout ${e.broken?'red':e.slow?'warn':''}"><span class="small">${esc(e.note)}</span></div>`:''}
+      <div class="testout" id="out-${i}"><div class="status" id="st-${i}"></div><pre id="resp-${i}"></pre></div>
+    </div>`;
+  epRoot.appendChild(card);
+
+  card.querySelector('.hd').addEventListener('click',()=>card.classList.toggle('open'));
+});
+
+// keep URLs fresh (NOW changes) when opening
+function refreshUrls(){ EP.forEach((e,i)=>{ const el=document.getElementById('url-'+i); if(el) el.textContent=fullURL(e.sample); }); }
+document.getElementById('baseUrl').addEventListener('input',refreshUrls);
+
+async function hit(i){
+  const e=EP[i], url=fullURL(e.sample);
+  const out=document.getElementById('out-'+i), st=document.getElementById('st-'+i), resp=document.getElementById('resp-'+i);
+  out.classList.add('show'); st.innerHTML='<span class="muted">requesting…</span>'; resp.textContent='';
+  const t0=performance.now();
+  try{
+    const r=await fetch(url,{method:'GET'});
+    const txt=await r.text();
+    const ms=Math.round(performance.now()-t0);
+    let body=txt, parsed=null;
+    try{ parsed=JSON.parse(txt); body=JSON.stringify(parsed,null,2); }
+    catch(_){ const m=txt.search(/[\[{]/); if(m>0){ try{ parsed=JSON.parse(txt.slice(m)); body='⚠ leading text trimmed:\n'+JSON.stringify(parsed,null,2);}catch(__){} } }
+    st.innerHTML=`<span class="${r.ok?'ok':'err'}">HTTP ${r.status}</span> · ${ms}ms · ${txt.length} bytes`;
+    resp.textContent=body.slice(0,4000)+(body.length>4000?'\n… truncated …':'');
+    return {req:e.req,url,status:r.status,ms,bytes:txt.length,sample:(parsed??txt)};
+  }catch(err){
+    st.innerHTML=`<span class="err">FAILED</span> — ${esc(String(err.message||err))} (likely CORS; use the curl line)`;
+    return {req:e.req,url,status:'error',error:String(err.message||err)};
+  }
+}
+document.querySelectorAll('.testbtn').forEach(b=>b.addEventListener('click',()=>{
+  b.closest('.ep').classList.add('open'); hit(+b.dataset.i);
+}));
+
+// run all + copy
+const prog=document.getElementById('prog'), runStatus=document.getElementById('runStatus');
+document.getElementById('runAll').addEventListener('click',async()=>{
+  refreshUrls(); const results=[];
+  for(let i=0;i<EP.length;i++){
+    document.getElementById('ep-'+EP[i].req).classList.add('open');
+    runStatus.innerHTML=`Testing <code>${EP[i].req}</code> (${i+1}/${EP.length})…`;
+    prog.style.width=((i+1)/EP.length*100)+'%';
+    results.push(await hit(i));
+  }
+  lastResults={base:baseEl(),ran:new Date().toISOString(),results};
+  await copyResults();
+  const ok=results.filter(r=>r.status===200).length;
+  runStatus.innerHTML=`Done — ${ok}/${EP.length} returned HTTP 200. Bundle copied to clipboard. <b>Paste it back to confirm shapes.</b>`;
+});
+async function copyResults(){
+  if(!lastResults){runStatus.textContent='Nothing to copy yet — run the suite first.';return;}
+  try{ await navigator.clipboard.writeText(JSON.stringify(lastResults,null,2)); }
+  catch(_){ const ta=document.createElement('textarea'); ta.value=JSON.stringify(lastResults,null,2); document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+}
+document.getElementById('copyAll').addEventListener('click',copyResults);
+</script>
+</body>
+</html>
