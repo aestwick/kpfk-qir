@@ -165,7 +165,10 @@ export async function POST(request: NextRequest) {
     // Normalize + validate. A row needs a key and a name; everything else is optional.
     // De-dupe by key within the payload (last write wins) so a doubled paste row
     // doesn't trip the upsert's "cannot affect row a second time" error.
-    const byKey = new Map<string, { station_id: string; key: string; show_name: string; category: string | null; primary_language: string | null; active: boolean }>()
+    // archived_at: null on re-add un-archives a previously soft-deleted key, so
+    // pasting/discovering a show you'd archived brings it back live rather than
+    // leaving it active-but-archived.
+    const byKey = new Map<string, { station_id: string; key: string; show_name: string; category: string | null; primary_language: string | null; active: boolean; archived_at: null }>()
     const skipped: { row: number; reason: string }[] = []
 
     input.forEach((raw: Record<string, unknown>, i: number) => {
@@ -180,7 +183,7 @@ export async function POST(request: NextRequest) {
         ? String(raw.category).trim() : null
       const primary_language = raw.primary_language != null && String(raw.primary_language).trim() !== ''
         ? String(raw.primary_language).trim().toLowerCase() : null
-      byKey.set(key, { station_id: stationId, key, show_name, category, primary_language, active: true })
+      byKey.set(key, { station_id: stationId, key, show_name, category, primary_language, active: true, archived_at: null })
     })
 
     const rows = Array.from(byKey.values())
@@ -224,6 +227,15 @@ export async function PATCH(request: NextRequest) {
         if (allowedFields.includes(key)) {
           safeUpdates[key] = value
         }
+      }
+
+      // Soft-delete: `archived` is translated to the archived_at tombstone rather
+      // than written directly. Archiving also deactivates so it can't pull even if
+      // it was active; restoring clears the tombstone and leaves it inactive for
+      // the operator to re-activate deliberately.
+      if (typeof updates.archived === 'boolean') {
+        safeUpdates.archived_at = updates.archived ? new Date().toISOString() : null
+        if (updates.archived) safeUpdates.active = false
       }
 
       if (Object.keys(safeUpdates).length === 0) {
