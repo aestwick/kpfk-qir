@@ -165,7 +165,8 @@ supabase/migrations/
   ...
   033_api_keys.sql              — api_keys table (station-scoped) + RLS
                                   (admin-write, member-read) + audit trigger
-  034_confessor_ingest.sql      — stations.ingest_primary + confessor_base_url;
+  034_show_keys_archived_at.sql — show_keys.archived_at soft-delete tombstone
+  035_confessor_ingest.sql      — stations.ingest_primary + confessor_base_url;
                                   episode_log.ingest_source/confessor_meta/
                                   human_summary; flips KPFK to Confessor-primary
 ```
