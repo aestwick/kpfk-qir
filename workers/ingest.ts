@@ -274,6 +274,7 @@ export async function processIngest(job: Job) {
     .select('*')
     .eq('station_id', stationId)
     .eq('active', true)
+    .is('archived_at', null)
 
   if (showsErr) throw new Error(`Failed to fetch shows: ${showsErr.message}`)
   if (!shows?.length) return { newEpisodes: 0 }

@@ -4,7 +4,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
 import { getSetting, getCurationPrompt, isComplianceBlocking } from '../lib/settings'
 import { getStation } from '../lib/stations'
-import { resolveGroupDisplayName, resolveShowGroup } from '../lib/shows'
+import { resolveGroupDisplayName, showGroupKey } from '../lib/shows'
 import {
   episodeToQirEntry,
   formatFullReport,
@@ -113,9 +113,11 @@ export async function processGenerateQir(job: Job) {
     .from('show_keys')
     .select('key, show_name, feed_name, display_name, show_group')
     .eq('station_id', stationId)
+  // Case-insensitive merge key so feeds whose group labels differ only by
+  // capitalization still resolve to one logical show (showGroupKey).
   const feedsByGroup = new Map<string, typeof showKeyRows>()
   for (const r of showKeyRows ?? []) {
-    const group = resolveShowGroup(r)
+    const group = showGroupKey(r)
     const list = feedsByGroup.get(group) ?? []
     list.push(r)
     feedsByGroup.set(group, list)
@@ -123,7 +125,7 @@ export async function processGenerateQir(job: Job) {
   const stripPrefixes = station.show_name_strip_prefixes ?? null
   const displayNameByKey = new Map<string, string>()
   for (const r of showKeyRows ?? []) {
-    const group = resolveShowGroup(r)
+    const group = showGroupKey(r)
     displayNameByKey.set(r.key, resolveGroupDisplayName(feedsByGroup.get(group) ?? [r], stripPrefixes))
   }
 
