@@ -8,6 +8,7 @@ import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { fetchConfessorEpisodes, projectPubfile } from '../lib/confessor'
+import { buildHumanFieldSources } from '../lib/field-sources'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -123,6 +124,15 @@ async function processShowConfessor(
     const end = startMs != null ? computeEnd(startMs, durationMinutes) : { endTime: '', airEnd: '' }
 
     const proj = projectPubfile(row.pubfile)
+    // Seed the per-field provenance with the human copies. The summarizer fills
+    // the AI copies later and resolves the active winner per field (human wins
+    // by default; categories default to AI — see lib/field-sources.ts).
+    const fieldSources = buildHumanFieldSources({
+      host: proj.host,
+      guest: proj.guest,
+      issue_category: proj.issueCategory,
+      summary: proj.humanSummary,
+    })
 
     const { error: insertErr } = await supabaseAdmin
       .from('episode_log')
@@ -141,16 +151,17 @@ async function processShowConfessor(
         air_date: startStr?.airDate ?? null,
         air_start: startStr?.airStart ?? null,
         air_end: end.airEnd || null,
-        // Human-authored fields from the Confessor pubfile. Stored as the
-        // authoritative seed; the AI summarizer only fills what's missing.
+        // Human-authored fields from the Confessor pubfile. confessor_meta keeps
+        // the raw pubfile losslessly; field_sources is the human/AI toggle layer.
         ingest_source: 'confessor',
         confessor_meta: row.pubfile && row.pubfile.length ? row.pubfile : null,
+        field_sources: fieldSources,
         host: proj.host,
         guest: proj.guest,
         issue_category: proj.issueCategory,
         human_summary: proj.humanSummary,
+        summary: proj.humanSummary,
         headline: null,
-        summary: null,
         transcript_url: null,
         compliance_status: null,
         compliance_report: null,

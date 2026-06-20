@@ -109,6 +109,8 @@ export interface EpisodeLog {
   confessor_meta: ConfessorPubfile[] | null
   /** Human-written narrative synthesized from the Confessor pubfile; wins over the AI summary. */
   human_summary: string | null
+  /** Per-field human/ai/manual candidates + active selector (see lib/field-sources.ts). */
+  field_sources: import('./field-sources').FieldSources | null
   error_message: string | null
   retry_count: number
   created_at: string
