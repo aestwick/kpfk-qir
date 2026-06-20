@@ -7,7 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
-import { resolveGroupDisplayName, resolveShowGroup, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
+import { resolveGroupDisplayName, showGroupKey, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
 import { episodeHref } from '@/lib/nav'
@@ -786,9 +786,12 @@ export default function SettingsPage() {
   // never the name — names can differ across feeds. Keys stay individually
   // controllable (name override, group, active, exclude, category).
   const groupedShows = (() => {
+    // Key by the case-insensitive merge key (showGroupKey) so feeds whose group
+    // labels differ only by capitalization collapse into one logical show — same
+    // grouping the QIR report uses.
     const byGroup = new Map<string, Show[]>()
     for (const s of filteredShows) {
-      const g = resolveShowGroup(s)
+      const g = showGroupKey(s)
       const list = byGroup.get(g) ?? []
       list.push(s)
       byGroup.set(g, list)
@@ -799,6 +802,18 @@ export default function SettingsPage() {
       name: resolveGroupDisplayName(feeds, stripPrefixes),
     }))
     return groups.sort((a, b) => a.name.localeCompare(b.name) || a.group.localeCompare(b.group))
+  })()
+
+  // Existing group labels (case-insensitively de-duped, keeping the first-seen
+  // spelling) to suggest in the Group field — autocomplete without forcing a
+  // choice, so a brand-new group can still be typed.
+  const existingGroups = (() => {
+    const seen = new Map<string, string>()
+    for (const s of shows) {
+      const label = s.show_group?.trim()
+      if (label && !seen.has(label.toLowerCase())) seen.set(label.toLowerCase(), label)
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b))
   })()
 
   if (loading) return (
@@ -1344,6 +1359,7 @@ export default function SettingsPage() {
                         <input
                           ref={showEditRef as React.RefObject<HTMLInputElement>}
                           type="text"
+                          list="show-groups"
                           value={editingShowValue}
                           onChange={(e) => setEditingShowValue(e.target.value)}
                           onBlur={() => saveShowEdit(show.id)}
@@ -1355,12 +1371,12 @@ export default function SettingsPage() {
                             }
                           }}
                           placeholder={show.key}
-                          className="border rounded px-2 py-0.5 text-sm w-28 font-mono dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+                          className="border rounded px-2 py-0.5 text-xs w-28 font-mono dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
                         />
                       ) : (
                         <button
                           onClick={() => startShowEdit(show, 'show_group')}
-                          className="text-left hover:text-blue-600 cursor-pointer font-mono text-xs"
+                          className="block text-left hover:text-blue-600 cursor-pointer font-mono text-xs border border-transparent rounded px-2 py-0.5 w-28 truncate"
                           title="Click to edit. Set the same group on multiple feeds to merge them into one logical show."
                         >
                           {show.show_group
@@ -1514,6 +1530,11 @@ export default function SettingsPage() {
             <datalist id="show-itunes-categories">
               {['Arts','Business','Comedy','Education','Games & Hobbies','Government & Organizations','Health','Kids & Family','Music','News & Politics','Religion & Spirituality','Science & Medicine','Society & Culture','Sports & Recreation','Technology','TV & Film'].map((c) => (
                 <option key={c} value={c} />
+              ))}
+            </datalist>
+            <datalist id="show-groups">
+              {existingGroups.map((g) => (
+                <option key={g} value={g} />
               ))}
             </datalist>
           </div>

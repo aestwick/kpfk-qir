@@ -74,6 +74,17 @@ export function resolveShowGroup(row: Pick<ShowNameFields, 'key' | 'show_group'>
   return row.show_group?.trim() || row.key
 }
 
+/**
+ * Normalized merge key for grouping feeds into one logical show. Same identity as
+ * {@link resolveShowGroup} but case-insensitive, so manually-typed group labels
+ * that differ only by capitalization ("Rhapsody in Black" vs "Rhapsody In Black")
+ * still merge. Use this for Map keys / grouping; use {@link resolveShowGroup} or
+ * {@link resolveGroupDisplayName} for the human-readable label.
+ */
+export function showGroupKey(row: Pick<ShowNameFields, 'key' | 'show_group'>): string {
+  return resolveShowGroup(row).toLowerCase()
+}
+
 /** ISO 639-1 code assumed when a show has no explicit primary language. */
 export const DEFAULT_SHOW_LANGUAGE = 'en'
 
