@@ -50,7 +50,11 @@ workers/
                       it's the primary + configured, else RSS; Confessor falls
                       back to RSS per show on failure. fetch → parse → dedupe
                       (by mp3_url) → insert episodes as pending
-  transcribe.ts     — ffmpeg chunk → Groq Whisper → corrections → store transcript + VTT
+  transcribe.ts     — Resolve provider plan → run transcription (priority order,
+                      auto-fallback via lib/transcription) → corrections → store
+                      transcript + VTT. Groq path ffmpeg-chunks; Deepgram/
+                      AssemblyAI take mp3_url directly. Diarized speaker labels →
+                      WebVTT voice spans. Records provider/model per transcript.
   summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata.
                       Records AI copy + resolves human/AI winner per field
                       (lib/field-sources.ts)
@@ -64,6 +68,11 @@ workers/
 ```
 lib/
   supabase.ts       — Supabase clients (admin for server, browser for client)
+  transcription/    — Pluggable speech-to-text. index.ts: provider registry +
+                      resolveProviderPlan (priority/enable from settings) +
+                      runTranscription (fallback) + cost rates + config status.
+                      groq.ts (chunked Whisper), deepgram.ts / assemblyai.ts
+                      (URL-based, diarizing). vtt.ts: speaker-aware VTT builder.
   confessor.ts      — Confessor archive API client (?req=fil) + pubfile projection
                       (host/guest/issues/human_summary) with loose-JSON parsing
   field-sources.ts  — Per-field human/ai/manual provenance engine (build/apply/
@@ -174,6 +183,9 @@ supabase/migrations/
                                   human_summary; flips KPFK to Confessor-primary
   036_field_sources.sql         — episode_log.field_sources (per-field human/ai/
                                   manual copies + active selector)
+  037_transcription_providers.sql — transcripts.provider/model; seeds
+                                  transcription_providers (order+enable) +
+                                  diarization_enabled defaults in qir_settings
 ```
 
 **Key tables:**
@@ -203,6 +215,8 @@ package.json            — Scripts: dev, build, workers, start:all
 Failures at any stage set `status = 'failed'` with `error_message` and increment `retry_count`.
 
 **Worker chaining:** Ingest completion auto-triggers transcription (if new episodes found). Transcription completion auto-triggers summarization (if episodes transcribed). QIR generation is manual only.
+
+**Transcription is provider-pluggable with fallback** (`lib/transcription/`). The worker resolves a per-station, ordered provider plan from the `transcription_providers` setting (array order = priority; each entry has an `enabled` toggle), keeping only providers whose API key is present in the env, then tries each in turn until one succeeds (`runTranscription`). **Groq** (whisper-large-v3) keeps the ffmpeg-chunk path; **Deepgram** (nova-2) and **AssemblyAI** (universal) take the `mp3_url` directly (no ffmpeg) and **diarize** (speaker labels), gated by `diarization_enabled`. A genuine 404 (`AudioUnavailableError`) is terminal → episode marked `unavailable` (no fallthrough — no provider can fetch a missing file); other provider errors fall through to the next, and only an all-providers failure marks the episode `failed`. Each transcript records the `provider`/`model` that produced it; usage cost is logged at the actual provider's rate (`lib/usage.ts`). Speaker labels are emitted into the VTT as WebVTT `<v Speaker N>` voice spans — `lib/vtt.ts#parseVtt` strips those tags so transcript-search cues stay clean, and the plain `transcript` column stays speaker-free so summarization is undisturbed. Order/toggles + the diarization switch are edited at **Settings → Pipeline → Transcription Providers** (per-station override); the dashboard badges each provider configured/missing from `providerConfigStatus()` (key **presence** only, never the value). Defaults keep Groq primary (lowest cost, prior behaviour) with Deepgram then AssemblyAI as fallbacks — reorder to put a diarizing provider first for speaker captions on every episode.
 
 **Episode source is per-station (Confessor primary, RSS fallback).** `stations.ingest_primary` (`'rss'` default | `'confessor'`) + `stations.confessor_base_url` pick where `workers/ingest.ts` pulls episodes. When Confessor is the primary AND a host is configured, ingest calls the archive's Confessor API (`?req=fil&id=<show key>` via `lib/confessor.ts`) — which, unlike RSS, returns the **human-entered `pubfile`** (host, guest name/topic, FCC `issue1..3`, free-text notes/rundown). If Confessor fails for a show, that show falls back to its RSS feed; everything else (dedupe by `mp3_url`, `pending` insert, the transcribe→summarize chain) is identical regardless of source. **Human metadata is preserved losslessly**: the full pubfile array is stored verbatim in `episode_log.confessor_meta` (jsonb), projected onto `host`/`guest`/`issue_category`, and any narrative kept in `human_summary`. Only KPFK is Confessor-primary (the only verified host, migration 035); other stations stay RSS until their host is confirmed.
 

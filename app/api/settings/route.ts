@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { invalidateSetting } from '@/lib/settings'
+import { providerConfigStatus } from '@/lib/transcription'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,7 +74,10 @@ export async function GET(request: NextRequest) {
       settings[row.key] = row.value
     }
 
-    return NextResponse.json({ settings, rows: globalRes.data })
+    // Non-secret transcription provider status: which API keys are present in the
+    // environment (presence only — never the key value), so the UI can badge each
+    // provider as configured/missing.
+    return NextResponse.json({ settings, rows: globalRes.data, providerStatus: providerConfigStatus() })
   } catch (err) {
     console.error('GET /api/settings failed:', err)
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 })

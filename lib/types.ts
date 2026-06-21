@@ -151,6 +151,10 @@ export interface Transcript {
   language: string | null
   english_transcript: string | null
   english_vtt: string | null
+  // Which speech-to-text engine produced this transcript, and its model/tier.
+  // Null for transcripts created before the pluggable-provider migration (037).
+  provider: string | null
+  model: string | null
   created_at: string
 }
 

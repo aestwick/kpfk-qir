@@ -12,8 +12,14 @@ async function insertUsage(row: Record<string, unknown>, context: string) {
   }
 }
 
-// Groq Whisper pricing: $0.111 per hour of audio
-const GROQ_WHISPER_COST_PER_SECOND = 0.111 / 3600
+// Per-provider transcription pricing (USD per second of audio). Groq is the
+// verified published rate; Deepgram/AssemblyAI are list-price estimates (their
+// diarization is included free) — advisory only, adjust per account tier.
+const TRANSCRIBE_COST_PER_SECOND: Record<string, number> = {
+  groq: 0.111 / 3600, // $0.111 / hr (whisper-large-v3)
+  deepgram: 0.0043 / 60, // $0.0043 / min (nova-2 prerecorded)
+  assemblyai: 0.12 / 3600, // ~$0.12 / hr (Universal) — estimate
+}
 
 // OpenAI GPT-4o-mini pricing: $0.15/1M input, $0.60/1M output
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
@@ -22,25 +28,30 @@ const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 // OpenAI text-embedding-3-small pricing: $0.02/1M tokens
 const OPENAI_EMBEDDING_COST_PER_TOKEN = 0.02 / 1_000_000
 
+// Provider/model are recorded per call now that transcription is pluggable
+// (Groq Whisper, Deepgram, AssemblyAI). Cost is derived from the provider's
+// per-second rate; an unknown provider logs zero cost rather than mispricing.
 export async function logTranscriptionUsage(
   stationId: string,
   episodeId: number,
   durationSeconds: number,
-  metadata?: Record<string, unknown>
+  options?: { provider?: string; model?: string; metadata?: Record<string, unknown> }
 ) {
-  const estimatedCost = durationSeconds * GROQ_WHISPER_COST_PER_SECOND
+  const provider = options?.provider ?? 'groq'
+  const model = options?.model ?? 'whisper-large-v3'
+  const estimatedCost = durationSeconds * (TRANSCRIBE_COST_PER_SECOND[provider] ?? 0)
 
   await insertUsage({
     station_id: stationId,
     episode_id: episodeId,
-    service: 'groq',
-    model: 'whisper-large-v3',
+    service: provider,
+    model,
     operation: 'transcribe',
     input_tokens: 0,
     output_tokens: 0,
     duration_seconds: durationSeconds,
     estimated_cost: estimatedCost,
-    metadata: metadata ?? {},
+    metadata: options?.metadata ?? {},
   }, 'transcription')
 }
 

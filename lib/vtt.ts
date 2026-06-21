@@ -49,6 +49,9 @@ export function parseVtt(vtt: string | null | undefined): VttCue[] {
     const text = lines
       .slice(timingLineIdx + 1)
       .join(' ')
+      // Strip WebVTT voice/markup tags (e.g. <v Speaker 0>, </v>) that diarized
+      // captions carry, so search cues hold spoken text only — never a label.
+      .replace(/<\/?[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
     if (!text) continue
