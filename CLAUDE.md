@@ -45,9 +45,15 @@ Background workers (BullMQ + Redis) process episodes through each stage. An hour
 ```
 workers/
   index.ts          — BullMQ worker setup, cron scheduling, stage chaining
-  ingest.ts         — RSS fetch → parse → dedupe → insert episodes
+  ingest.ts         — Episode ingest. Per station, source = Confessor API
+                      (?req=fil — carries human host/guest/issue metadata) when
+                      it's the primary + configured, else RSS; Confessor falls
+                      back to RSS per show on failure. fetch → parse → dedupe
+                      (by mp3_url) → insert episodes as pending
   transcribe.ts     — ffmpeg chunk → Groq Whisper → corrections → store transcript + VTT
-  summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata
+  summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata.
+                      Records AI copy + resolves human/AI winner per field
+                      (lib/field-sources.ts)
   generate-qir.ts   — Group episodes → OpenAI curation → build draft
   discover-sync.ts  — Daily: scrape each station's archive program list →
                       insert NEW show_keys as inactive (opt-out onboarding)
@@ -58,6 +64,10 @@ workers/
 ```
 lib/
   supabase.ts       — Supabase clients (admin for server, browser for client)
+  confessor.ts      — Confessor archive API client (?req=fil) + pubfile projection
+                      (host/guest/issues/human_summary) with loose-JSON parsing
+  field-sources.ts  — Per-field human/ai/manual provenance engine (build/apply/
+                      resolve/toggle); shared by workers + episode detail UI
   queue.ts          — BullMQ queue instances (ingest, transcribe, summarize, generate-qir)
   settings.ts       — Settings cache (60s TTL) reading from qir_settings table
   usage.ts          — Cost logging helpers (Groq per-second, OpenAI per-token)
@@ -158,6 +168,12 @@ supabase/migrations/
   ...
   033_api_keys.sql              — api_keys table (station-scoped) + RLS
                                   (admin-write, member-read) + audit trigger
+  034_show_keys_archived_at.sql — show_keys.archived_at soft-delete tombstone
+  035_confessor_ingest.sql      — stations.ingest_primary + confessor_base_url;
+                                  episode_log.ingest_source/confessor_meta/
+                                  human_summary; flips KPFK to Confessor-primary
+  036_field_sources.sql         — episode_log.field_sources (per-field human/ai/
+                                  manual copies + active selector)
 ```
 
 **Key tables:**
@@ -187,6 +203,10 @@ package.json            — Scripts: dev, build, workers, start:all
 Failures at any stage set `status = 'failed'` with `error_message` and increment `retry_count`.
 
 **Worker chaining:** Ingest completion auto-triggers transcription (if new episodes found). Transcription completion auto-triggers summarization (if episodes transcribed). QIR generation is manual only.
+
+**Episode source is per-station (Confessor primary, RSS fallback).** `stations.ingest_primary` (`'rss'` default | `'confessor'`) + `stations.confessor_base_url` pick where `workers/ingest.ts` pulls episodes. When Confessor is the primary AND a host is configured, ingest calls the archive's Confessor API (`?req=fil&id=<show key>` via `lib/confessor.ts`) — which, unlike RSS, returns the **human-entered `pubfile`** (host, guest name/topic, FCC `issue1..3`, free-text notes/rundown). If Confessor fails for a show, that show falls back to its RSS feed; everything else (dedupe by `mp3_url`, `pending` insert, the transcribe→summarize chain) is identical regardless of source. **Human metadata is preserved losslessly**: the full pubfile array is stored verbatim in `episode_log.confessor_meta` (jsonb), projected onto `host`/`guest`/`issue_category`, and any narrative kept in `human_summary`. Only KPFK is Confessor-primary (the only verified host, migration 035); other stations stay RSS until their host is confirmed.
+
+**Per-field source provenance (human vs AI, both kept).** For the four dual-authored fields (`host`, `guest`, `issue_category`, `summary`), the app keeps **both** the human (Confessor) and AI copies plus a per-field `active` selector in `episode_log.field_sources` (jsonb) — the flat columns hold the *resolved* active value so every downstream reader (QIR, exports, public API, episode table) is unchanged. Logic lives in `lib/field-sources.ts` (pure, shared by workers + UI): ingest seeds the human copy (`buildHumanFieldSources`); summarize records the AI copy and resolves the winner (`applyAi`) — **human wins by default, but `issue_category` defaults to AI** (the model catches issues humans under-tag); a hand edit or the per-field toggle (`setFieldChoice`, `PATCH …{action:'set-field-source'}`) **pins** the field so a later re-summarize won't override the choice. Nothing is destroyed on conflict — both copies persist and the UI (`FieldSourcesCard` on the episode detail page) shows a `human ≠ AI` badge and a "repeated on N episodes — likely generic" warning when a human summary is byte-identical across a show (boilerplate guard, surfaced via `humanSummaryRepeats` from the episode GET).
 
 **Pipeline pause is layered** (`lib/settings.ts#isPipelinePaused(stationId?)`). A **global** master flag (`qir_settings.pipeline_paused`) pauses everything — it's the only signal that can BullMQ-`pause()` the *shared* worker pool wholesale (`workers/index.ts#syncPipelineMode`). Each station may *additionally* be paused on its own via `station_settings(station_id,'pipeline_paused')`; since the shared pool can't be paused per station, per-station pause is enforced one level up — the ingest dispatcher skips paused stations on fan-out, the auto-chain hooks skip them, and each stage processor (`transcribe`/`summarize`/`compliance`) early-skips a job whose station is paused. Effective state = `global OR station`. The Jobs page (active station) drives the global flag; the super-admin **Master Control** (`/dashboard/master` ↔ `api/admin/overview`) drives per-station pause/resume, run-now, and failed-job retry/clear across all stations. `isStationPaused(stationId)` reads a station's own flag in isolation (for the master view). Both pause reads are uncached (control signal).
 

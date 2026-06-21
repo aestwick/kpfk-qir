@@ -10,6 +10,7 @@ import { resolveOrigin } from '@/lib/nav'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import type { SeekToFn } from '@/app/components/episode-media'
 import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
+import { DUAL_FIELDS, type DualField, type FieldSource, type FieldSources, resolveChoice, hasConflict } from '@/lib/field-sources'
 
 /* ─── lazy-loaded media components ─── */
 const AudioPlayerWithCaptions = dynamic(() => import('@/app/components/episode-media').then(m => ({ default: m.AudioPlayerWithCaptions })), {
@@ -41,6 +42,7 @@ interface Episode {
   air_start: string | null
   air_end: string | null
   issue_category: string | null
+  field_sources: FieldSources | null
   error_message: string | null
   retry_count: number
   compliance_report: string | null
@@ -187,6 +189,111 @@ function InlineEditField({
       {value || '\u2014'}
       <span className="ml-1 text-gray-300 dark:text-warm-600 opacity-0 group-hover:opacity-100 text-xs">✎</span>
     </p>
+  )
+}
+
+/* ─── Per-field Human vs AI source toggle ─── */
+const FIELD_LABELS: Record<DualField, string> = {
+  host: 'Host',
+  guest: 'Guest',
+  issue_category: 'Issue Category',
+  summary: 'Summary',
+}
+
+function FieldSourcesCard({
+  episodeId,
+  fieldSources,
+  humanSummaryRepeats,
+  onChanged,
+}: {
+  episodeId: string
+  fieldSources: FieldSources
+  humanSummaryRepeats: number
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState<string | null>(null)
+
+  // Only show fields that actually have an alternative to choose between (a
+  // human AND an ai copy), or a manual override — otherwise there's no toggle.
+  const rows = DUAL_FIELDS.filter((f) => {
+    const c = fieldSources[f]
+    if (!c) return false
+    const copies = [c.human, c.ai, c.manual].filter((v) => v && v.trim()).length
+    return copies >= 1 && (c.human || c.ai)
+  })
+  if (rows.length === 0) return null
+
+  async function choose(field: DualField, source: FieldSource) {
+    setBusy(`${field}:${source}`)
+    await authedFetch(`/api/episodes/${episodeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set-field-source', field, source }),
+    })
+    setBusy(null)
+    onChanged()
+  }
+
+  return (
+    <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Field Sources — Human vs AI</h3>
+        <span className="text-[11px] text-gray-400 dark:text-warm-500">Active copy is used in the report</span>
+      </div>
+      {rows.map((field) => {
+        const c = fieldSources[field]!
+        const conflict = hasConflict(c)
+        const active = resolveChoice(c)
+        const options: { source: FieldSource; label: string; value: string | null }[] = [
+          { source: 'human', label: 'Human', value: c.human },
+          { source: 'ai', label: 'AI', value: c.ai },
+        ]
+        if (c.manual && c.manual.trim()) options.push({ source: 'manual', label: 'Manual', value: c.manual })
+        return (
+          <div key={field} className="border-t dark:border-warm-700 pt-3 first:border-t-0 first:pt-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-sm font-medium dark:text-warm-100">{FIELD_LABELS[field]}</span>
+              {conflict && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" title="Human and AI values differ">
+                  human ≠ AI
+                </span>
+              )}
+              {field === 'summary' && humanSummaryRepeats >= 3 && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300" title="This human summary is identical on other episodes of this show">
+                  repeated on {humanSummaryRepeats} episodes — likely generic
+                </span>
+              )}
+              <div className="ml-auto inline-flex rounded-md overflow-hidden border dark:border-warm-600">
+                {options.map((o) => {
+                  const disabled = !o.value || !o.value.trim() || busy !== null
+                  const isActive = c.active === o.source
+                  return (
+                    <button
+                      key={o.source}
+                      onClick={() => choose(field, o.source)}
+                      disabled={disabled}
+                      className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                        isActive
+                          ? 'bg-blue-600 text-white'
+                          : disabled
+                          ? 'bg-gray-50 text-gray-300 dark:bg-warm-800 dark:text-warm-600 cursor-not-allowed'
+                          : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-warm-700 dark:text-warm-200 dark:hover:bg-warm-600'
+                      }`}
+                      title={o.value || `No ${o.label.toLowerCase()} value`}
+                    >
+                      {o.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <p className="text-sm text-gray-700 dark:text-warm-200 whitespace-pre-wrap break-words">
+              {active || <span className="text-gray-400 dark:text-warm-500">—</span>}
+            </p>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -350,6 +457,7 @@ export default function EpisodeDetailPage() {
   const [resolveNotes, setResolveNotes] = useState('')
   const [showResolved, setShowResolved] = useState(false)
   const [highlightText, setHighlightText] = useState<string | null>(null)
+  const [humanSummaryRepeats, setHumanSummaryRepeats] = useState(0)
   const [toast, setToast] = useState<string | null>(null)
 
   // Text selection correction toolbar state
@@ -371,6 +479,7 @@ export default function EpisodeDetailPage() {
       setTranscript(data.transcript)
       setEditSummary(data.episode.summary ?? '')
       setEditCategory(data.episode.issue_category ?? '')
+      setHumanSummaryRepeats(data.humanSummaryRepeats ?? 0)
     }
     if (flagsRes.ok) {
       const data = await flagsRes.json()
@@ -686,6 +795,16 @@ export default function EpisodeDetailPage() {
           </div>
         ))}
       </div>
+
+      {/* Per-field Human vs AI source toggle (only when a Confessor copy exists) */}
+      {episode.field_sources && (
+        <FieldSourcesCard
+          episodeId={id}
+          fieldSources={episode.field_sources}
+          humanSummaryRepeats={humanSummaryRepeats}
+          onChanged={fetchEpisode}
+        />
+      )}
 
       {/* Action buttons */}
       <div className="flex gap-3 flex-wrap">

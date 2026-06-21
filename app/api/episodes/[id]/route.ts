@@ -3,6 +3,9 @@ import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { DUAL_FIELDS, DualField, FieldSource, FieldSources, setFieldChoice } from '@/lib/field-sources'
+
+const isDualField = (k: string): k is DualField => (DUAL_FIELDS as string[]).includes(k)
 
 export async function GET(
   request: NextRequest,
@@ -69,10 +72,30 @@ export async function GET(
       })
     }
 
+    // Boilerplate guard: a Confessor human summary that's byte-identical across
+    // many of a show's episodes is almost certainly a static blurb, not a real
+    // per-episode rundown. Count siblings sharing this episode's human summary so
+    // the UI can warn "likely generic — consider AI". Cheap: one head-count query,
+    // only when a human summary exists.
+    let humanSummaryRepeats = 0
+    const fs = episodeResult.data.field_sources as FieldSources | null
+    const humanSummary = fs?.summary?.human?.trim()
+    if (humanSummary) {
+      const { count } = await supabase
+        .from('episode_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('station_id', stationId)
+        .eq('show_key', episodeResult.data.show_key)
+        .neq('id', episodeId)
+        .eq('field_sources->summary->>human', humanSummary)
+      humanSummaryRepeats = count ?? 0
+    }
+
     return NextResponse.json({
       episode: episodeResult.data,
       transcript: transcriptResult.data ?? null,
       complianceFlags: flagsResult.data ?? [],
+      humanSummaryRepeats,
     })
   } catch (err) {
     console.error('GET /api/episodes/[id] failed:', err)
@@ -165,6 +188,35 @@ export async function PATCH(
       return NextResponse.json({ ok: true, message: 'Episode reset to pending' })
     }
 
+    // Toggle which copy (human / ai / manual) is active for one dual-authored
+    // field. Pins the field so a later re-summarize won't override the choice.
+    if (action === 'set-field-source') {
+      const field = updates.field as string
+      const source = updates.source as FieldSource
+      if (!isDualField(field) || !['human', 'ai', 'manual'].includes(source)) {
+        return NextResponse.json({ error: 'Invalid field or source' }, { status: 400 })
+      }
+      const { data: cur } = await supabase
+        .from('episode_log')
+        .select('field_sources')
+        .eq('id', episodeId)
+        .eq('station_id', stationId)
+        .single()
+      const { fieldSources, value } = setFieldChoice(
+        (cur?.field_sources as FieldSources | null) ?? null,
+        field,
+        source,
+        source === 'manual' ? (updates.value as string | null) : undefined
+      )
+      const { error } = await supabase
+        .from('episode_log')
+        .update({ field_sources: fieldSources, [field]: value, updated_at: new Date().toISOString() })
+        .eq('id', episodeId)
+        .eq('station_id', stationId)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ ok: true, field, source, value })
+    }
+
     // Generic update (edit summary, issue_category, host, guest, etc.)
     const allowedFields = ['summary', 'issue_category', 'headline', 'host', 'guest', 'status', 'error_message', 'air_date', 'compliance_report']
     const safeUpdates: Record<string, unknown> = {}
@@ -176,6 +228,26 @@ export async function PATCH(
 
     if (Object.keys(safeUpdates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+    }
+
+    // A hand edit of a dual-authored field is a manual override: record it in
+    // field_sources (pinned) so the toggle reflects it and re-summarize won't
+    // clobber it. Load once if any such field is being edited.
+    const editedDual = Object.keys(safeUpdates).filter(isDualField) as DualField[]
+    if (editedDual.length) {
+      const { data: cur } = await supabase
+        .from('episode_log')
+        .select('field_sources')
+        .eq('id', episodeId)
+        .eq('station_id', stationId)
+        .single()
+      let fieldSources: FieldSources = (cur?.field_sources as FieldSources | null) ?? {}
+      for (const f of editedDual) {
+        const res = setFieldChoice(fieldSources, f, 'manual', (safeUpdates[f] as string | null) ?? null)
+        fieldSources = res.fieldSources
+        safeUpdates[f] = res.value
+      }
+      safeUpdates.field_sources = fieldSources
     }
 
     const { error } = await supabase

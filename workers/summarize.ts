@@ -6,6 +6,7 @@ import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, i
 import { isSpendLimitError } from '../lib/retry-policy'
 import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { applyAi, FieldSources } from '../lib/field-sources'
 
 interface SummaryResponse {
   headline: string
@@ -183,15 +184,26 @@ ${transcriptText}`
         throw new Error(`OpenAI returned incomplete summary (missing headline or summary): ${content.slice(0, 200)}`)
       }
 
-      // Update episode with summary data
+      // Record the AI copy of each dual-authored field and resolve the active
+      // winner per field. Both copies are kept (field_sources); the flat columns
+      // hold the resolved value. Human wins by default, categories default to
+      // AI, and a curator's pinned toggle survives a re-summarize.
+      const { fieldSources, flat } = applyAi(episode.field_sources as FieldSources | null, {
+        host: parsed.host || null,
+        guest: parsed.guest || null,
+        issue_category: parsed.issue_category || null,
+        summary: parsed.summary || null,
+      })
+
       await supabaseAdmin
         .from('episode_log')
         .update({
           headline: parsed.headline || null,
-          summary: parsed.summary || null,
-          host: parsed.host || episode.host || null,
-          guest: parsed.guest || null,
-          issue_category: parsed.issue_category || null,
+          summary: flat.summary,
+          host: flat.host,
+          guest: flat.guest,
+          issue_category: flat.issue_category,
+          field_sources: fieldSources,
           compliance_report: parsed.discrepancy || null,
           status: 'summarized',
           error_message: null,

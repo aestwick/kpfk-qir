@@ -9,6 +9,10 @@ export interface Station {
   timezone: string | null
   rss_base_url: string | null
   mp3_filename_prefix: string | null
+  /** Full Confessor API endpoint (up to the script); null = Confessor not configured. */
+  confessor_base_url: string | null
+  /** Primary episode source: 'confessor' (RSS per-show fallback) or 'rss'. */
+  ingest_primary: 'rss' | 'confessor'
   station_id_patterns: string[] | null
   /** Prefixes stripped from auto-derived show display names (e.g. ["KPFK -"]). Display-only. */
   show_name_strip_prefixes: string[] | null
@@ -60,6 +64,21 @@ export interface StationSetting {
   updated_at: string
 }
 
+// One human-entered "pubfile" segment from the Confessor API (`?req=fil`). A
+// single airing can carry several (one per guest/segment). Every field is
+// optional — humans fill whatever they have (sometimes just a guest, sometimes
+// a full rundown), so all of it is preserved verbatim in episode_log.confessor_meta.
+export interface ConfessorPubfile {
+  pf_host?: string
+  pf_gname?: string
+  pf_gtopic?: string
+  pf_gurl?: string
+  pf_issue1?: string
+  pf_issue2?: string
+  pf_issue3?: string
+  pf_notes?: string
+}
+
 export interface EpisodeLog {
   id: number
   station_id: string
@@ -84,6 +103,14 @@ export interface EpisodeLog {
   air_start: string | null
   air_end: string | null
   issue_category: string | null
+  /** Where this episode originated: 'confessor' or 'rss'. */
+  ingest_source: 'rss' | 'confessor'
+  /** Verbatim Confessor pubfile (human host/guest/topic/issues/notes), lossless. */
+  confessor_meta: ConfessorPubfile[] | null
+  /** Human-written narrative synthesized from the Confessor pubfile; wins over the AI summary. */
+  human_summary: string | null
+  /** Per-field human/ai/manual candidates + active selector (see lib/field-sources.ts). */
+  field_sources: import('./field-sources').FieldSources | null
   error_message: string | null
   retry_count: number
   created_at: string
