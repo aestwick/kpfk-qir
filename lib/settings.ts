@@ -119,6 +119,42 @@ export async function getTranscribeBatchSize(stationId: string): Promise<number>
   return (await getSetting<number>('transcribe_batch_size', stationId)) ?? 5
 }
 
+// Speech-to-text provider order + enable toggles. Array order = priority; the
+// worker tries each enabled provider whose API key is present until one
+// succeeds (lib/transcription). Default keeps Groq primary (current behaviour /
+// lowest cost) with Deepgram then AssemblyAI as fallbacks. Per-station
+// overridable. Tolerates either a parsed array or a JSON string.
+export interface TranscriptionProviderConfig {
+  provider: string
+  enabled: boolean
+}
+
+const DEFAULT_TRANSCRIPTION_PROVIDERS: TranscriptionProviderConfig[] = [
+  { provider: 'groq', enabled: true },
+  { provider: 'deepgram', enabled: true },
+  { provider: 'assemblyai', enabled: true },
+]
+
+export async function getTranscriptionProviders(stationId: string): Promise<TranscriptionProviderConfig[]> {
+  const raw = await getSetting<unknown>('transcription_providers', stationId)
+  const arr = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string'
+      ? (() => { try { return JSON.parse(raw) } catch { return null } })()
+      : null
+  if (!Array.isArray(arr)) return DEFAULT_TRANSCRIPTION_PROVIDERS
+  const cleaned = arr
+    .filter((e): e is TranscriptionProviderConfig => !!e && typeof e.provider === 'string')
+    .map((e) => ({ provider: e.provider, enabled: e.enabled !== false }))
+  return cleaned.length ? cleaned : DEFAULT_TRANSCRIPTION_PROVIDERS
+}
+
+// Whether diarization (speaker labels) is requested from providers that support
+// it. On by default; speaker labels land in the VTT as WebVTT voice spans.
+export async function isDiarizationEnabled(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('diarization_enabled', stationId)) ?? true
+}
+
 export async function getSummarizeBatchSize(stationId: string): Promise<number> {
   return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
 }

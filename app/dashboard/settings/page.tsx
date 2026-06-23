@@ -78,6 +78,17 @@ const settingFields: SettingField[] = [
   { key: 'summarize_batch_size', label: 'Summarize Batch Size', type: 'number', autoSave: true },
 ]
 
+// Transcription providers, in default priority order. `diarization` marks
+// engines that can return speaker labels. The actual order/enabled state lives in
+// the `transcription_providers` setting; this only supplies display metadata.
+const PROVIDER_META: { id: string; label: string; diarization: boolean; note: string }[] = [
+  { id: 'groq', label: 'Groq Whisper', diarization: false, note: 'whisper-large-v3 · fast, low cost · no speakers' },
+  { id: 'deepgram', label: 'Deepgram', diarization: true, note: 'nova-2 · speaker diarization' },
+  { id: 'assemblyai', label: 'AssemblyAI', diarization: true, note: 'universal · speaker diarization' },
+]
+
+interface ProviderRow { provider: string; enabled: boolean }
+
 const PIPELINE_MODES = [
   {
     key: 'steady',
@@ -118,6 +129,11 @@ export default function SettingsPage() {
   const [savedFlash, setSavedFlash] = useState<string | null>(null)
   const [pipelineMode, setPipelineMode] = useState('steady')
   const [savingMode, setSavingMode] = useState(false)
+  // Transcription provider order/toggles + which keys are configured server-side.
+  const [providers, setProviders] = useState<ProviderRow[]>([])
+  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({})
+  const [diarizationEnabled, setDiarizationEnabled] = useState(true)
+  const [savingProviders, setSavingProviders] = useState(false)
   const [corrections, setCorrections] = useState<Correction[]>([])
   const [wordlist, setWordlist] = useState<ComplianceWord[]>([])
   const [newWord, setNewWord] = useState('')
@@ -224,6 +240,30 @@ export default function SettingsPage() {
       if (data.settings?.pipeline_mode) {
         setPipelineMode(data.settings.pipeline_mode as string)
       }
+      // Transcription providers: tolerate a parsed array or a JSON string; fall
+      // back to the known providers in default order if unset. Always reconcile
+      // against PROVIDER_META so a newly-added engine still shows up.
+      const rawProviders = data.settings?.transcription_providers
+      const parsedProviders: ProviderRow[] = (() => {
+        const arr = Array.isArray(rawProviders)
+          ? rawProviders
+          : typeof rawProviders === 'string'
+            ? (() => { try { return JSON.parse(rawProviders) } catch { return [] } })()
+            : []
+        const seen = new Set<string>()
+        const rows: ProviderRow[] = []
+        for (const e of Array.isArray(arr) ? arr : []) {
+          if (e && typeof e.provider === 'string' && PROVIDER_META.some(m => m.id === e.provider) && !seen.has(e.provider)) {
+            seen.add(e.provider)
+            rows.push({ provider: e.provider, enabled: e.enabled !== false })
+          }
+        }
+        for (const m of PROVIDER_META) if (!seen.has(m.id)) rows.push({ provider: m.id, enabled: true })
+        return rows
+      })()
+      setProviders(parsedProviders)
+      setProviderStatus((data.providerStatus as Record<string, boolean>) ?? {})
+      setDiarizationEnabled(data.settings?.diarization_enabled !== false)
       if (data.settings?.compliance_checks_enabled) {
         setComplianceChecks(data.settings.compliance_checks_enabled as Record<string, boolean>)
       }
@@ -481,6 +521,54 @@ export default function SettingsPage() {
       toast('error', 'Network error: could not reach server')
     }
     setSavingMode(false)
+  }
+
+  // Persist the transcription provider order/toggles. Order in the array = the
+  // fallback priority the worker walks (first enabled+configured wins).
+  async function saveProviders(next: ProviderRow[]) {
+    const prev = providers
+    setProviders(next) // optimistic
+    setSavingProviders(true)
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'transcription_providers', value: next }),
+      })
+      if (!res.ok) throw new Error('save failed')
+    } catch {
+      setProviders(prev) // revert
+      toast('error', 'Failed to save transcription providers')
+    }
+    setSavingProviders(false)
+  }
+
+  function moveProvider(index: number, dir: -1 | 1) {
+    const next = [...providers]
+    const target = index + dir
+    if (target < 0 || target >= next.length) return
+    ;[next[index], next[target]] = [next[target], next[index]]
+    saveProviders(next)
+  }
+
+  function toggleProviderEnabled(provider: string) {
+    saveProviders(providers.map(p => p.provider === provider ? { ...p, enabled: !p.enabled } : p))
+  }
+
+  async function toggleDiarization() {
+    const next = !diarizationEnabled
+    setDiarizationEnabled(next)
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'diarization_enabled', value: next }),
+      })
+      if (!res.ok) throw new Error('save failed')
+    } catch {
+      setDiarizationEnabled(!next)
+      toast('error', 'Failed to save diarization setting')
+    }
   }
 
   async function handleSaveCorrection(
@@ -992,6 +1080,77 @@ export default function SettingsPage() {
                 </div>
               )
             })}
+          </div>
+
+          {/* Transcription Providers */}
+          <div className="bg-white rounded-lg shadow p-4 space-y-3 dark:bg-surface-raised dark:shadow-card-dark">
+            <div>
+              <h3 className="font-semibold text-sm text-gray-500 uppercase dark:text-warm-400">Transcription Providers</h3>
+              <p className="text-xs text-gray-500 dark:text-warm-400 mt-1">
+                Speech-to-text engines tried in order — the first enabled provider whose API key is set transcribes each episode; if it fails, the next takes over. Drag priority with the arrows.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {providers.map((p, i) => {
+                const meta = PROVIDER_META.find(m => m.id === p.provider)
+                const configured = providerStatus[p.provider]
+                return (
+                  <div
+                    key={p.provider}
+                    className={`flex items-center gap-3 border rounded-lg p-3 dark:border-warm-700 ${p.enabled ? '' : 'opacity-60'}`}
+                  >
+                    <div className="flex flex-col">
+                      <button
+                        onClick={() => moveProvider(i, -1)}
+                        disabled={i === 0 || savingProviders}
+                        aria-label="Move up"
+                        className="text-gray-400 hover:text-gray-700 disabled:opacity-30 dark:text-warm-500 dark:hover:text-warm-300 leading-none"
+                      >▲</button>
+                      <button
+                        onClick={() => moveProvider(i, 1)}
+                        disabled={i === providers.length - 1 || savingProviders}
+                        aria-label="Move down"
+                        className="text-gray-400 hover:text-gray-700 disabled:opacity-30 dark:text-warm-500 dark:hover:text-warm-300 leading-none"
+                      >▼</button>
+                    </div>
+                    <span className="text-xs font-mono text-gray-400 dark:text-warm-500 w-4">{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-gray-900 dark:text-warm-100">{meta?.label ?? p.provider}</span>
+                        {meta?.diarization && (
+                          <span className="text-[10px] uppercase tracking-wide bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded dark:bg-indigo-900/30 dark:text-indigo-300">Speakers</span>
+                        )}
+                        {configured === false && (
+                          <span className="text-[10px] uppercase tracking-wide bg-red-100 text-red-700 px-1.5 py-0.5 rounded dark:bg-red-900/30 dark:text-red-300" title="No API key set on the server — this provider is skipped">Key missing</span>
+                        )}
+                        {configured === true && (
+                          <span className="text-[10px] uppercase tracking-wide bg-green-100 text-green-700 px-1.5 py-0.5 rounded dark:bg-green-900/30 dark:text-green-300">Configured</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-warm-400 truncate">{meta?.note}</p>
+                    </div>
+                    <label className="flex items-center gap-1.5 text-sm shrink-0 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={p.enabled}
+                        onChange={() => toggleProviderEnabled(p.provider)}
+                        disabled={savingProviders}
+                        className="rounded"
+                      />
+                      <span className="text-gray-600 dark:text-warm-400">Enabled</span>
+                    </label>
+                  </div>
+                )
+              })}
+            </div>
+
+            <label className="flex items-center gap-2 text-sm pt-1 cursor-pointer">
+              <input type="checkbox" checked={diarizationEnabled} onChange={toggleDiarization} className="rounded" />
+              <span className="text-gray-700 dark:text-warm-300">Diarization (speaker labels in captions)</span>
+              <span className="text-xs text-gray-400 dark:text-warm-500">— applies to providers that support it</span>
+            </label>
+            <p className="text-xs text-gray-400 dark:text-warm-500">Workers pick up provider changes on the next episode (settings cache refreshes within ~60 seconds).</p>
           </div>
 
           {/* Pipeline Health */}
