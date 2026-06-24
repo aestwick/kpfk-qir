@@ -27,6 +27,17 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
   return { start, end }
 }
 
+/**
+ * Date window for candidate selection — current quarter by default, or an explicit
+ * `{ window: { start, end } }` from job data for a historical backfill. Mirrors
+ * transcribe.ts; the chain re-enqueues thread the window through.
+ */
+function resolveWindow(job: Job): { start: string; end: string } {
+  const w = job.data?.window as { start?: string; end?: string } | undefined
+  if (w?.start && w?.end) return { start: w.start, end: w.end }
+  return getCurrentQuarterBounds()
+}
+
 export async function processSummarize(job: Job) {
   // Service-role client bypasses RLS, so the station_id filter is the only guard.
   const stationId = job.data?.stationId as string | undefined
@@ -49,7 +60,7 @@ export async function processSummarize(job: Job) {
   // summary (resolved once per batch — the 60s settings cache makes this cheap).
   const embeddingsEnabled = await isEmbeddingsEnabled(stationId)
   const embeddingModel = await getEmbeddingModel(stationId)
-  const { start, end } = getCurrentQuarterBounds()
+  const { start, end } = resolveWindow(job)
 
   // Get candidate transcribed episodes from current quarter (including those with null
   // air_date that were created during this quarter — older ingests didn't populate it)

@@ -114,19 +114,23 @@ transcribeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.transcribed ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[transcribe] completed — ${count} episodes transcribed${remaining ? ' (more remaining)' : ''}`)
+  // A backfill job carries an explicit date window; thread it through every
+  // re-enqueue (continue/backoff/chain) so the whole drain stays scoped to that
+  // quarter instead of snapping back to the current-quarter default.
+  const window = job.data?.window ? { window: job.data.window } : {}
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', { stationId }, { delay: 5 * 60 * 1000, priority })
+      await transcribeQueue.add('transcribe-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
     } else {
-      await transcribeQueue.add('transcribe-continue', { stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
+      await transcribeQueue.add('transcribe-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
     }
   }
   // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
   // Skipped while paused so a resumed pipeline doesn't fan out stale work.
   if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
     console.log(`[transcribe] ${job.data.source} auto-chain → summarize`)
-    await summarizeQueue.add('chain-summarize', { stationId, source: job.data.source, chain: true }, { priority })
+    await summarizeQueue.add('chain-summarize', { stationId, ...window, source: job.data.source, chain: true }, { priority })
   }
 })
 transcribeWorker.on('failed', (job, err) => {
@@ -145,12 +149,14 @@ summarizeWorker.on('completed', async (job) => {
   const count = job.returnvalue?.summarized ?? 0
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[summarize] completed — ${count} episodes summarized${remaining ? ' (more remaining)' : ''}`)
+  // Carry the backfill window through summarize's own continue/backoff loop too.
+  const window = job.data?.window ? { window: job.data.window } : {}
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', { stationId }, { delay: 5 * 60 * 1000, priority })
+      await summarizeQueue.add('summarize-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
     } else {
-      await summarizeQueue.add('summarize-continue', { stationId, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
+      await summarizeQueue.add('summarize-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
     }
   }
   // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).

@@ -280,7 +280,9 @@ function getRatingBarColor(score: number, max: number): string {
 }
 
 export default function GenerateQirPage() {
-  const quarterOptions = getQuarterOptions(1)
+  // Reach back far enough to select historical-backfill quarters (e.g. a one-off
+  // Q4 2020 report) for review/finalize, not just the last year.
+  const quarterOptions = getQuarterOptions(6)
   const [selectedQuarter, setSelectedQuarter] = useState(quarterOptions[0])
   const [drafts, setDrafts] = useState<QirDraft[]>([])
   const [activeDraft, setActiveDraft] = useState<QirDraft | null>(null)
