@@ -225,6 +225,29 @@ async function storageExists(bucket: string, objectPath: string): Promise<boolea
   return !!data?.some((o) => o.name === name)
 }
 
+// A file counts as "done" only when ALL THREE artifacts are present. Keying the
+// skip on the .json alone would permanently strand a partial upload (a "stub" —
+// .json written but .vtt/.txt missing after an interrupted run), since the next
+// run would see the .json and skip it. Requiring the full trio makes every re-run
+// self-healing: complete files are skipped, partials get redone (uploads upsert).
+async function storageTrioComplete(bucket: string, key: string): Promise<boolean> {
+  for (const ext of ['json', 'vtt', 'txt']) {
+    if (!(await storageExists(bucket, storageKey(key, ext)))) return false
+  }
+  return true
+}
+
+async function localTrioComplete(out: string, base: string): Promise<boolean> {
+  for (const ext of ['json', 'vtt', 'txt']) {
+    try {
+      await fs.access(path.join(out, `${base}.${ext}`))
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
 async function uploadArtifact(
   bucket: string,
   objectPath: string,
@@ -250,19 +273,17 @@ async function transcribeOne(key: string, args: Args, s3: S3Client | null): Prom
   const provider = PROVIDERS[args.provider]
   const jsonStorageKey = storageKey(key, 'json')
   const localBase = args.out ? outBaseName(key) : null
-  const localJsonPath = args.out && localBase ? path.join(args.out, `${localBase}.json`) : null
 
-  // Skip-if-exists keyed on the .json artifact at the configured destination(s).
+  // Skip only when the COMPLETE trio (.json/.vtt/.txt) already exists at the
+  // destination — a partial (stub) falls through and gets redone (see
+  // storageTrioComplete). --overwrite forces a redo regardless.
   if (!args.overwrite) {
-    const present = args.supabaseBucket
-      ? await storageExists(args.supabaseBucket, jsonStorageKey)
-      : localJsonPath
-        ? await fs
-            .access(localJsonPath)
-            .then(() => true)
-            .catch(() => false)
+    const complete = args.supabaseBucket
+      ? await storageTrioComplete(args.supabaseBucket, key)
+      : args.out && localBase
+        ? await localTrioComplete(args.out, localBase)
         : false
-    if (present) {
+    if (complete) {
       console.log(`[transcribe-r2] skip (exists): ${key}`)
       return { key, provider: args.provider, durationSec: 0, cost: 0, diarized: false, skipped: true }
     }
