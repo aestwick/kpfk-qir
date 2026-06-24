@@ -2,10 +2,11 @@
  * Standalone R2 → diarized transcript job.
  *
  * Transcribes a bunch of audio that lives in a Cloudflare R2 bucket and writes
- * one set of transcript files PER audio object to a local directory. This is a
- * one-off utility — it does NOT touch episode_log, stations, quarters, or the
- * QIR pipeline. It just reuses the pipeline's existing speech-to-text providers
- * (lib/transcription/{assemblyai,deepgram}) and VTT builder (lib/transcription/vtt).
+ * one set of transcript artifacts PER audio object — to a Supabase Storage bucket
+ * and/or a local directory. This is a one-off utility — it does NOT touch
+ * episode_log, stations, quarters, or the QIR pipeline. It just reuses the
+ * pipeline's existing speech-to-text providers (lib/transcription/{assemblyai,
+ * deepgram}) and VTT builder (lib/transcription/vtt).
  *
  * Why presigned URLs: AssemblyAI and Deepgram fetch the audio THEMSELVES over
  * HTTPS (no upload from us). R2 is S3-compatible, so for a private bucket we mint
@@ -14,28 +15,29 @@
  * (--public-base-url).
  *
  * Each provider diarizes (speaker labels) and timestamps; for every audio file we
- * write three artifacts to --out:
- *   <name>.vtt   — WebVTT with <v Speaker N> voice spans + cue timestamps (players)
- *   <name>.txt   — readable, speaker-separated, timestamped transcript (humans)
- *   <name>.json  — { source, provider, model, language, durationSec, segments[] }
+ * produce three artifacts:
+ *   <key>.vtt   — WebVTT with <v Speaker N> voice spans + cue timestamps (players)
+ *   <key>.txt   — readable, speaker-separated, timestamped transcript (humans)
+ *   <key>.json  — { source, provider, model, language, durationSec, segments[] }
  *
- * Usage (run on a host that has the R2 + provider keys in its env — e.g. the VPS):
+ * Destinations:
+ *   --supabase / --supabase-bucket <name>   upload artifacts to a Supabase Storage
+ *                                           bucket (default bucket name: transcripts).
+ *                                           Object paths mirror the R2 key (folders
+ *                                           preserved, audio extension swapped).
+ *   --out <dir>                             also/instead write flat files locally.
+ *   If a Supabase bucket is given, upload is the default and local writing is OFF
+ *   unless you also pass --out. With no Supabase bucket, it writes locally only.
  *
- *   # List + transcribe every audio object under a prefix, private bucket:
- *   npm run transcribe-r2 -- --bucket my-audio --prefix shows/2026-q2/ --provider assemblyai
+ * Usage (run INSIDE the worker container, which has the env + tsx):
  *
- *   # Specific keys only:
- *   npm run transcribe-r2 -- --bucket my-audio --keys a.mp3,b.m4a --provider deepgram
+ *   docker exec qir-worker npm run transcribe-r2 -- \
+ *     --bucket pra --provider assemblyai --supabase
  *
- *   # Public bucket (no S3 creds needed): build URLs from a base + keys/prefix list:
- *   npm run transcribe-r2 -- --public-base-url https://pub-xxx.r2.dev --keys a.mp3,b.mp3
- *
- * Env (S3 path — put these in .env alongside DEEPGRAM_API_KEY / ASSEMBLYAI_API_KEY):
- *   R2_ACCOUNT_ID          Cloudflare account id (used to build the S3 endpoint)
- *   R2_ACCESS_KEY_ID       R2 S3 API token access key id
- *   R2_SECRET_ACCESS_KEY   R2 S3 API token secret
- *   R2_BUCKET              default bucket (overridable with --bucket)
- *   R2_ENDPOINT            optional explicit S3 endpoint (else https://<acct>.r2.cloudflarestorage.com)
+ * Env (S3 path — in .env alongside DEEPGRAM_API_KEY / ASSEMBLYAI_API_KEY):
+ *   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+ *   R2_ENDPOINT (optional; else https://<acct>.r2.cloudflarestorage.com)
+ * Supabase upload reuses NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
  *
  * Flags:
  *   --bucket <name>          R2 bucket (default: $R2_BUCKET)
@@ -44,16 +46,20 @@
  *   --keys-file <path>       newline-delimited object keys (# comments + blanks ignored)
  *   --public-base-url <url>  build audio URLs as <base>/<key> instead of presigning (public bucket)
  *   --provider <id>          assemblyai | deepgram   (default: assemblyai)
- *   --out <dir>              output directory (default: ./transcripts)
+ *   --supabase               upload artifacts to Supabase Storage bucket "transcripts"
+ *   --supabase-bucket <name> upload to a named Supabase Storage bucket
+ *   --out <dir>              also write flat files to a local directory
  *   --no-diarize             disable speaker labels (diarization is ON by default)
  *   --concurrency <n>        parallel transcriptions (default: 2)
  *   --expires <sec>          presigned URL lifetime (default: 7200)
- *   --overwrite              re-transcribe even if <name>.json already exists
+ *   --limit <n>              transcribe at most the first <n> objects (sampling/A-B)
+ *   --overwrite              re-transcribe even if the .json artifact already exists
  */
 import { S3Client, ListObjectsV2Command, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import { supabaseAdmin } from '../lib/supabase'
 import { assemblyaiProvider } from '../lib/transcription/assemblyai'
 import { deepgramProvider } from '../lib/transcription/deepgram'
 import { buildVtt, formatVttTime } from '../lib/transcription/vtt'
@@ -66,6 +72,7 @@ import type {
 } from '../lib/transcription/types'
 
 const AUDIO_EXT = /\.(mp3|m4a|wav|aac|flac|ogg|opus|mp4|webm|mov)$/i
+const DEFAULT_SUPABASE_BUCKET = 'transcripts'
 
 const PROVIDERS: Record<string, TranscriptionProvider> = {
   assemblyai: assemblyaiProvider,
@@ -79,10 +86,12 @@ interface Args {
   keysFile: string | undefined
   publicBaseUrl: string | undefined
   provider: string
-  out: string
+  supabaseBucket: string | undefined
+  out: string | undefined
   diarize: boolean
   concurrency: number
   expires: number
+  limit: number | undefined
   overwrite: boolean
 }
 
@@ -95,6 +104,13 @@ function parseArgs(argv: string[]): Args {
   if (!PROVIDERS[provider]) {
     throw new Error(`--provider must be one of: ${Object.keys(PROVIDERS).join(', ')} (got "${provider}")`)
   }
+  const supabaseBucket = argv.includes('--supabase')
+    ? get('--supabase-bucket') ?? DEFAULT_SUPABASE_BUCKET
+    : get('--supabase-bucket')
+  // Local output: explicit --out, or (when no Supabase target) a sensible default.
+  const outFlag = get('--out')
+  const out = outFlag ?? (supabaseBucket ? undefined : './transcripts')
+  const limitRaw = get('--limit')
   return {
     bucket: get('--bucket') ?? process.env.R2_BUCKET,
     prefix: get('--prefix'),
@@ -105,10 +121,12 @@ function parseArgs(argv: string[]): Args {
     keysFile: get('--keys-file'),
     publicBaseUrl: get('--public-base-url')?.replace(/\/+$/, ''),
     provider,
-    out: get('--out') ?? './transcripts',
+    supabaseBucket,
+    out,
     diarize: !argv.includes('--no-diarize'),
     concurrency: Math.max(1, parseInt(get('--concurrency') ?? '2', 10) || 2),
     expires: Math.max(60, parseInt(get('--expires') ?? '7200', 10) || 7200),
+    limit: limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 1) : undefined,
     overwrite: argv.includes('--overwrite'),
   }
 }
@@ -139,7 +157,7 @@ async function listAudioKeys(s3: S3Client, bucket: string, prefix: string | unde
       new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
     )
     for (const obj of res.Contents ?? []) {
-      if (obj.Key && AUDIO_EXT.test(obj.Key) && !(obj.Key.endsWith('/'))) keys.push(obj.Key)
+      if (obj.Key && AUDIO_EXT.test(obj.Key) && !obj.Key.endsWith('/')) keys.push(obj.Key)
     }
     token = res.IsTruncated ? res.NextContinuationToken : undefined
   } while (token)
@@ -147,13 +165,8 @@ async function listAudioKeys(s3: S3Client, bucket: string, prefix: string | unde
 }
 
 /** Resolve the HTTPS URL a provider will fetch for an object key. */
-async function resolveAudioUrl(
-  key: string,
-  args: Args,
-  s3: S3Client | null,
-): Promise<string> {
+async function resolveAudioUrl(key: string, args: Args, s3: S3Client | null): Promise<string> {
   if (args.publicBaseUrl) {
-    // Encode each path segment but keep the slashes.
     const encoded = key.split('/').map(encodeURIComponent).join('/')
     return `${args.publicBaseUrl}/${encoded}`
   }
@@ -163,7 +176,12 @@ async function resolveAudioUrl(
   })
 }
 
-/** A safe, flat output basename for an object key (drops the extension). */
+/** Storage object path mirroring the R2 key with the audio extension swapped. */
+function storageKey(key: string, ext: string): string {
+  return `${key.replace(/\.[^.]+$/, '')}.${ext}`
+}
+
+/** Flat local basename for an object key (drops the extension). */
 function outBaseName(key: string): string {
   const stripped = key.replace(/\.[^.]+$/, '')
   return stripped.replace(/[\/\\]+/g, '__').replace(/[^A-Za-z0-9._-]/g, '_')
@@ -186,34 +204,71 @@ function buildSpeakerText(segments: NormalizedSegment[]): string {
   return blocks.map((b) => `[${formatVttTime(b.start)}] ${b.speaker}:\n${b.text}`).join('\n\n')
 }
 
-async function transcribeOne(
-  key: string,
-  args: Args,
-  s3: S3Client | null,
-): Promise<{ key: string; provider: string; durationSec: number; cost: number; diarized: boolean }> {
-  const provider = PROVIDERS[args.provider]
-  const base = outBaseName(key)
-  const jsonPath = path.join(args.out, `${base}.json`)
+/** Ensure a (private) Supabase Storage bucket exists. */
+async function ensureBucket(bucket: string): Promise<void> {
+  const { data: buckets, error } = await supabaseAdmin.storage.listBuckets()
+  if (error) throw new Error(`Supabase listBuckets failed: ${error.message}`)
+  if (buckets?.some((b) => b.name === bucket)) return
+  const { error: createErr } = await supabaseAdmin.storage.createBucket(bucket, { public: false })
+  if (createErr && !/already exists|duplicate/i.test(createErr.message)) {
+    throw new Error(`Supabase createBucket(${bucket}) failed: ${createErr.message}`)
+  }
+  console.log(`[transcribe-r2] created private Supabase Storage bucket "${bucket}"`)
+}
 
+/** Does an object already exist in the Supabase bucket? */
+async function storageExists(bucket: string, objectPath: string): Promise<boolean> {
+  const slash = objectPath.lastIndexOf('/')
+  const dir = slash >= 0 ? objectPath.slice(0, slash) : ''
+  const name = slash >= 0 ? objectPath.slice(slash + 1) : objectPath
+  const { data } = await supabaseAdmin.storage.from(bucket).list(dir, { search: name, limit: 100 })
+  return !!data?.some((o) => o.name === name)
+}
+
+async function uploadArtifact(
+  bucket: string,
+  objectPath: string,
+  body: string,
+  contentType: string,
+): Promise<void> {
+  const { error } = await supabaseAdmin.storage
+    .from(bucket)
+    .upload(objectPath, Buffer.from(body, 'utf8'), { contentType, upsert: true })
+  if (error) throw new Error(`Supabase upload ${objectPath}: ${error.message}`)
+}
+
+interface OneResult {
+  key: string
+  provider: string
+  durationSec: number
+  cost: number
+  diarized: boolean
+  skipped: boolean
+}
+
+async function transcribeOne(key: string, args: Args, s3: S3Client | null): Promise<OneResult> {
+  const provider = PROVIDERS[args.provider]
+  const jsonStorageKey = storageKey(key, 'json')
+  const localBase = args.out ? outBaseName(key) : null
+  const localJsonPath = args.out && localBase ? path.join(args.out, `${localBase}.json`) : null
+
+  // Skip-if-exists keyed on the .json artifact at the configured destination(s).
   if (!args.overwrite) {
-    try {
-      await fs.access(jsonPath)
+    const present = args.supabaseBucket
+      ? await storageExists(args.supabaseBucket, jsonStorageKey)
+      : localJsonPath
+        ? await fs
+            .access(localJsonPath)
+            .then(() => true)
+            .catch(() => false)
+        : false
+    if (present) {
       console.log(`[transcribe-r2] skip (exists): ${key}`)
-      const prior = JSON.parse(await fs.readFile(jsonPath, 'utf8'))
-      return {
-        key,
-        provider: prior.provider ?? args.provider,
-        durationSec: prior.durationSec ?? 0,
-        cost: 0,
-        diarized: !!prior.diarized,
-      }
-    } catch {
-      /* not present — transcribe */
+      return { key, provider: args.provider, durationSec: 0, cost: 0, diarized: false, skipped: true }
     }
   }
 
   const url = await resolveAudioUrl(key, args, s3)
-
   const ctx: TranscribeContext = {
     episodeId: 0, // not an episode — URL providers never use this
     mp3Url: url,
@@ -228,7 +283,7 @@ async function transcribeOne(
   const result: TranscriptionResult = await provider.transcribe(ctx)
 
   const vtt = buildVtt(result.segments, [], args.diarize)
-  const speakerText = buildSpeakerText(result.segments)
+  const txt = buildSpeakerText(result.segments) + '\n'
   const json = JSON.stringify(
     {
       source: { bucket: args.bucket ?? null, key, url: args.publicBaseUrl ? url : '<presigned>' },
@@ -243,19 +298,31 @@ async function transcribeOne(
     2,
   )
 
-  await Promise.all([
-    fs.writeFile(path.join(args.out, `${base}.vtt`), vtt),
-    fs.writeFile(path.join(args.out, `${base}.txt`), speakerText + '\n'),
-    fs.writeFile(jsonPath, json),
-  ])
+  const dests: string[] = []
+  if (args.supabaseBucket) {
+    await Promise.all([
+      uploadArtifact(args.supabaseBucket, storageKey(key, 'vtt'), vtt, 'text/vtt'),
+      uploadArtifact(args.supabaseBucket, storageKey(key, 'txt'), txt, 'text/plain; charset=utf-8'),
+      uploadArtifact(args.supabaseBucket, jsonStorageKey, json, 'application/json'),
+    ])
+    dests.push(`supabase:${args.supabaseBucket}/${storageKey(key, '{vtt,txt,json}')}`)
+  }
+  if (args.out && localBase) {
+    await Promise.all([
+      fs.writeFile(path.join(args.out, `${localBase}.vtt`), vtt),
+      fs.writeFile(path.join(args.out, `${localBase}.txt`), txt),
+      fs.writeFile(path.join(args.out, `${localBase}.json`), json),
+    ])
+    dests.push(`local:${localBase}.{vtt,txt,json}`)
+  }
 
   const cost = estimateTranscriptionCost(result.providerId, result.durationSec)
   const mins = (result.durationSec / 60).toFixed(1)
   console.log(
     `[transcribe-r2] ✓ ${key} — ${mins} min, ${result.segments.length} segs, ` +
-      `${result.diarized ? 'diarized' : 'NOT diarized'}, ~$${cost.toFixed(4)} → ${base}.{vtt,txt,json}`,
+      `${result.diarized ? 'diarized' : 'NOT diarized'}, ~$${cost.toFixed(4)} → ${dests.join(' + ')}`,
   )
-  return { key, provider: result.providerId, durationSec: result.durationSec, cost, diarized: result.diarized }
+  return { key, provider: result.providerId, durationSec: result.durationSec, cost, diarized: result.diarized, skipped: false }
 }
 
 /** Run `worker` over `items` with at most `limit` in flight; collect {ok|err}. */
@@ -302,9 +369,12 @@ async function main() {
         `(${args.provider === 'assemblyai' ? 'ASSEMBLYAI_API_KEY' : 'DEEPGRAM_API_KEY'}).`,
     )
   }
+  if (!args.supabaseBucket && !args.out) {
+    throw new Error('no destination — pass --supabase / --supabase-bucket <name> and/or --out <dir>')
+  }
 
   // Decide where keys come from: explicit list, or S3 listing under a prefix.
-  let explicitKeys = await loadKeyList(args)
+  const explicitKeys = await loadKeyList(args)
   const usingS3 = !args.publicBaseUrl
   const s3 = usingS3 ? makeS3() : null
 
@@ -319,27 +389,44 @@ async function main() {
     throw new Error('--public-base-url needs --keys/--keys-file (cannot list a public bucket without S3 creds)')
   }
 
+  if (args.limit && keys.length > args.limit) {
+    console.log(`[transcribe-r2] limiting to first ${args.limit} of ${keys.length} objects`)
+    keys = keys.slice(0, args.limit)
+  }
+
   if (!keys.length) {
     console.log('[transcribe-r2] no audio objects matched — nothing to do.')
     return
   }
 
-  await fs.mkdir(args.out, { recursive: true })
+  if (args.supabaseBucket) await ensureBucket(args.supabaseBucket)
+  if (args.out) await fs.mkdir(args.out, { recursive: true })
+
+  const destLabel = [
+    args.supabaseBucket ? `supabase://${args.supabaseBucket}` : null,
+    args.out ? `local://${path.resolve(args.out)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' + ')
   console.log(
-    `[transcribe-r2] ${keys.length} file(s) · provider=${args.provider} · ` +
-      `diarize=${args.diarize} · concurrency=${args.concurrency} · out=${path.resolve(args.out)}\n`,
+    `[transcribe-r2] ${keys.length} file(s) · provider=${args.provider} · diarize=${args.diarize} · ` +
+      `concurrency=${args.concurrency} · → ${destLabel}\n`,
   )
 
   const results = await mapPool(keys, args.concurrency, (key) => transcribeOne(key, args, s3))
 
   const ok = results.filter((r) => r.value)
   const failed = results.filter((r) => r.error)
-  const totalCost = ok.reduce((s, r) => s + (r.value!.cost ?? 0), 0)
-  const totalMin = ok.reduce((s, r) => s + (r.value!.durationSec ?? 0), 0) / 60
-  const notDiarized = ok.filter((r) => args.diarize && !r.value!.diarized)
+  const done = ok.filter((r) => !r.value!.skipped)
+  const skipped = ok.filter((r) => r.value!.skipped)
+  const totalCost = done.reduce((s, r) => s + (r.value!.cost ?? 0), 0)
+  const totalMin = done.reduce((s, r) => s + (r.value!.durationSec ?? 0), 0) / 60
+  const notDiarized = done.filter((r) => args.diarize && !r.value!.diarized)
 
-  console.log(`\n[transcribe-r2] done: ${ok.length} ok, ${failed.length} failed.`)
-  if (ok.length) console.log(`[transcribe-r2] ~${totalMin.toFixed(0)} min audio, est. ~$${totalCost.toFixed(2)}.`)
+  console.log(
+    `\n[transcribe-r2] done: ${done.length} transcribed, ${skipped.length} skipped, ${failed.length} failed.`,
+  )
+  if (done.length) console.log(`[transcribe-r2] ~${totalMin.toFixed(0)} min audio, est. ~$${totalCost.toFixed(2)}.`)
   if (notDiarized.length) {
     console.warn(
       `[transcribe-r2] note: ${notDiarized.length} file(s) returned no speaker labels ` +
