@@ -288,7 +288,7 @@ export interface ApiKey {
 }
 
 // The read scopes a key may carry. Each /api/v1 endpoint requires one.
-export type ApiScope = 'qir' | 'episodes' | 'transcripts' | 'shows' | 'usage'
+export type ApiScope = 'qir' | 'episodes' | 'transcripts' | 'shows' | 'usage' | 'transcribe'
 
 export interface ComplianceFlag {
   id: number
