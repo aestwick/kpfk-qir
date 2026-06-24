@@ -176,9 +176,23 @@ async function resolveAudioUrl(key: string, args: Args, s3: S3Client | null): Pr
   })
 }
 
+// Supabase Storage rejects non-ASCII object keys ("Invalid key"). Spaces, &, ',
+// (), commas etc. are fine (hundreds of files upload with them) — only accented
+// Latin letters fail. De-accent each path segment (NFKD → strip combining marks,
+// é→e, ö→o, ł→l) and replace any remaining non-ASCII-printable char, preserving
+// the slash-delimited directory structure so the key still mirrors the R2 path.
+function sanitizeStorageSegment(s: string): string {
+  return s
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7e]/g, '_')
+}
+
 /** Storage object path mirroring the R2 key with the audio extension swapped. */
 function storageKey(key: string, ext: string): string {
-  return `${key.replace(/\.[^.]+$/, '')}.${ext}`
+  const base = key.replace(/\.[^.]+$/, '')
+  const safe = base.split('/').map(sanitizeStorageSegment).join('/')
+  return `${safe}.${ext}`
 }
 
 /** Flat local basename for an object key (drops the extension). */
