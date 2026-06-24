@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "backfill-quarter": "tsx scripts/backfill-quarter.ts",
+    "transcribe-r2": "tsx scripts/transcribe-r2.ts",
     "backfill-transcript-cues": "tsx scripts/backfill-transcript-cues.ts",
     "backfill-transcript-embeddings": "tsx scripts/backfill-transcript-embeddings.ts",
     "workers": "tsx workers/index.ts",
@@ -16,6 +17,8 @@
     "start:all": "concurrently \"npm run start\" \"npm run workers\""
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@aws-sdk/s3-request-presigner": "^3.1075.0",
     "@supabase/supabase-js": "^2.45.0",
     "autoprefixer": "^10.4.27",
     "bullmq": "^5.12.0",
