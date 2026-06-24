@@ -38,6 +38,7 @@ interface Args {
   quarter: number
   urls?: string
   generate: boolean
+  kick: boolean
 }
 
 function parseArgs(argv: string[]): Args {
@@ -61,7 +62,23 @@ function parseArgs(argv: string[]): Args {
     quarter: q,
     urls: get('--urls'),
     generate: argv.includes('--generate'),
+    kick: argv.includes('--kick'),
   }
+}
+
+/**
+ * Enqueue the windowed transcribe→summarize chain for a quarter. `chain: true`
+ * makes transcribe auto-advance into summarize (workers/index.ts), and `window`
+ * keeps every stage scoped to the backfill quarter (and lets it run past a parked
+ * station's pause). The long-lived workers on the host pick this up.
+ */
+async function enqueueWindowedChain(stationId: string, start: string, end: string) {
+  const priority = await jobPriority(stationId)
+  await transcribeQueue.add(
+    'backfill-transcribe',
+    { stationId, source: 'chain', chain: true, window: { start, end } },
+    { priority }
+  )
 }
 
 async function resolveStation(slug: string) {
@@ -248,24 +265,26 @@ async function runInsert(args: Args) {
     outOfWindow.forEach((u) => console.warn(`           ${u}`))
   }
 
-  if (inserted === 0) {
-    console.log('[backfill] nothing new to process — not enqueuing a transcribe job')
+  if (inserted === 0 && !args.kick) {
+    console.log('[backfill] nothing new to process — not enqueuing (pass --kick to re-enqueue anyway)')
     return
   }
 
-  // Kick the windowed transcribe chain. `chain: true` makes transcribe auto-advance
-  // into summarize (workers/index.ts), and `window` keeps every stage scoped to the
-  // backfill quarter. The running workers on the host pick this up.
-  const priority = await jobPriority(station.id)
-  await transcribeQueue.add(
-    'backfill-transcribe',
-    { stationId: station.id, source: 'chain', chain: true, window: { start, end } },
-    { priority }
-  )
+  await enqueueWindowedChain(station.id, start, end)
   console.log(
     `[backfill] queued transcribe → summarize for ${start}..${end}. ` +
       `Monitor via the Episodes page (filter ${args.year} Q${args.quarter}); once they reach ` +
       `"summarized", run this script again with --generate.`
+  )
+}
+
+async function runKick(args: Args) {
+  const station = await resolveStation(args.station)
+  const { start, end } = getQuarterDateRange(args.year, args.quarter)
+  await enqueueWindowedChain(station.id, start, end)
+  console.log(
+    `[backfill] re-kicked windowed transcribe → summarize for ${station.name} ${start}..${end}. ` +
+      `Existing pending episodes in that window will drain (no insert).`
   )
 }
 
@@ -286,6 +305,10 @@ async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.generate) {
     await runGenerate(args)
+  } else if (args.kick && !args.urls) {
+    // Re-enqueue the windowed chain for an already-inserted quarter (e.g. after
+    // un-parking a station, or resuming an interrupted drain) — no insert.
+    await runKick(args)
   } else {
     await runInsert(args)
   }
