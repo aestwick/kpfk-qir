@@ -127,11 +127,233 @@ function makeChunkLoader(mp3Url: string, tmpDir: string): () => Promise<string[]
   }
 }
 
+type Correction = { wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }
+
+interface TranscribeOneCtx {
+  stationId: string
+  providerPlan: Awaited<ReturnType<typeof resolveProviderPlan>>
+  diarize: boolean
+  corrections: Correction[]
+  job: Job
+}
+
+/**
+ * Transcribe a single already-claimed episode end-to-end: run the provider plan
+ * (priority order, automatic fallback), store the transcript (plain text +
+ * speaker-aware VTT), flip status to `transcribed`, populate search cues, and log
+ * usage. Never throws — a terminal 404 → `unavailable`, any other error → `failed`,
+ * both written to the row here. Shared by the quarter batch and the on-demand
+ * targeted path so they produce byte-identical transcripts.
+ */
+async function transcribeOne(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  episode: any,
+  { stationId, providerPlan, diarize, corrections, job }: TranscribeOneCtx,
+): Promise<'transcribed' | 'unavailable' | 'failed'> {
+  // Unique temp dir per run — a deterministic per-episode path lets overlapping
+  // jobs (manual retry, continue-chain, BullMQ attempts, cron) delete each other's
+  // chunks mid-transcription, surfacing as ENOENT on a later chunk.
+  const runId = `${job.id ?? 'job'}-${Math.random().toString(36).slice(2, 10)}`
+  const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}-${runId}`)
+  try {
+    // Run the provider plan (priority order, automatic fallback). Groq pulls the
+    // ffmpeg chunks via getLocalChunks; Deepgram/AssemblyAI fetch the mp3_url
+    // directly, so the chunk loader only runs if a chunk-based provider is used.
+    const result = await runTranscription(
+      {
+        episodeId: episode.id,
+        mp3Url: episode.mp3_url,
+        diarize,
+        chunkDurationSec: CHUNK_DURATION_SECONDS,
+        getLocalChunks: makeChunkLoader(episode.mp3_url, tmpDir),
+      },
+      providerPlan,
+    )
+
+    // Stitch and apply corrections. Speaker labels (when diarized) go into the
+    // VTT as voice spans; the plain transcript stays speaker-free for summarize.
+    const correctedTranscript = applyCorrections(result.text, corrections)
+    const vtt = buildVtt(result.segments, corrections, result.diarized)
+    const totalDuration = result.durationSec
+
+    // Store transcript — check for errors before marking episode as transcribed
+    const { error: upsertError } = await supabaseAdmin.from('transcripts').upsert(
+      {
+        episode_id: episode.id,
+        transcript: correctedTranscript,
+        vtt,
+        language: result.language,
+        provider: result.providerId,
+        model: result.model,
+        english_transcript: null,
+        english_vtt: null,
+      },
+      { onConflict: 'episode_id' }
+    )
+
+    if (upsertError) {
+      throw new Error(`Failed to store transcript: ${upsertError.message}`)
+    }
+
+    // Verify transcript was actually stored before updating status
+    const { count: transcriptCount } = await supabaseAdmin
+      .from('transcripts')
+      .select('episode_id', { count: 'exact', head: true })
+      .eq('episode_id', episode.id)
+
+    if (!transcriptCount || transcriptCount === 0) {
+      throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
+    }
+
+    // Update episode status. Fill duration when it's missing (a backfill, or any
+    // RSS feed that omitted itunes:duration, ships a null duration) — transcription
+    // knows the true audio length. Never overwrite an existing duration.
+    const durationMinutes =
+      episode.duration == null && Number.isFinite(totalDuration)
+        ? Math.max(1, Math.round(totalDuration / 60))
+        : undefined
+    await supabaseAdmin
+      .from('episode_log')
+      .update({
+        status: 'transcribed',
+        error_message: null,
+        ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', episode.id)
+
+    // Populate timed search cues from the VTT (best-effort — never fail the
+    // episode over auxiliary search data).
+    try {
+      await populateCues(episode.id, vtt)
+    } catch (cueErr) {
+      console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
+    }
+
+    // Log usage against the provider that actually ran (cost is provider-rated).
+    await logTranscriptionUsage(stationId, episode.id, totalDuration, {
+      provider: result.providerId,
+      model: result.model,
+      metadata: { diarized: result.diarized },
+    })
+
+    console.log(`[transcribe] ep ${episode.id} done via ${result.providerId} (${Math.round(totalDuration)}s${result.diarized ? ', diarized' : ''})`)
+    return 'transcribed'
+  } catch (err) {
+    // A genuinely missing MP3 is terminal — mark unavailable, don't burn a retry
+    // or fall through to "failed" (no provider can fetch a 404).
+    if (err instanceof AudioUnavailableError) {
+      await supabaseAdmin
+        .from('episode_log')
+        .update({ status: 'unavailable', error_message: err.message, updated_at: new Date().toISOString() })
+        .eq('id', episode.id)
+      console.warn(`[transcribe] episode ${episode.id} unavailable: ${err.message}`)
+      return 'unavailable'
+    }
+    const errMsg = err instanceof Error ? err.message : String(err)
+    console.error(`[transcribe] ep ${episode.id} failed:`, errMsg)
+    // A spend-limit block is org-wide, not this episode's fault — don't spend
+    // a retry on it, or a billing outage will eventually mark the backlog dead.
+    const spendBlocked = isSpendLimitError(errMsg)
+    await supabaseAdmin
+      .from('episode_log')
+      .update({
+        status: 'failed',
+        error_message: errMsg.slice(0, 1000),
+        retry_count: spendBlocked ? (episode.retry_count ?? 0) : (episode.retry_count ?? 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', episode.id)
+    return 'failed'
+  } finally {
+    // Clean up temp files
+    try {
+      await fs.rm(tmpDir, { recursive: true, force: true })
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
+
+/**
+ * On-demand transcription of a specific set of episodes (POST /api/v1/transcribe).
+ * Unlike the quarter batch this claims exactly the requested ids, ignores the
+ * current-quarter window and category exclusions, and does NOT chain into
+ * summarize or re-enqueue a continuation. The atomic status claim is the only
+ * correctness guard: if the steady-state chain already grabbed one of these
+ * episodes, the claim here is a no-op for it (the transcript still lands once).
+ */
+async function runTargetedTranscribe(job: Job, stationId: string, episodeIds: number[]) {
+  const providerPlan = await resolveProviderPlan(stationId)
+  if (!providerPlan.length) {
+    console.warn(`[transcribe] no provider enabled+configured for station ${stationId} — skipping targeted request`)
+    return { transcribed: 0, skipped: 'no-provider' as const }
+  }
+  const diarize = await isDiarizationEnabled(stationId)
+  const corrections = await loadCorrections(stationId)
+
+  // Atomically claim only the requested, still-pending episodes for this station.
+  const { data: episodes, error: claimError } = await supabaseAdmin
+    .from('episode_log')
+    .update({ status: 'transcribing', updated_at: new Date().toISOString() })
+    .eq('station_id', stationId)
+    .in('id', episodeIds)
+    .eq('status', 'pending')
+    .select('*')
+
+  if (claimError) throw new Error(`Failed to claim episodes: ${claimError.message}`)
+  if (!episodes?.length) {
+    console.log('[transcribe] targeted: no pending episodes claimed (already processed or in flight)')
+    return { transcribed: 0, remaining: false }
+  }
+
+  console.log(`[transcribe] targeted: claimed ${episodes.length} episode(s); provider order ${providerPlan.map((p) => p.id).join(' → ')} (diarize=${diarize})`)
+  let transcribed = 0
+  for (let i = 0; i < episodes.length; i++) {
+    const episode = episodes[i]
+    await job.updateProgress({ current: i + 1, total: episodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
+    const outcome = await transcribeOne(episode, { stationId, providerPlan, diarize, corrections, job })
+    if (outcome === 'transcribed') transcribed++
+  }
+
+  if (transcribed > 0) {
+    void logAuditEvent({
+      action: AUDIT_ACTIONS.TRANSCRIBE_COMPLETE,
+      operation: 'update',
+      stationId,
+      resourceType: 'episode',
+      metadata: { transcribed, source: 'cms-request', episodeIds },
+    })
+  }
+  console.log(`[transcribe] targeted: ${transcribed}/${episodes.length} transcribed`)
+  return { transcribed, remaining: false }
+}
+
 export async function processTranscribe(job: Job) {
   // Workers run with the service-role client (RLS bypassed), so the station_id
   // filter below is the ONLY guard against processing another station's episodes.
   const stationId = job.data?.stationId as string | undefined
   if (!stationId) throw new Error('[transcribe] stationId is required in job data')
+
+  // On-demand targeted transcription (e.g. a sibling KPFK app requesting one
+  // episode via POST /api/v1/transcribe). Identified by an explicit episodeIds
+  // list. Like a windowed backfill it's an explicit operator action: it bypasses
+  // the per-station park (honoring only the GLOBAL kill switch) and is NOT bound
+  // to the current-quarter window or the chain's continue-loop. It also skips the
+  // per-(station,stage) chain lock — correctness comes from the atomic status
+  // claim, and a one-off single episode shouldn't be silently dropped behind a
+  // draining chain (which the lock's busy-skip would do).
+  const episodeIds = Array.isArray(job.data?.episodeIds)
+    ? (job.data.episodeIds as number[])
+    : null
+  if (episodeIds?.length) {
+    if (await isPipelinePaused()) {
+      console.log('[transcribe] paused (global) — skipping targeted request')
+      return { transcribed: 0, skipped: true }
+    }
+    return runTargetedTranscribe(job, stationId, episodeIds)
+  }
+
   // A windowed job is an explicit operator backfill — it runs even when the
   // STATION is parked (per-station pause), but still honors the GLOBAL kill
   // switch. A normal (live) job respects the per-station pause as before.
@@ -227,128 +449,8 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   for (let i = 0; i < filteredEpisodes.length; i++) {
     const episode = filteredEpisodes[i]
     await job.updateProgress({ current: i + 1, total: filteredEpisodes.length, episodeId: episode.id, showName: episode.show_name || episode.show_key, airDate: episode.air_date })
-    // Unique temp dir per run — a deterministic per-episode path lets overlapping
-    // jobs (manual retry, continue-chain, BullMQ attempts, cron) delete each other's
-    // chunks mid-transcription, surfacing as ENOENT on a later chunk.
-    const runId = `${job.id ?? 'job'}-${Math.random().toString(36).slice(2, 10)}`
-    const tmpDir = path.join(os.tmpdir(), 'qir-audio', `ep-${episode.id}-${runId}`)
-    try {
-      // Run the provider plan (priority order, automatic fallback). Groq pulls the
-      // ffmpeg chunks via getLocalChunks; Deepgram/AssemblyAI fetch the mp3_url
-      // directly, so the chunk loader only runs if a chunk-based provider is used.
-      const result = await runTranscription(
-        {
-          episodeId: episode.id,
-          mp3Url: episode.mp3_url,
-          diarize,
-          chunkDurationSec: CHUNK_DURATION_SECONDS,
-          getLocalChunks: makeChunkLoader(episode.mp3_url, tmpDir),
-        },
-        providerPlan,
-      )
-
-      // Stitch and apply corrections. Speaker labels (when diarized) go into the
-      // VTT as voice spans; the plain transcript stays speaker-free for summarize.
-      const correctedTranscript = applyCorrections(result.text, corrections)
-      const vtt = buildVtt(result.segments, corrections, result.diarized)
-      const totalDuration = result.durationSec
-
-      // Store transcript — check for errors before marking episode as transcribed
-      const { error: upsertError } = await supabaseAdmin.from('transcripts').upsert(
-        {
-          episode_id: episode.id,
-          transcript: correctedTranscript,
-          vtt,
-          language: result.language,
-          provider: result.providerId,
-          model: result.model,
-          english_transcript: null,
-          english_vtt: null,
-        },
-        { onConflict: 'episode_id' }
-      )
-
-      if (upsertError) {
-        throw new Error(`Failed to store transcript: ${upsertError.message}`)
-      }
-
-      // Verify transcript was actually stored before updating status
-      const { count: transcriptCount } = await supabaseAdmin
-        .from('transcripts')
-        .select('episode_id', { count: 'exact', head: true })
-        .eq('episode_id', episode.id)
-
-      if (!transcriptCount || transcriptCount === 0) {
-        throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
-      }
-
-      // Update episode status. Fill duration when it's missing (a backfill, or any
-      // RSS feed that omitted itunes:duration, ships a null duration) — transcription
-      // knows the true audio length. Never overwrite an existing duration.
-      const durationMinutes =
-        episode.duration == null && Number.isFinite(totalDuration)
-          ? Math.max(1, Math.round(totalDuration / 60))
-          : undefined
-      await supabaseAdmin
-        .from('episode_log')
-        .update({
-          status: 'transcribed',
-          error_message: null,
-          ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', episode.id)
-
-      // Populate timed search cues from the VTT (best-effort — never fail the
-      // episode over auxiliary search data).
-      try {
-        await populateCues(episode.id, vtt)
-      } catch (cueErr) {
-        console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
-      }
-
-      // Log usage against the provider that actually ran (cost is provider-rated).
-      await logTranscriptionUsage(stationId, episode.id, totalDuration, {
-        provider: result.providerId,
-        model: result.model,
-        metadata: { diarized: result.diarized },
-      })
-
-      transcribed++
-      console.log(`[transcribe] ep ${episode.id} done via ${result.providerId} (${Math.round(totalDuration)}s${result.diarized ? ', diarized' : ''})`)
-    } catch (err) {
-      // A genuinely missing MP3 is terminal — mark unavailable, don't burn a retry
-      // or fall through to "failed" (no provider can fetch a 404).
-      if (err instanceof AudioUnavailableError) {
-        await supabaseAdmin
-          .from('episode_log')
-          .update({ status: 'unavailable', error_message: err.message, updated_at: new Date().toISOString() })
-          .eq('id', episode.id)
-        console.warn(`[transcribe] episode ${episode.id} unavailable: ${err.message}`)
-        continue
-      }
-      const errMsg = err instanceof Error ? err.message : String(err)
-      console.error(`[transcribe] ep ${episode.id} failed:`, errMsg)
-      // A spend-limit block is org-wide, not this episode's fault — don't spend
-      // a retry on it, or a billing outage will eventually mark the backlog dead.
-      const spendBlocked = isSpendLimitError(errMsg)
-      await supabaseAdmin
-        .from('episode_log')
-        .update({
-          status: 'failed',
-          error_message: errMsg.slice(0, 1000),
-          retry_count: spendBlocked ? (episode.retry_count ?? 0) : (episode.retry_count ?? 0) + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', episode.id)
-    } finally {
-      // Clean up temp files
-      try {
-        await fs.rm(tmpDir, { recursive: true, force: true })
-      } catch {
-        // ignore cleanup errors
-      }
-    }
+    const outcome = await transcribeOne(episode, { stationId, providerPlan, diarize, corrections, job })
+    if (outcome === 'transcribed') transcribed++
   }
 
   // More claimable pending beyond this batch? Excluded-category episodes are NOT

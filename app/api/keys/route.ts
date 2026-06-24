@@ -7,7 +7,10 @@ import type { ApiScope } from '@/lib/types'
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-const VALID_SCOPES: ApiScope[] = ['qir', 'episodes', 'transcripts', 'shows', 'usage']
+// 'transcribe' is the only WRITE scope (POST /api/v1/transcribe enqueues a job +
+// may create an episode); like 'transcripts' it's opt-in and excluded from the
+// read-only default set minted below.
+const VALID_SCOPES: ApiScope[] = ['qir', 'episodes', 'transcripts', 'shows', 'usage', 'transcribe']
 
 // GET /api/keys — list the active station's API keys (metadata only; the secret
 // is never returned). Any station member may view; the RLS client scopes rows.
