@@ -50,6 +50,19 @@ function getCurrentQuarterBounds(): { start: string; end: string } {
   return { start, end }
 }
 
+/**
+ * Date window for candidate selection. Defaults to the current quarter (steady
+ * state), but a job may carry an explicit `{ window: { start, end } }` to drive a
+ * historical backfill past the current-quarter gate. The continue/backoff/chain
+ * re-enqueues (workers/index.ts) thread the same window through so the whole drain
+ * stays scoped. See scripts/backfill-quarter.ts.
+ */
+function resolveWindow(job: Job): { start: string; end: string } {
+  const w = job.data?.window as { start?: string; end?: string } | undefined
+  if (w?.start && w?.end) return { start: w.start, end: w.end }
+  return getCurrentQuarterBounds()
+}
+
 async function loadCorrections(stationId: string): Promise<
   Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
 > {
@@ -142,7 +155,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
 
   const excludedCategories = await getExcludedCategories(stationId)
   const batchSize = await getTranscribeBatchSize(stationId)
-  const { start, end } = getCurrentQuarterBounds()
+  const { start, end } = resolveWindow(job)
 
   // Resolve the provider fallback plan once per batch (it's station-level config,
   // not per-episode). If nothing is enabled+configured, bail BEFORE claiming so a
@@ -261,10 +274,21 @@ async function runTranscribeBatch(job: Job, stationId: string) {
         throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
       }
 
-      // Update episode status
+      // Update episode status. Fill duration when it's missing (a backfill, or any
+      // RSS feed that omitted itunes:duration, ships a null duration) — transcription
+      // knows the true audio length. Never overwrite an existing duration.
+      const durationMinutes =
+        episode.duration == null && Number.isFinite(totalDuration)
+          ? Math.max(1, Math.round(totalDuration / 60))
+          : undefined
       await supabaseAdmin
         .from('episode_log')
-        .update({ status: 'transcribed', error_message: null, updated_at: new Date().toISOString() })
+        .update({
+          status: 'transcribed',
+          error_message: null,
+          ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
+          updated_at: new Date().toISOString(),
+        })
         .eq('id', episode.id)
 
       // Populate timed search cues from the VTT (best-effort — never fail the
