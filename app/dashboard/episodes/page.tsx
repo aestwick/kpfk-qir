@@ -228,8 +228,9 @@ export default function EpisodesPage() {
 
   const totalPages = Math.ceil(total / limit)
 
-  // Quarter options (current quarter back two years, never future quarters).
-  const quarterOptions = getQuarterOptions().map((o) => ({
+  // Quarter options back far enough to monitor historical backfills (e.g. WPFW
+  // Q4 2020), never future quarters.
+  const quarterOptions = getQuarterOptions(6).map((o) => ({
     label: o.label,
     value: `${o.year}-Q${o.quarter}`,
   }))

@@ -4,7 +4,9 @@ import { useState } from 'react'
 import { getQuarterOptions } from '@/lib/quarters'
 
 export default function DownloadsPage() {
-  const quarterOptions = getQuarterOptions(1)
+  // Reach back far enough to export historical-backfill quarters (e.g. WPFW's
+  // one-off Q4 2020), not just the last year. The downloads API is quarter-agnostic.
+  const quarterOptions = getQuarterOptions(6)
   const [selected, setSelected] = useState(quarterOptions[0])
 
   const downloads = [

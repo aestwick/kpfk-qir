@@ -164,10 +164,12 @@ summarizeWorker.on('completed', async (job) => {
   }
   // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).
   // This is the final automated stage — episodes get compliance-checked without a
-  // manual trigger. Skipped while paused.
-  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
+  // manual trigger. Skipped while paused, but a windowed backfill bypasses the
+  // per-station park (global pause still stops it) and threads its window through.
+  const compliancePaused = job.data?.window ? await isPipelinePaused() : await isPipelinePaused(job.data?.stationId)
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !compliancePaused) {
     console.log(`[summarize] ${job.data.source} auto-chain → compliance`)
-    await complianceQueue.add('chain-compliance', { stationId, source: job.data.source }, { priority })
+    await complianceQueue.add('chain-compliance', { stationId, ...window, source: job.data.source }, { priority })
   }
 })
 summarizeWorker.on('failed', (job, err) => {
@@ -185,7 +187,8 @@ complianceWorker.on('completed', async (job) => {
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
-    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId }, { priority: await jobPriority(job.data?.stationId) })
+    const window = job.data?.window ? { window: job.data.window } : {}
+    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId, ...window }, { priority: await jobPriority(job.data?.stationId) })
   }
 })
 complianceWorker.on('failed', (job, err) => {

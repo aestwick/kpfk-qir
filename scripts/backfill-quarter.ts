@@ -28,7 +28,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
 import { getQuarterDateRange } from '../lib/qir-format'
 import { parseChannelMeta } from '../lib/rss'
-import { transcribeQueue, generateQirQueue } from '../lib/queue'
+import { transcribeQueue, complianceQueue, generateQirQueue } from '../lib/queue'
 import { jobPriority } from '../lib/tier'
 import * as fs from 'fs/promises'
 
@@ -77,6 +77,20 @@ async function enqueueWindowedChain(stationId: string, start: string, end: strin
   await transcribeQueue.add(
     'backfill-transcribe',
     { stationId, source: 'chain', chain: true, window: { start, end } },
+    { priority }
+  )
+}
+
+/**
+ * Enqueue a windowed compliance sweep — checks every already-`summarized` episode
+ * in the window (the transcribe→summarize→compliance chain only auto-advances
+ * episodes that summarize after it's wired, so this catches the ones already done).
+ */
+async function enqueueWindowedCompliance(stationId: string, start: string, end: string) {
+  const priority = await jobPriority(stationId)
+  await complianceQueue.add(
+    'backfill-compliance',
+    { stationId, window: { start, end } },
     { priority }
   )
 }
@@ -281,10 +295,13 @@ async function runInsert(args: Args) {
 async function runKick(args: Args) {
   const station = await resolveStation(args.station)
   const { start, end } = getQuarterDateRange(args.year, args.quarter)
+  // Transcribe chain drains anything still pending (→ summarize → compliance);
+  // the compliance sweep catches episodes already summarized before this ran.
   await enqueueWindowedChain(station.id, start, end)
+  await enqueueWindowedCompliance(station.id, start, end)
   console.log(
-    `[backfill] re-kicked windowed transcribe → summarize for ${station.name} ${start}..${end}. ` +
-      `Existing pending episodes in that window will drain (no insert).`
+    `[backfill] re-kicked transcribe → summarize → compliance for ${station.name} ${start}..${end}. ` +
+      `Pending episodes drain through the chain; already-summarized ones get the compliance sweep (no insert).`
   )
 }
 
