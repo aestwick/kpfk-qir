@@ -127,8 +127,11 @@ transcribeWorker.on('completed', async (job) => {
     }
   }
   // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
-  // Skipped while paused so a resumed pipeline doesn't fan out stale work.
-  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !(await isPipelinePaused(job.data?.stationId))) {
+  // Skipped while paused so a resumed pipeline doesn't fan out stale work — but a
+  // windowed backfill bypasses the per-station park (global pause still stops it),
+  // matching the processor, so the cascade keeps draining for a parked station.
+  const chainPaused = job.data?.window ? await isPipelinePaused() : await isPipelinePaused(job.data?.stationId)
+  if ((job.data?.source === 'audit' || job.data?.source === 'chain') && job.data?.chain && count > 0 && !chainPaused) {
     console.log(`[transcribe] ${job.data.source} auto-chain → summarize`)
     await summarizeQueue.add('chain-summarize', { stationId, ...window, source: job.data.source, chain: true }, { priority })
   }

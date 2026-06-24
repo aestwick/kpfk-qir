@@ -132,10 +132,13 @@ export async function processTranscribe(job: Job) {
   // filter below is the ONLY guard against processing another station's episodes.
   const stationId = job.data?.stationId as string | undefined
   if (!stationId) throw new Error('[transcribe] stationId is required in job data')
-  // Soft pause (global OR this station): expensive stages stop, ingest keeps
-  // running. Checked before the lock so a paused station never takes a lock.
-  if (await isPipelinePaused(stationId)) {
-    console.log(`[transcribe] paused for station ${stationId} — skipping`)
+  // A windowed job is an explicit operator backfill — it runs even when the
+  // STATION is parked (per-station pause), but still honors the GLOBAL kill
+  // switch. A normal (live) job respects the per-station pause as before.
+  // Checked before the lock so a paused station never takes a lock.
+  const paused = job.data?.window ? await isPipelinePaused() : await isPipelinePaused(stationId)
+  if (paused) {
+    console.log(`[transcribe] paused (${job.data?.window ? 'global' : `station ${stationId}`}) — skipping`)
     return { transcribed: 0, remaining: false, skipped: true }
   }
 

@@ -42,9 +42,11 @@ export async function processSummarize(job: Job) {
   // Service-role client bypasses RLS, so the station_id filter is the only guard.
   const stationId = job.data?.stationId as string | undefined
   if (!stationId) throw new Error('[summarize] stationId is required in job data')
-  // Skip if the pipeline is paused globally OR just for this station.
-  if (await isPipelinePaused(stationId)) {
-    console.log(`[summarize] paused for station ${stationId} — skipping`)
+  // A windowed backfill bypasses the per-station park (still honors the global
+  // kill switch); a live job respects the per-station pause. Mirrors transcribe.ts.
+  const paused = job.data?.window ? await isPipelinePaused() : await isPipelinePaused(stationId)
+  if (paused) {
+    console.log(`[summarize] paused (${job.data?.window ? 'global' : `station ${stationId}`}) — skipping`)
     return { summarized: 0, remaining: false, skipped: true }
   }
   console.log('[summarize] starting batch...')
