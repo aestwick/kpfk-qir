@@ -171,8 +171,14 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   const diarize = await isDiarizationEnabled(stationId)
   console.log(`[transcribe] provider order: ${providerPlan.map((p) => p.id).join(' → ')} (diarize=${diarize})`)
 
-  // Get candidate pending episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
+  // Get candidate pending episodes from the window (including those with null
+  // air_date that were created during it — older ingests didn't populate it).
+  // NOTE: we deliberately do NOT `.limit(batchSize)` here. Excluded categories must
+  // be dropped BEFORE the batch is sliced: with a small batch size, a run of
+  // excluded-category episodes at the head of the created_at order (e.g. a backfill's
+  // block of Music episodes) would otherwise fill the entire batch, claim nothing,
+  // and dead-end the continue-chain while claimable episodes sit right behind them.
+  // id+category over one window is small, so fetching all then slicing is cheap.
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
@@ -180,23 +186,22 @@ async function runTranscribeBatch(job: Job, stationId: string) {
     .eq('status', 'pending')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
-    .limit(batchSize)
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!candidates?.length) {
-    console.log('[transcribe] no pending episodes')
-    return { transcribed: 0 }
-  }
 
-  // Drop excluded categories before claiming so they stay pending (not stuck mid-stage)
-  const claimIds = candidates
-    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
-    .map((ep) => ep.id)
-
-  if (!claimIds.length) {
-    console.log('[transcribe] only excluded-category episodes pending')
-    return { transcribed: 0 }
+  // Drop excluded categories before slicing the batch so they stay pending (never
+  // claimed, never stuck mid-stage) without starving claimable work. A null category
+  // is never excluded — matches getExcludedCategories' substring semantics.
+  const claimable = (candidates ?? []).filter(
+    (ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)),
+  )
+  if (!claimable.length) {
+    // Nothing pending, or only excluded-category episodes remain — both are a clean
+    // terminal state for this stage (excluded ones are meant to stay pending).
+    console.log('[transcribe] no claimable pending episodes')
+    return { transcribed: 0, remaining: false }
   }
+  const claimIds = claimable.slice(0, batchSize).map((ep) => ep.id)
 
   // Atomically claim: the `.eq('status', 'pending')` guard means only rows still
   // pending are flipped to 'transcribing', so overlapping runs (manual retry,
@@ -346,18 +351,13 @@ async function runTranscribeBatch(job: Job, stationId: string) {
     }
   }
 
-  // Check if more pending episodes remain after this batch (this station only —
-  // the continue-chain job carries this station's id)
-  const { count: remainingCount } = await supabaseAdmin
-    .from('episode_log')
-    .select('id', { count: 'exact', head: true })
-    .eq('station_id', stationId)
-    .eq('status', 'pending')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-
-  const remaining = (remainingCount ?? 0) > 0
+  // More claimable pending beyond this batch? Excluded-category episodes are NOT
+  // counted — they intentionally stay `pending` and must not keep the chain alive
+  // (counting them was the other half of the backfill deadlock). The continue job
+  // re-queries fresh, so a slight over-estimate just costs one extra empty tick.
+  const remaining = claimable.length > claimIds.length
   if (remaining) {
-    console.log(`[transcribe] ${remainingCount} more pending episodes — will continue`)
+    console.log(`[transcribe] ${claimable.length - claimIds.length} more claimable pending — will continue`)
   }
 
   if (transcribed > 0) {

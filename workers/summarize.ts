@@ -64,8 +64,11 @@ export async function processSummarize(job: Job) {
   const embeddingModel = await getEmbeddingModel(stationId)
   const { start, end } = resolveWindow(job)
 
-  // Get candidate transcribed episodes from current quarter (including those with null
-  // air_date that were created during this quarter — older ingests didn't populate it)
+  // Get candidate transcribed episodes from the window (including those with null
+  // air_date that were created during it — older ingests didn't populate it). As in
+  // transcribe.ts, we do NOT `.limit(batchSize)` here: excluded categories must be
+  // dropped BEFORE the batch is sliced, or a head-of-queue block of excluded episodes
+  // would fill the batch, claim nothing, and dead-end the continue-chain.
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
@@ -73,23 +76,20 @@ export async function processSummarize(job: Job) {
     .eq('status', 'transcribed')
     .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     .order('created_at', { ascending: true })
-    .limit(batchSize)
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!candidates?.length) {
-    console.log('[summarize] no transcribed episodes')
-    return { summarized: 0 }
-  }
 
-  // Drop excluded categories before claiming so they stay transcribed (not stuck mid-stage)
-  const claimIds = candidates
-    .filter((ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)))
-    .map((ep) => ep.id)
-
-  if (!claimIds.length) {
-    console.log('[summarize] only excluded-category episodes transcribed')
-    return { summarized: 0 }
+  // Drop excluded categories before slicing the batch so they stay transcribed (never
+  // claimed, never stuck mid-stage) without starving claimable work. Null category is
+  // never excluded — matches getExcludedCategories' substring semantics.
+  const claimable = (candidates ?? []).filter(
+    (ep) => !excludedCategories.some((exc) => ep.category?.includes(exc)),
+  )
+  if (!claimable.length) {
+    console.log('[summarize] no claimable transcribed episodes')
+    return { summarized: 0, remaining: false }
   }
+  const claimIds = claimable.slice(0, batchSize).map((ep) => ep.id)
 
   // Atomically claim: the `.eq('status', 'transcribed')` guard ensures overlapping
   // runs can't grab the same episode (see transcribe.ts for the full rationale).
@@ -270,18 +270,12 @@ ${transcriptText}`
     }
   }
 
-  // Check if more transcribed episodes remain after this batch (this station only —
-  // the continue-chain job carries this station's id)
-  const { count: remainingCount } = await supabaseAdmin
-    .from('episode_log')
-    .select('id', { count: 'exact', head: true })
-    .eq('station_id', stationId)
-    .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-
-  const remaining = (remainingCount ?? 0) > 0
+  // More claimable transcribed episodes beyond this batch? Excluded-category episodes
+  // are NOT counted — they intentionally stay `transcribed` and must not keep the
+  // chain alive (mirrors transcribe.ts; the continue job re-queries fresh).
+  const remaining = claimable.length > claimIds.length
   if (remaining) {
-    console.log(`[summarize] ${remainingCount} more transcribed episodes — will continue`)
+    console.log(`[summarize] ${claimable.length - claimIds.length} more claimable transcribed — will continue`)
   }
 
   if (summarized > 0) {
