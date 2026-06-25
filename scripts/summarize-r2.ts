@@ -1,92 +1,132 @@
 /**
- * Standalone summarization pass over bucket transcripts.
+ * Standalone Supabase-transcripts → descriptive summary job.
  *
- * Reads the `.txt` transcripts that `transcribe-r2` wrote to a Supabase Storage
- * bucket, summarizes each with OpenAI, and writes a sibling `<key>.summary.json`
- * back to the same bucket. This is a one-off utility — it does NOT touch
- * episode_log, stations, or the QIR pipeline; the QIR summarizer
- * (workers/summarize.ts, FCC archival-log prompt) is unrelated to this.
+ * Reads the speaker-separated `.txt` transcripts that `transcribe-r2` wrote to a
+ * Supabase Storage bucket and writes ONE summary artifact per transcript back to
+ * the SAME bucket, right next to the captions:
  *
- * Work-list: the canonical object keys come from listing the R2 audio bucket
- * (same source as transcribe-r2). No audio is downloaded here — only the key
- * NAMES are used to locate each transcript at `<key>.txt` in the Supabase
- * bucket. Pass --keys/--keys-file/--prefix to scope it, exactly like
- * transcribe-r2.
+ *   <base>.txt          (input  — produced by transcribe-r2)
+ *   <base>.summary.json (output — { summary, speakers[], skip_reason, _meta })
  *
- * Per key:
- *   read   supabase://<bucket>/<key>.txt          (skip "missing" if not transcribed yet)
- *   skip   if <key>.summary.json already exists    (unless --overwrite)
- *   write  supabase://<bucket>/<key>.summary.json
- *            { source, model, headline, summary, usage, costUsd, generatedAt }
+ * Like transcribe-r2 this is a one-off utility: it does NOT touch episode_log,
+ * stations, quarters, usage_log, or the QIR pipeline (workers/summarize.ts and
+ * its FCC archival-log prompt are unrelated). It walks the bucket, sends each
+ * transcript to OpenAI with the archivist prompt, and uploads the result. Cost
+ * is computed inline from the API's token usage and printed (not logged to DB).
  *
- * Usage (run INSIDE the worker container, which has OPENAI_API_KEY + R2 + Supabase env):
+ * Work-list comes straight from the Supabase bucket (list `.txt` recursively) —
+ * no R2 creds, and it reads exactly the keys that exist (so de-accented paths
+ * from the transcribe-r2 fix are handled with zero special-casing).
  *
+ * Skip-exists makes it idempotent: a transcript whose .summary.json already
+ * exists is skipped unless --overwrite. So a 15-file sample then a full run just
+ * works — the sample's 15 are skipped on the full pass.
+ *
+ * Usage (run INSIDE the worker container, which has OPENAI_API_KEY + tsx):
+ *
+ *   # sample 15, eyeball the output WITHOUT writing anything:
  *   docker exec qir-worker npm run summarize-r2 -- \
- *     --bucket pra --supabase-bucket Transcripts --concurrency 4
+ *     --supabase-bucket Transcripts --limit 15 --dry-run
  *
- * Tip: do a small `--limit 5` pass first and eyeball the .summary.json output
- * before running the whole archive.
+ *   # write summaries for 15:
+ *   docker exec qir-worker npm run summarize-r2 -- \
+ *     --supabase-bucket Transcripts --limit 15
+ *
+ * Env: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (storage) and
+ *      OPENAI_API_KEY (summarization).
  *
  * Flags:
- *   --bucket <name>          R2 bucket to enumerate keys from (default: $R2_BUCKET)
- *   --prefix <p>             only keys starting with <p> (S3 listing)
- *   --keys <a,b,c>           explicit audio keys (skips R2 listing)
- *   --keys-file <path>       newline-delimited keys (# comments + blanks ignored)
- *   --supabase-bucket <name> Supabase Storage bucket holding the transcripts (default: transcripts)
- *   --model <id>             OpenAI model (default: gpt-4o)
- *   --prompt-file <path>     override the built-in summarization prompt
- *   --out <dir>              also write each summary JSON to a local directory
- *   --concurrency <n>        parallel summaries (default: 4)
- *   --limit <n>              summarize at most the first <n> transcripts
- *   --overwrite              re-summarize even if the .summary.json already exists
+ *   --supabase-bucket <name>  Supabase Storage bucket to read/write (default: Transcripts)
+ *   --prefix <p>              only transcripts whose key starts with <p>
+ *   --limit <n>               summarize at most the first <n> transcripts (sampling)
+ *   --concurrency <n>         parallel summarizations (default: 4)
+ *   --model <id>              OpenAI model (default: gpt-4o)
+ *   --prompt-file <path>      override the baked-in system prompt with a file's contents
+ *   --max-chars <n>           truncate transcripts longer than this before sending (default: 240000)
+ *   --dry-run                 print summaries to stdout; do NOT upload
+ *   --out <dir>               also write each <base>.summary.json to a local directory
+ *   --overwrite               re-summarize even if the .summary.json already exists
  */
-import { S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3'
-import OpenAI from 'openai'
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 
-const AUDIO_EXT = /\.(mp3|m4a|wav|aac|flac|ogg|opus|mp4|webm|mov)$/i
-const DEFAULT_SUPABASE_BUCKET = 'transcripts'
+const DEFAULT_SUPABASE_BUCKET = 'Transcripts'
 const DEFAULT_MODEL = 'gpt-4o'
+// gpt-4o list price (USD per token). Used only for the printed estimate.
+const GPT4O_INPUT_COST_PER_TOKEN = 2.5 / 1_000_000
+const GPT4O_OUTPUT_COST_PER_TOKEN = 10 / 1_000_000
 
-// USD per 1,000,000 tokens (input, output). Verify at https://openai.com/api/pricing/.
-// Used only for the printed cost estimate; an unknown model just prints "n/a".
-const MODEL_RATES: Record<string, { in: number; out: number }> = {
-  'gpt-4o': { in: 2.5, out: 10 },
-  'gpt-4o-mini': { in: 0.15, out: 0.6 },
-}
+const DEFAULT_SUMMARY_PROMPT = `You are an archivist for KPFK, a Pacifica community radio station in Los Angeles.
+Your task is to write a factual descriptive summary of an archived radio broadcast
+from its transcript. This summary is the canonical record used for search and for
+grouping episodes into thematic collections. It is NOT promotional copy and NOT a
+compliance document.
 
-// Default summarization prompt. This is NOT the FCC archival-log prompt — it's a
-// browse/discovery summary for the public spoken-word archive. Override per-run
-// with --prompt-file.
-const DEFAULT_SUMMARY_PROMPT = `You are summarizing an audio recording from a public radio / spoken-word archive (Pacifica Radio: lectures, interviews, panels, news, and cultural programs) for a browsable public catalog. You are given a speaker-labeled transcript. Write a clear, factual summary that helps someone decide whether to listen.
+INPUTS:
+- Episode metadata (may include show title, air date, host(s), guest(s))
+- A transcript (machine-generated; may contain errors, especially in proper names)
 
-RULES:
-- The "summary" field must be 4 to 8 complete sentences.
-- Be neutral and factual. Describe what is actually said: the main subjects, the key arguments or information presented, and who is speaking when they are named.
-- Attribute claims and opinions to the speaker who makes them; do not assert them as fact in your own voice.
-- Do NOT invent names, dates, affiliations, titles, or any fact not present in the transcript. If something is unclear, omit it rather than guess.
-- Do NOT editorialize, praise, criticize, or assess significance, impact, or importance.
-- Write plainly for a general reader; it is fine to name the topic directly.
-- If the recording is mostly music, a pledge drive, or otherwise has no substantive spoken content, say so briefly in 1-2 sentences instead of padding to 4-8.
+CORE PRINCIPLE — GROUND EVERYTHING IN THE TRANSCRIPT:
+- Summarize only what is actually said in the transcript.
+- Do NOT add historical context, dates, biographical facts, significance, or background
+  from your own knowledge, even if you recognize the topic, period, or people involved.
+- If the transcript references an event or person without explaining it, name it as the
+  transcript does and stop. Do not fill in what you know.
+- Never guess at or "correct" a proper name. If a name appears garbled or uncertain,
+  use it exactly as transcribed or omit it. Do not substitute a real name you think
+  was intended.
 
-Also produce "headline": one short, declarative sentence (about 12 words or fewer) naming the main subject(s). No trailing period needed.
+WHAT TO CAPTURE (this is a search and collection substrate — be specific and dense):
+- The actual subjects discussed: topics, events, works, places, named people.
+- Claims, arguments, or positions stated by named speakers, attributed by name.
+- Concrete specifics a person might search for: names, places, organizations, titles
+  of works, the substance of what was argued — not abstract gestures at themes.
+- Use the broadcast's own terminology for its subjects — specific names, movement
+  names, terms of art the speakers actually use. Do not genericize them into broader
+  categories (e.g., keep "the Sanctuary Movement," not "immigration activism").
+  Mirror the source's vocabulary, never its tone.
+- When multiple distinct segments occur, cover the most substantive ones; name the
+  others briefly only if they carry real subject content.
 
-Return ONLY valid JSON, no markdown, no extra text:
-{"headline": "string", "summary": "string"}`
+VOICE:
+- Neutral and factual, but readable — plain natural prose, not robotic.
+- Attribute claims: "[Name] argues that…", "[Name] describes…".
+- Do NOT add praise, criticism, political framing, or judgments of importance.
+- Do NOT describe significance, impact, implications, or why a topic matters.
+- Do NOT narrate structure: no "opens with", "concludes", "the discussion turns to".
+- State subjects and claims directly; do not refer to "this episode" or "the program".
+- Vary sentence construction; do not collapse every line into "[Name] discusses X."
+
+LENGTH:
+- 600–1,000 characters. No fixed sentence count.
+- Length follows content: a dense, substantive broadcast earns the upper range; a thin
+  one earns the lower. Do not pad a sparse episode to seem substantive.
+
+NON-SUBSTANTIVE / NON-SPEECH EPISODES:
+- If the broadcast is primarily music, performance, or readings with little spoken
+  discussion, do not invent a summary. State briefly what it is (e.g., "A music
+  broadcast of [genre/performer if named]; minimal spoken content.") and set
+  "skip_reason".
+- If the transcript is too garbled or sparse to summarize reliably, say so plainly and
+  set "skip_reason".
+- Omit pledge drives, donation appeals, station IDs, promos, and production credits
+  from the summary regardless.
+
+OUTPUT — return ONLY valid JSON, no markdown, no extra text:
+{"summary":"string","speakers":["string"],"skip_reason":"string or empty"}`
 
 interface Args {
-  bucket: string | undefined
+  bucket: string
   prefix: string | undefined
-  keys: string[]
-  keysFile: string | undefined
-  supabaseBucket: string
+  limit: number | undefined
+  concurrency: number
   model: string
   promptFile: string | undefined
+  maxChars: number
+  dryRun: boolean
   out: string | undefined
-  concurrency: number
-  limit: number | undefined
   overwrite: boolean
 }
 
@@ -95,81 +135,74 @@ function parseArgs(argv: string[]): Args {
     const i = argv.indexOf(flag)
     return i >= 0 ? argv[i + 1] : undefined
   }
+  const num = (flag: string, def: number): number => {
+    const raw = get(flag)
+    if (raw === undefined) return def
+    const n = parseInt(raw, 10)
+    return Number.isFinite(n) && n > 0 ? n : def
+  }
   const limitRaw = get('--limit')
   return {
-    bucket: get('--bucket') ?? process.env.R2_BUCKET,
+    bucket: get('--supabase-bucket') ?? DEFAULT_SUPABASE_BUCKET,
     prefix: get('--prefix'),
-    keys: (get('--keys') ?? '')
-      .split(',')
-      .map((k) => k.trim())
-      .filter(Boolean),
-    keysFile: get('--keys-file'),
-    supabaseBucket: get('--supabase-bucket') ?? DEFAULT_SUPABASE_BUCKET,
+    limit: limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 1) : undefined,
+    concurrency: Math.max(1, num('--concurrency', 4)),
     model: get('--model') ?? DEFAULT_MODEL,
     promptFile: get('--prompt-file'),
+    maxChars: Math.max(1000, num('--max-chars', 240_000)),
+    dryRun: argv.includes('--dry-run'),
     out: get('--out'),
-    concurrency: Math.max(1, parseInt(get('--concurrency') ?? '4', 10) || 4),
-    limit: limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 1) : undefined,
     overwrite: argv.includes('--overwrite'),
   }
 }
 
-function makeS3(): S3Client {
-  const accountId = process.env.R2_ACCOUNT_ID
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY
-  const endpoint =
-    process.env.R2_ENDPOINT ||
-    (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined)
-  if (!endpoint || !accessKeyId || !secretAccessKey) {
-    throw new Error(
-      'R2 S3 credentials missing. Set R2_ACCOUNT_ID (or R2_ENDPOINT), R2_ACCESS_KEY_ID, ' +
-        'R2_SECRET_ACCESS_KEY — or pass --keys/--keys-file to skip R2 listing.',
-    )
-  }
-  return new S3Client({ region: 'auto', endpoint, credentials: { accessKeyId, secretAccessKey } })
+/** The summary object key for a transcript: `<base>.txt` → `<base>.summary.json`. */
+function summaryKey(txtKey: string): string {
+  return txtKey.replace(/\.txt$/i, '.summary.json')
 }
 
-/** Enumerate audio object keys under a prefix (paginated) — the canonical work-list. */
-async function listAudioKeys(s3: S3Client, bucket: string, prefix: string | undefined): Promise<string[]> {
-  const keys: string[] = []
-  let token: string | undefined
-  do {
-    const res = await s3.send(
-      new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
-    )
-    for (const obj of res.Contents ?? []) {
-      if (obj.Key && AUDIO_EXT.test(obj.Key) && !obj.Key.endsWith('/')) keys.push(obj.Key)
+/** Flat local basename for an object key (drops the .txt). */
+function outBaseName(txtKey: string): string {
+  return txtKey
+    .replace(/\.txt$/i, '')
+    .replace(/[\/\\]+/g, '__')
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+}
+
+/**
+ * Recursively enumerate `.txt` transcript keys in a Supabase Storage bucket.
+ * Supabase `.list(dir)` is one level deep and returns folders as entries with
+ * `id === null`; we DFS into those and page each level (limit/offset).
+ */
+async function listTranscriptKeys(bucket: string, prefix: string): Promise<string[]> {
+  const out: string[] = []
+  const stack: string[] = [prefix.replace(/\/+$/, '')]
+  const PAGE = 100
+  while (stack.length) {
+    const dir = stack.pop()!
+    let offset = 0
+    while (true) {
+      const { data, error } = await supabaseAdmin.storage
+        .from(bucket)
+        .list(dir, { limit: PAGE, offset, sortBy: { column: 'name', order: 'asc' } })
+      if (error) throw new Error(`Supabase list "${dir}": ${error.message}`)
+      if (!data || data.length === 0) break
+      for (const item of data) {
+        const full = dir ? `${dir}/${item.name}` : item.name
+        if (item.id === null) {
+          stack.push(full) // folder
+        } else if (/\.txt$/i.test(item.name)) {
+          out.push(full)
+        }
+      }
+      if (data.length < PAGE) break
+      offset += PAGE
     }
-    token = res.IsTruncated ? res.NextContinuationToken : undefined
-  } while (token)
-  return keys
-}
-
-async function loadKeyList(args: Args): Promise<string[]> {
-  const keys = [...args.keys]
-  if (args.keysFile) {
-    const raw = await fs.readFile(args.keysFile, 'utf8')
-    for (const line of raw.split(/\r?\n/)) {
-      const k = line.trim()
-      if (k && !k.startsWith('#')) keys.push(k)
-    }
   }
-  return Array.from(new Set(keys))
+  return out
 }
 
-/** Storage object path mirroring the R2 key with the audio extension swapped. */
-function storageKey(key: string, ext: string): string {
-  return `${key.replace(/\.[^.]+$/, '')}.${ext}`
-}
-
-/** Flat local basename for an object key (drops the extension). */
-function outBaseName(key: string): string {
-  const stripped = key.replace(/\.[^.]+$/, '')
-  return stripped.replace(/[\/\\]+/g, '__').replace(/[^A-Za-z0-9._-]/g, '_')
-}
-
-/** Does an object already exist in the Supabase bucket? */
+/** Does an object already exist in the bucket? (list+search the parent dir.) */
 async function storageExists(bucket: string, objectPath: string): Promise<boolean> {
   const slash = objectPath.lastIndexOf('/')
   const dir = slash >= 0 ? objectPath.slice(0, slash) : ''
@@ -178,63 +211,71 @@ async function storageExists(bucket: string, objectPath: string): Promise<boolea
   return !!data?.some((o) => o.name === name)
 }
 
-/** Download a text object from the bucket, or null if it isn't there. */
-async function downloadText(bucket: string, objectPath: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin.storage.from(bucket).download(objectPath)
-  if (error || !data) return null
+async function downloadText(bucket: string, key: string): Promise<string> {
+  const { data, error } = await supabaseAdmin.storage.from(bucket).download(key)
+  if (error || !data) throw new Error(`Supabase download "${key}": ${error?.message ?? 'no data'}`)
   return await data.text()
 }
 
-async function uploadJson(bucket: string, objectPath: string, obj: unknown): Promise<void> {
-  const body = Buffer.from(JSON.stringify(obj, null, 2), 'utf8')
+async function uploadJson(bucket: string, key: string, body: string): Promise<void> {
   const { error } = await supabaseAdmin.storage
     .from(bucket)
-    .upload(objectPath, body, { contentType: 'application/json', upsert: true })
-  if (error) throw new Error(`upload ${objectPath} failed: ${error.message}`)
+    .upload(key, Buffer.from(body, 'utf8'), { contentType: 'application/json', upsert: true })
+  if (error) throw new Error(`Supabase upload "${key}": ${error.message}`)
 }
 
-interface SummaryJson {
-  headline: string
+interface SummaryShape {
   summary: string
+  speakers: string[]
+  skip_reason: string
 }
 
-type OneStatus = 'done' | 'skipped' | 'missing'
+/** Coerce the model's JSON into the expected shape; throw if unusable. */
+function validate(raw: unknown): SummaryShape {
+  if (!raw || typeof raw !== 'object') throw new Error('response is not a JSON object')
+  const o = raw as Record<string, unknown>
+  const summary = typeof o.summary === 'string' ? o.summary : ''
+  const skip_reason = typeof o.skip_reason === 'string' ? o.skip_reason : ''
+  const speakers = Array.isArray(o.speakers) ? o.speakers.filter((s): s is string => typeof s === 'string') : []
+  if (!summary && !skip_reason) throw new Error('response has neither summary nor skip_reason')
+  return { summary, speakers, skip_reason }
+}
 
 interface OneResult {
   key: string
-  status: OneStatus
-  promptTokens: number
-  completionTokens: number
+  skipped: boolean
   costUsd: number
+  inputTokens: number
+  outputTokens: number
+  hadSkipReason: boolean
 }
 
-function costOf(model: string, promptTokens: number, completionTokens: number): number {
-  const rate = MODEL_RATES[model]
-  if (!rate) return 0
-  return (promptTokens / 1e6) * rate.in + (completionTokens / 1e6) * rate.out
-}
+async function summarizeOne(key: string, args: Args, openai: OpenAI, systemPrompt: string): Promise<OneResult> {
+  const destKey = summaryKey(key)
 
-async function summarizeOne(
-  key: string,
-  args: Args,
-  openai: OpenAI,
-  systemPrompt: string,
-): Promise<OneResult> {
-  const txtPath = storageKey(key, 'txt')
-  const summaryPath = storageKey(key, 'summary.json')
-
-  if (!args.overwrite && (await storageExists(args.supabaseBucket, summaryPath))) {
-    console.log(`[summarize-r2] skip (exists): ${key}`)
-    return { key, status: 'skipped', promptTokens: 0, completionTokens: 0, costUsd: 0 }
+  if (!args.overwrite && !args.dryRun) {
+    if (await storageExists(args.bucket, destKey)) {
+      console.log(`[summarize-r2] skip (exists): ${destKey}`)
+      return { key, skipped: true, costUsd: 0, inputTokens: 0, outputTokens: 0, hadSkipReason: false }
+    }
   }
 
-  const transcript = await downloadText(args.supabaseBucket, txtPath)
-  if (transcript === null || !transcript.trim()) {
-    console.warn(`[summarize-r2] no transcript yet: ${key}`)
-    return { key, status: 'missing', promptTokens: 0, completionTokens: 0, costUsd: 0 }
+  let transcript = await downloadText(args.bucket, key)
+  let truncated = false
+  if (transcript.length > args.maxChars) {
+    transcript = transcript.slice(0, args.maxChars)
+    truncated = true
   }
 
-  // Retry transient OpenAI errors with exponential backoff (mirrors workers/summarize.ts).
+  // Metadata we actually have for an archive file is the path. Don't fabricate
+  // air dates / hosts — the prompt grounds everything in the transcript anyway.
+  const base = key.replace(/\.txt$/i, '')
+  const title = base.slice(base.lastIndexOf('/') + 1)
+  const userMessage = `Title: ${title}
+Archive path: ${base}
+Transcript:
+${transcript}`
+
   let response: OpenAI.Chat.Completions.ChatCompletion | null = null
   let lastError: Error | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -243,7 +284,7 @@ async function summarizeOne(
         model: args.model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Transcript:\n${transcript}` },
+          { role: 'user', content: userMessage },
         ],
         temperature: 0.3,
         response_format: { type: 'json_object' },
@@ -254,7 +295,7 @@ async function summarizeOne(
       const status = (err as { status?: number })?.status
       if (status && [429, 500, 502, 503].includes(status)) {
         const delay = Math.pow(2, attempt + 1) * 1000
-        console.warn(`[summarize-r2] ${key} OpenAI ${status}, retrying in ${delay}ms…`)
+        console.warn(`[summarize-r2] OpenAI ${status} on ${title}, retrying in ${delay}ms…`)
         await new Promise((r) => setTimeout(r, delay))
         continue
       }
@@ -265,38 +306,44 @@ async function summarizeOne(
 
   const content = response.choices[0]?.message?.content
   if (!content) throw new Error('empty response from OpenAI')
+  const parsed = validate(JSON.parse(content))
 
-  let parsed: SummaryJson
-  try {
-    parsed = JSON.parse(content)
-  } catch {
-    throw new Error(`invalid JSON from OpenAI: ${content.slice(0, 200)}`)
+  const inputTokens = response.usage?.prompt_tokens ?? 0
+  const outputTokens = response.usage?.completion_tokens ?? 0
+  const costUsd = inputTokens * GPT4O_INPUT_COST_PER_TOKEN + outputTokens * GPT4O_OUTPUT_COST_PER_TOKEN
+
+  const out = JSON.stringify(
+    {
+      ...parsed,
+      _meta: {
+        source_key: key,
+        model: args.model,
+        chars: transcript.length,
+        truncated,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+      },
+    },
+    null,
+    2,
+  )
+
+  const tag = parsed.skip_reason ? `SKIP_REASON: ${parsed.skip_reason}` : `${parsed.summary.length} chars`
+  if (args.dryRun) {
+    console.log(`\n──────── ${title}${truncated ? ' (truncated)' : ''} ────────`)
+    console.log(out)
+  } else {
+    await uploadJson(args.bucket, destKey, out)
+    if (args.out) {
+      await fs.writeFile(path.join(args.out, `${outBaseName(key)}.summary.json`), out)
+    }
   }
-  if (!parsed.headline?.trim() || !parsed.summary?.trim()) {
-    throw new Error(`incomplete summary (missing headline or summary): ${content.slice(0, 200)}`)
-  }
-
-  const promptTokens = response.usage?.prompt_tokens ?? 0
-  const completionTokens = response.usage?.completion_tokens ?? 0
-  const costUsd = costOf(args.model, promptTokens, completionTokens)
-
-  const artifact = {
-    source: { bucket: args.supabaseBucket, key, transcript: txtPath },
-    model: args.model,
-    headline: parsed.headline.trim(),
-    summary: parsed.summary.trim(),
-    usage: { promptTokens, completionTokens },
-    costUsd: Number(costUsd.toFixed(6)),
-    generatedAt: new Date().toISOString(),
-  }
-
-  await uploadJson(args.supabaseBucket, summaryPath, artifact)
-  if (args.out) {
-    await fs.writeFile(path.join(args.out, `${outBaseName(key)}.summary.json`), JSON.stringify(artifact, null, 2))
-  }
-
-  console.log(`[summarize-r2] ✓ ${key} — ~$${costUsd.toFixed(4)} · "${artifact.headline.slice(0, 60)}"`)
-  return { key, status: 'done', promptTokens, completionTokens, costUsd }
+  console.log(
+    `[summarize-r2] ${args.dryRun ? '✎' : '✓'} ${title} — ${tag}, ` +
+      `${inputTokens}+${outputTokens} tok, ~$${costUsd.toFixed(4)}` +
+      (parsed.speakers.length ? ` · speakers: ${parsed.speakers.join(', ')}` : ''),
+  )
+  return { key, skipped: false, costUsd, inputTokens, outputTokens, hadSkipReason: !!parsed.skip_reason }
 }
 
 /** Run `worker` over `items` with at most `limit` in flight; collect {ok|err}. */
@@ -324,65 +371,54 @@ async function mapPool<T, R>(
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
-
   if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not set')
-  if (!MODEL_RATES[args.model]) {
-    console.warn(`[summarize-r2] note: no cost rate for "${args.model}" — cost estimate will read $0.00.`)
-  }
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 5 * 60 * 1000 })
+
   const systemPrompt = args.promptFile
-    ? await fs.readFile(args.promptFile, 'utf8')
+    ? (await fs.readFile(args.promptFile, 'utf8')).trim()
     : DEFAULT_SUMMARY_PROMPT
 
-  // Work-list: explicit keys, else list the R2 audio bucket (names only).
-  const explicitKeys = await loadKeyList(args)
-  let keys: string[]
-  if (explicitKeys.length) {
-    keys = explicitKeys
-  } else {
-    if (!args.bucket) throw new Error('--bucket (or $R2_BUCKET) is required when listing keys')
-    console.log(`[summarize-r2] listing keys in r2://${args.bucket}/${args.prefix ?? ''} …`)
-    keys = await listAudioKeys(makeS3(), args.bucket, args.prefix)
-  }
+  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 5 * 60 * 1000 })
+
+  console.log(`[summarize-r2] listing transcripts in supabase://${args.bucket}/${args.prefix ?? ''} …`)
+  let keys = await listTranscriptKeys(args.bucket, args.prefix ?? '')
+  keys.sort()
+  console.log(`[summarize-r2] ${keys.length} transcript(s) found`)
 
   if (args.limit && keys.length > args.limit) {
     console.log(`[summarize-r2] limiting to first ${args.limit} of ${keys.length}`)
     keys = keys.slice(0, args.limit)
   }
   if (!keys.length) {
-    console.log('[summarize-r2] no keys matched — nothing to do.')
+    console.log('[summarize-r2] nothing to do.')
     return
   }
   if (args.out) await fs.mkdir(args.out, { recursive: true })
 
   console.log(
-    `[summarize-r2] ${keys.length} transcript(s) · model=${args.model} · concurrency=${args.concurrency} · ` +
-      `→ supabase://${args.supabaseBucket}/<key>.summary.json${args.out ? ` + local://${path.resolve(args.out)}` : ''}\n`,
+    `[summarize-r2] ${keys.length} file(s) · model=${args.model} · concurrency=${args.concurrency} · ` +
+      `${args.dryRun ? 'DRY-RUN (no upload)' : `→ supabase://${args.bucket}`}\n`,
   )
 
   const results = await mapPool(keys, args.concurrency, (key) => summarizeOne(key, args, openai, systemPrompt))
 
   const ok = results.filter((r) => r.value)
   const failed = results.filter((r) => r.error)
-  const done = ok.filter((r) => r.value!.status === 'done')
-  const skipped = ok.filter((r) => r.value!.status === 'skipped')
-  const missing = ok.filter((r) => r.value!.status === 'missing')
+  const done = ok.filter((r) => !r.value!.skipped)
+  const skipped = ok.filter((r) => r.value!.skipped)
+  const skipReasons = done.filter((r) => r.value!.hadSkipReason)
   const totalCost = done.reduce((s, r) => s + r.value!.costUsd, 0)
-  const totalIn = done.reduce((s, r) => s + r.value!.promptTokens, 0)
-  const totalOut = done.reduce((s, r) => s + r.value!.completionTokens, 0)
+  const totalIn = done.reduce((s, r) => s + r.value!.inputTokens, 0)
+  const totalOut = done.reduce((s, r) => s + r.value!.outputTokens, 0)
 
   console.log(
-    `\n[summarize-r2] done: ${done.length} summarized, ${skipped.length} skipped, ` +
-      `${missing.length} no-transcript, ${failed.length} failed.`,
+    `\n[summarize-r2] done: ${done.length} summarized${args.dryRun ? ' (dry-run, not written)' : ''}, ` +
+      `${skipped.length} skipped, ${failed.length} failed.`,
   )
   if (done.length) {
     console.log(
-      `[summarize-r2] ${(totalIn / 1e6).toFixed(2)}M in + ${(totalOut / 1e6).toFixed(2)}M out tokens, ` +
-        `est. ~$${totalCost.toFixed(2)} on ${args.model}.`,
+      `[summarize-r2] ${totalIn}+${totalOut} tokens, est. ~$${totalCost.toFixed(2)} · ` +
+        `${skipReasons.length} flagged skip_reason (music/sparse/garbled).`,
     )
-  }
-  if (missing.length) {
-    console.warn(`[summarize-r2] no transcript for: ${missing.map((r) => r.item).join(', ')}`)
   }
   if (failed.length) {
     console.error('[summarize-r2] failures:')
