@@ -44,6 +44,7 @@ export default function EpisodesPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [issueCategories, setIssueCategories] = useState<string[]>([])
+  const [programCategories, setProgramCategories] = useState<{ category: string; n: number }[]>([])
 
   // Inline category editing state
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null)
@@ -63,6 +64,7 @@ export default function EpisodesPage() {
   const quarterApiValue = quarterFilter === 'all' ? '' : quarterFilter
   const showFilterParam = searchParams.get('show') ?? ''
   const categoryFilterParam = searchParams.get('category') ?? ''
+  const programCategoryFilter = searchParams.get('program_category') ?? ''
   const sort = searchParams.get('sort') ?? 'created_at'
   const order = searchParams.get('order') ?? 'desc'
   const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
@@ -99,6 +101,7 @@ export default function EpisodesPage() {
   function setStatusFilter(v: string) { updateParams({ status: v, page: '' }) }
   function setQuarterFilter(v: string) { updateParams({ quarter: v, page: '' }) }
   function setCategoryFilterValue(v: string) { updateParams({ category: v, page: '' }) }
+  function setProgramCategoryFilter(v: string) { updateParams({ program_category: v, page: '' }) }
   function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
 
   // Debounce text filter updates to URL
@@ -143,6 +146,22 @@ export default function EpisodesPage() {
     fetchCategories()
   }, [])
 
+  // Fetch the station's program categories (genre) for the filter dropdown.
+  useEffect(() => {
+    async function fetchProgramCategories() {
+      try {
+        const res = await authedFetch('/api/episodes/categories')
+        if (res.ok) {
+          const data = await res.json()
+          if (Array.isArray(data.categories)) setProgramCategories(data.categories)
+        }
+      } catch {
+        // Non-fatal — the dropdown just shows no options.
+      }
+    }
+    fetchProgramCategories()
+  }, [])
+
   const fetchEpisodes = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams({ page: String(page), limit: String(limit), sort, order })
@@ -150,6 +169,7 @@ export default function EpisodesPage() {
     if (quarterApiValue) params.set('quarter', quarterApiValue)
     if (showFilter) params.set('show', showFilter)
     if (categoryFilter) params.set('category', categoryFilter)
+    if (programCategoryFilter) params.set('program_category', programCategoryFilter)
 
     const res = await authedFetch(`/api/episodes?${params}`)
     if (res.ok) {
@@ -158,7 +178,7 @@ export default function EpisodesPage() {
       setTotal(data.total ?? 0)
     }
     setLoading(false)
-  }, [page, statusFilter, quarterApiValue, showFilter, categoryFilter, sort, order])
+  }, [page, statusFilter, quarterApiValue, showFilter, categoryFilter, programCategoryFilter, sort, order])
 
   useEffect(() => { fetchEpisodes() }, [fetchEpisodes])
 
@@ -195,6 +215,7 @@ export default function EpisodesPage() {
     if (quarterApiValue) params.set('quarter', quarterApiValue)
     if (showFilter) params.set('show', showFilter)
     if (categoryFilter) params.set('category', categoryFilter)
+    if (programCategoryFilter) params.set('program_category', programCategoryFilter)
     window.open(`/api/episodes?${params}`, '_blank')
   }
 
@@ -330,10 +351,22 @@ export default function EpisodesPage() {
           value={categoryFilter}
           onChange={(e) => setCategoryFilterValue(e.target.value)}
           className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+          title="Filter by FCC issue category"
         >
-          <option value="">All Categories</option>
+          <option value="">All Issues</option>
           {issueCategories.map((cat) => (
             <option key={cat} value={cat}>{cat}</option>
+          ))}
+        </select>
+        <select
+          value={programCategoryFilter}
+          onChange={(e) => setProgramCategoryFilter(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+          title="Filter by program category (genre)"
+        >
+          <option value="">All Genres</option>
+          {programCategories.map((c) => (
+            <option key={c.category} value={c.category}>{c.category} ({c.n})</option>
           ))}
         </select>
       </div>
