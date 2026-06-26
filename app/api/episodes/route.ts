@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status')
     const show = searchParams.get('show')
     const category = searchParams.get('category')
+    const programCategory = searchParams.get('program_category') // genre: episode_log.category
     const quarter = searchParams.get('quarter') // e.g. "2025-Q1"
     const sort = searchParams.get('sort') ?? 'created_at'
     const order = searchParams.get('order') ?? 'desc'
@@ -30,11 +31,15 @@ export async function GET(request: NextRequest) {
       .order(sort, { ascending: order === 'asc' })
       .range(offset, offset + limit - 1)
 
+    // Hide the PRA archive (status 'archived') by default. An explicit status
+    // filter — including selecting 'archived' — overrides this.
     if (status) query = query.eq('status', status)
+    else query = query.neq('status', 'archived')
     const showKey = searchParams.get('show_key')
     if (showKey) query = query.eq('show_key', showKey)
     else if (show) query = query.ilike('show_name', `%${show}%`)
     if (category) query = query.eq('issue_category', category)
+    if (programCategory) query = query.eq('category', programCategory)
 
     if (quarter) {
       const [year, q] = quarter.split('-Q')

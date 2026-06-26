@@ -9,22 +9,56 @@ const parser = new XMLParser({
   isArray: (name) => name === 'item',
 })
 
+// Named HTML entities seen in (or likely for) Pacifica feed categories/titles —
+// the XML predefined five plus the common Latin set for Spanish-language shows.
+// The XML parser decodes these on plain text nodes, but CDATA content is passed
+// through verbatim (entities are not processed inside CDATA), so a CDATA-wrapped
+// "Espa&ntilde;ol" / "Arts &amp; Entertainment" would survive un-decoded without
+// this. Numeric refs (&#243; / &#xF3;) are handled generically below.
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ntilde: 'ñ', Ntilde: 'Ñ',
+  aacute: 'á', eacute: 'é', iacute: 'í', oacute: 'ó', uacute: 'ú',
+  Aacute: 'Á', Eacute: 'É', Iacute: 'Í', Oacute: 'Ó', Uacute: 'Ú',
+  uuml: 'ü', Uuml: 'Ü', iexcl: '¡', iquest: '¿', ordf: 'ª', ordm: 'º',
+}
+
 /**
- * Unwrap a possibly-CDATA-wrapped RSS text node to a trimmed string (or null).
- * RSS titles/categories arrive either as a plain string or, when CDATA-wrapped,
- * as an object carrying `__cdata` (see the parser config above).
+ * Decode HTML/XML character references in a string: named entities (the set
+ * above), decimal (`&#243;`) and hex (`&#xF3;`) numeric refs. Conservative —
+ * only well-formed `&…;` tokens are touched, so stray ampersands ("AT&T",
+ * "Cats & Dogs") are left alone. Idempotent on already-decoded text.
+ */
+export function decodeEntities(s: string): string {
+  return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, body: string) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X'
+        ? parseInt(body.slice(2), 16)
+        : parseInt(body.slice(1), 10)
+      return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : match
+    }
+    return Object.prototype.hasOwnProperty.call(NAMED_ENTITIES, body) ? NAMED_ENTITIES[body] : match
+  })
+}
+
+/**
+ * Unwrap a possibly-CDATA-wrapped RSS text node to a trimmed, entity-decoded
+ * string (or null). RSS titles/categories arrive either as a plain string or,
+ * when CDATA-wrapped, as an object carrying `__cdata` (see the parser config
+ * above). Entities are decoded here so CDATA-wrapped nodes (which the parser
+ * leaves encoded) match the plain-text path — see migration 039.
  */
 export function rssText(node: unknown): string | null {
   if (node == null) return null
   if (typeof node === 'object') {
     const cdata = (node as { __cdata?: unknown }).__cdata
     if (cdata != null) {
-      const s = String(cdata).trim()
+      const s = decodeEntities(String(cdata)).trim()
       return s || null
     }
     return null
   }
-  const s = String(node).trim()
+  const s = decodeEntities(String(node)).trim()
   return s || null
 }
 
