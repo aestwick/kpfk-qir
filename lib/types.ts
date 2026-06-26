@@ -103,8 +103,12 @@ export interface EpisodeLog {
   air_start: string | null
   air_end: string | null
   issue_category: string | null
-  /** Where this episode originated: 'confessor' or 'rss'. */
-  ingest_source: 'rss' | 'confessor'
+  /** Where this episode originated: 'confessor', 'rss', or 'pra' (operator audio server / Pacifica Radio Archives). */
+  ingest_source: 'rss' | 'confessor' | 'pra'
+  /** PRA only: catalog code parsed from the R2 object key (e.g. 'AZ1797A'). NOT unique; null when unparseable. See migration 038. */
+  source_ref: string | null
+  /** PRA only: collection/sub-collection folder path (object key minus the 'Flash Drive (64gb)/' prefix and the leaf). See migration 038. */
+  source_folder: string | null
   /** Verbatim Confessor pubfile (human host/guest/topic/issues/notes), lossless. */
   confessor_meta: ConfessorPubfile[] | null
   /** Human-written narrative synthesized from the Confessor pubfile; wins over the AI summary. */
