@@ -25,8 +25,11 @@
  *   - show_key      = 'pra'      (required + no FK; these aren't broadcast shows.
  *                                 The collection hierarchy lives in source_folder.)
  *
- * Idempotent: upserts on mp3_url (UNIQUE), so re-running is safe and re-applies
- * any parser fixes to the PRA columns without disturbing existing rows.
+ * Idempotent + non-destructive: inserts on mp3_url (UNIQUE) with ON CONFLICT DO
+ * NOTHING, so re-running only adds rows not already present and NEVER overwrites
+ * existing ones. kpfk-web owns these rows after import (status, title, summaries,
+ * access flags), and this seed must not clobber those edits on a re-run. (To
+ * re-apply a parser fix to already-imported rows, delete the affected rows first.)
  *
  *   npx tsx scripts/import-pra.ts --dry-run     # parse + report, no DB writes
  *   npx tsx scripts/import-pra.ts               # upsert into episode_log
@@ -146,20 +149,23 @@ async function main() {
     return
   }
 
-  let upserted = 0
+  let inserted = 0
   for (let i = 0; i < episodes.length; i += BATCH_SIZE) {
     const batch = episodes.slice(i, i + BATCH_SIZE)
-    const { error, count } = await supabaseAdmin
+    // ON CONFLICT (mp3_url) DO NOTHING — insert missing rows, never overwrite
+    // existing ones (preserves kpfk-web's downstream edits on re-run).
+    const { data, error } = await supabaseAdmin
       .from('episode_log')
-      .upsert(batch, { onConflict: 'mp3_url', count: 'exact' })
+      .upsert(batch, { onConflict: 'mp3_url', ignoreDuplicates: true })
+      .select('id')
     if (error) {
-      throw new Error(`[pra] upsert failed at batch ${i / BATCH_SIZE}: ${error.message}`)
+      throw new Error(`[pra] insert failed at batch ${i / BATCH_SIZE}: ${error.message}`)
     }
-    upserted += count ?? batch.length
-    console.log(`[pra] upserted ${Math.min(i + BATCH_SIZE, episodes.length)}/${episodes.length}`)
+    inserted += data?.length ?? 0
+    console.log(`[pra] processed ${Math.min(i + BATCH_SIZE, episodes.length)}/${episodes.length} (new this batch: ${data?.length ?? 0})`)
   }
 
-  console.log(`[pra] done — ${upserted} rows upserted (station=KPFK, show_key='${SHOW_KEY}', status='${STATUS}').`)
+  console.log(`[pra] done — ${inserted} new rows inserted, ${episodes.length - inserted} already present (station=KPFK, show_key='${SHOW_KEY}', status='${STATUS}').`)
 }
 
 main().catch((err) => {
