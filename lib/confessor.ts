@@ -1,4 +1,5 @@
 import { ConfessorPubfile } from './types'
+import { decodeEntities } from './rss'
 
 /**
  * Client for the Pacifica "Confessor" archive API (see references/api-reference.html
@@ -127,10 +128,13 @@ export function projectPubfile(pubfile: ConfessorPubfile[] | undefined): Pubfile
     if (block) blocks.push(block)
   }
 
+  // Pubfile text is human-entered through an HTML-ish archive UI, so it can
+  // carry encoded entities (e.g. "Peace &amp; Justice"). Decode at the source so
+  // every consumer (columns, field_sources, exports) sees real characters.
   return {
-    host,
-    guest: guests.length ? guests.join(', ') : null,
-    issueCategory: issues.length ? issues.join(', ') : null,
-    humanSummary: blocks.length ? blocks.join('\n\n') : null,
+    host: host ? decodeEntities(host) : null,
+    guest: guests.length ? decodeEntities(guests.join(', ')) : null,
+    issueCategory: issues.length ? decodeEntities(issues.join(', ')) : null,
+    humanSummary: blocks.length ? decodeEntities(blocks.join('\n\n')) : null,
   }
 }

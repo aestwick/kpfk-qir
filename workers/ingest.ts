@@ -3,7 +3,7 @@ import { XMLParser } from 'fast-xml-parser'
 import { supabaseAdmin } from '../lib/supabase'
 import { getExcludedCategories, getExcludedShowKeys, isPipelinePaused } from '../lib/settings'
 import { parseMp3Url, dateFieldsFromUrl } from '../lib/parse-mp3-url'
-import { rssText } from '../lib/rss'
+import { rssText, decodeEntities } from '../lib/rss'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
@@ -140,8 +140,12 @@ async function processShowConfessor(
         station_id: station.id,
         show_key: show.key,
         show_name: show.show_name,
-        category: row.category || show.category,
-        title: row.title || null,
+        // Confessor category/title come straight from the archive's (HTML-ish)
+        // JSON and can carry encoded entities (e.g. "Espa&ntilde;ol"); the RSS
+        // path is already decoded via rssText. Decode here so the Confessor path
+        // matches. show.category is already clean (resolved through rssText).
+        category: row.category ? decodeEntities(row.category) : show.category,
+        title: row.title ? decodeEntities(row.title) : null,
         date: startStr?.date ?? null,
         start_time: startStr?.startTime ?? null,
         end_time: end.endTime || null,
