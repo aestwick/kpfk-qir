@@ -30,7 +30,10 @@ export async function GET(request: NextRequest) {
       .order(sort, { ascending: order === 'asc' })
       .range(offset, offset + limit - 1)
 
+    // Hide the PRA archive (status 'archived') by default. An explicit status
+    // filter — including selecting 'archived' — overrides this.
     if (status) query = query.eq('status', status)
+    else query = query.neq('status', 'archived')
     const showKey = searchParams.get('show_key')
     if (showKey) query = query.eq('show_key', showKey)
     else if (show) query = query.ilike('show_name', `%${show}%`)

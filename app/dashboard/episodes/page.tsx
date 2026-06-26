@@ -307,8 +307,8 @@ export default function EpisodesPage() {
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
-          <option value="">All Statuses</option>
-          {['pending', 'transcribing', 'transcribed', 'summarizing', 'summarized', 'compliance_checked', 'failed', 'transcript_missing', 'unavailable', 'dead'].map((s) => (
+          <option value="">All (non-archived)</option>
+          {['pending', 'transcribing', 'transcribed', 'summarizing', 'summarized', 'compliance_checked', 'failed', 'transcript_missing', 'unavailable', 'dead', 'archived'].map((s) => (
             <option key={s} value={s}>{s}</option>
           ))}
         </select>

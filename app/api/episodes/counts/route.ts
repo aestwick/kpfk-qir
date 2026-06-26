@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const health = searchParams.get('health') === 'true'
 
-    const statuses = ['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable', 'transcript_missing', 'dead'] as const
+    const statuses = ['pending', 'transcribed', 'summarized', 'compliance_checked', 'failed', 'unavailable', 'transcript_missing', 'dead', 'archived'] as const
     const counts: Record<string, number> = {}
 
     await Promise.all(
