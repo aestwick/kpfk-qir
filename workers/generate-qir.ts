@@ -216,10 +216,13 @@ ${categorySummaries.join('\n')}`
 
   const nextVersion = (existingDrafts?.[0]?.version ?? 0) + 1
 
-  // Store the draft
+  // Store the draft. station_id is NOT NULL and has no default — every reader
+  // scopes by it (and RLS depends on it), so the draft is tenant-owned. Omitting
+  // it fails the insert with a not-null violation after all curation work is done.
   const { data: draft, error: insertErr } = await supabaseAdmin
     .from('qir_drafts')
     .insert({
+      station_id: stationId,
       year,
       quarter,
       status: 'draft',
