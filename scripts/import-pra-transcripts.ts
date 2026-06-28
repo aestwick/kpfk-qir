@@ -41,6 +41,28 @@ function storageBase(mp3Url: string): string {
   return decodeURIComponent(new URL(mp3Url).pathname).replace(R2_PREFIX, '').replace(/\.mp3$/i, '')
 }
 
+/**
+ * transcribe-r2 sanitized non-ASCII characters out of Storage object keys
+ * (accents stripped — "Guérillères" → "Guerilleres", "Sebők" → "Sebok"), while
+ * episode_log.mp3_url keeps the accented original. Fold diacritics so the
+ * accented-title episodes match their uploaded artifacts.
+ */
+function asciiFold(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+/** Resolve the Storage base that actually has a .txt: exact key, else folded. */
+async function resolveBase(rawBase: string): Promise<{ base: string; txt: string } | null> {
+  const exact = await downloadText(`${rawBase}.txt`)
+  if (exact != null) return { base: rawBase, txt: exact }
+  const folded = asciiFold(rawBase)
+  if (folded !== rawBase) {
+    const t = await downloadText(`${folded}.txt`)
+    if (t != null) return { base: folded, txt: t }
+  }
+  return null
+}
+
 async function downloadText(path: string): Promise<string | null> {
   const { data, error } = await supabaseAdmin.storage.from(STORAGE_BUCKET).download(path)
   if (error || !data) return null
@@ -113,12 +135,13 @@ async function main() {
 
   let loaded = 0, missing = 0, failed = 0, done = 0
   await runPool(todo, concurrency, async (ep) => {
-    const base = storageBase(ep.mp3_url)
     try {
-      const [txt, vtt, jsonRaw] = await Promise.all([
-        downloadText(`${base}.txt`), downloadText(`${base}.vtt`), downloadText(`${base}.json`),
+      const resolved = await resolveBase(storageBase(ep.mp3_url))
+      if (resolved == null) { missing++; return } // no transcript artifact for this one
+      const { base, txt } = resolved
+      const [vtt, jsonRaw] = await Promise.all([
+        downloadText(`${base}.vtt`), downloadText(`${base}.json`),
       ])
-      if (txt == null) { missing++; return } // no transcript artifact for this one
       let provider: string | null = null, model: string | null = null, language: string | null = null
       if (jsonRaw) {
         try { const m = JSON.parse(jsonRaw); provider = m.provider ?? null; model = m.model ?? null; language = m.language ?? null } catch { /* keep nulls */ }
