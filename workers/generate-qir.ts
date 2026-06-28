@@ -181,7 +181,7 @@ ${categorySummaries.join('\n')}`
   const content = response.choices[0]?.message?.content
   if (!content) throw new Error('Empty response from OpenAI')
 
-  let curatedSelection: Record<string, number[]>
+  let curatedSelection: Record<string, unknown[]>
   try {
     curatedSelection = JSON.parse(content)
   } catch {
@@ -192,16 +192,45 @@ ${categorySummaries.join('\n')}`
     throw new Error(`OpenAI returned empty or invalid curation selection: ${content.slice(0, 200)}`)
   }
 
-  // Collect curated episode IDs
+  // Collect selected episode IDs + capture the model's filing-ready rewrite. The
+  // curation prompt returns, per category, an array of { id, topic, description }
+  // objects (it both SELECTS and rewrites each entry). Accept a bare-number shape
+  // too, so a prompt/parser mismatch degrades to selection-only instead of silently
+  // yielding zero entries — which is exactly what the number[]-only parser did once
+  // the prompt was switched to rich objects (it added objects to a Set<number>).
   const curatedIds = new Set<number>()
-  for (const ids of Object.values(curatedSelection)) {
-    if (Array.isArray(ids)) {
-      for (const id of ids) curatedIds.add(id)
+  const rewriteById = new Map<number, { topic?: string; description?: string }>()
+  for (const items of Object.values(curatedSelection)) {
+    if (!Array.isArray(items)) continue
+    for (const item of items) {
+      if (typeof item === 'number') {
+        curatedIds.add(item)
+      } else if (item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'number') {
+        const it = item as { id: number; topic?: string; description?: string }
+        curatedIds.add(it.id)
+        rewriteById.set(it.id, { topic: it.topic, description: it.description })
+      }
     }
   }
 
-  // Build curated entries list
-  const curatedEntries = allEntries.filter((e) => curatedIds.has(e.episode_id))
+  // Fail loudly rather than store a useless 0-entry draft (the old silent failure).
+  if (curatedIds.size === 0) {
+    throw new Error(`OpenAI curation selected no valid episode IDs: ${content.slice(0, 200)}`)
+  }
+
+  // Build curated entries list, applying the model's filing-ready rewrite
+  // (topic → headline, description → summary) when present.
+  const curatedEntries = allEntries
+    .filter((e) => curatedIds.has(e.episode_id))
+    .map((e) => {
+      const rw = rewriteById.get(e.episode_id)
+      if (!rw) return e
+      return {
+        ...e,
+        headline: rw.topic?.trim() || e.headline,
+        summary: rw.description?.trim() || e.summary,
+      }
+    })
   const curatedText = formatCuratedReport(curatedEntries, year, quarter, station.name)
 
   // Get the next version number for this quarter
