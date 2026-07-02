@@ -1,0 +1,17 @@
+# BullMQ background workers (transcribe/summarize/etc). Needs ffmpeg for audio chunking.
+# Runs TypeScript directly via tsx (a production dependency), so no build stage —
+# just prod deps plus the worker source. scripts/ is included for manual one-offs
+# (e.g. npm run backfill-quarter) run inside the container.
+FROM node:20-alpine
+RUN apk add --no-cache ffmpeg
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY tsconfig.json ./
+COPY lib ./lib
+COPY workers ./workers
+COPY scripts ./scripts
+# Stays root: the qir-tmp volume mounted at /tmp/qir-audio on existing
+# deployments is root-owned and ffmpeg chunking must be able to write there.
+CMD ["node_modules/.bin/tsx", "workers/index.ts"]

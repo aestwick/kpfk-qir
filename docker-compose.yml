@@ -1,10 +1,9 @@
 version: "3.8"
 services:
   qir-app:
-    image: ghcr.io/aestwick/kpfk-qir:latest
+    image: ghcr.io/aestwick/kpfk-qir-app:latest
     container_name: qir-app
     restart: unless-stopped
-    command: ["npm", "run", "start"]
     ports:
       - "3100:3000"
     env_file: .env
@@ -29,10 +28,9 @@ services:
       - default
 
   qir-worker:
-    image: ghcr.io/aestwick/kpfk-qir:latest
+    image: ghcr.io/aestwick/kpfk-qir-worker:latest
     container_name: qir-worker
     restart: unless-stopped
-    command: ["npm", "run", "workers"]
     env_file: .env
     depends_on:
       - qir-redis
