@@ -46,8 +46,8 @@ jobs:
         with:
           images: ghcr.io/aestwick/${{ matrix.image }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=long
+            type=raw,value=latest
+            type=sha,prefix=
 
       # NEXT_PUBLIC_* values are baked into the client bundle and are public
       # by design — no secrets may be passed as build args. Resolved at step
