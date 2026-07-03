@@ -102,7 +102,11 @@ function makeChunkLoader(mp3Url: string, tmpDir: string): () => Promise<string[]
       ], { timeout: 600_000 }) // 10 min timeout
     } catch (ffErr: unknown) {
       const errMsg = ffErr instanceof Error ? ffErr.message : String(ffErr)
-      if (errMsg.includes('404') || errMsg.includes('Server returned')) {
+      // Only a literal 404 is terminal `unavailable`. ffmpeg reports every
+      // HTTP status as "Server returned <code> ..." — a 403/5xx must stay a
+      // retryable failure, and a bare '404' substring can appear in the MP3
+      // filename itself (any April 4 air date), so match the full phrase.
+      if (/Server returned 404|HTTP error 404/.test(errMsg)) {
         throw new AudioUnavailableError('MP3 not found (404)')
       }
       throw ffErr

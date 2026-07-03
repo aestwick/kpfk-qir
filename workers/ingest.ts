@@ -7,7 +7,7 @@ import { rssText } from '../lib/rss'
 import { listStationIds, getStation } from '../lib/stations'
 import { ingestQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
-import { fetchConfessorEpisodes, projectPubfile } from '../lib/confessor'
+import { fetchConfessorEpisodes, normalizeConfessorMp3Url, projectPubfile } from '../lib/confessor'
 import { buildHumanFieldSources } from '../lib/field-sources'
 
 const parser = new XMLParser({
@@ -98,7 +98,7 @@ function computeEnd(startMs: number, durationMinutes: number | null): { endTime:
  */
 async function processShowConfessor(
   show: { key: string; show_name: string; category: string },
-  station: { id: string; confessorBase: string },
+  station: { id: string; confessorBase: string; archiveBase: string },
   num: number
 ): Promise<{ count: number; ok: boolean }> {
   let rows
@@ -111,10 +111,10 @@ async function processShowConfessor(
 
   let newCount = 0
   for (const row of rows) {
-    const mp3Url = row.mp3
     // `fil` only returns non-expired rows, but a row past its window reports
     // mp3="expired" instead of a URL — skip those (no audio to process).
-    if (!mp3Url || mp3Url === 'expired') continue
+    if (!row.mp3 || row.mp3 === 'expired') continue
+    const mp3Url = normalizeConfessorMp3Url(row.mp3, station.archiveBase)
     if (await episodeExists(station.id, mp3Url)) continue
 
     const durationMinutes = row.lsecs ? Math.round(row.lsecs / 60) : null
@@ -389,7 +389,11 @@ export async function processIngest(job: Job) {
     rssBaseUrl: station.rss_base_url ?? '',
     mp3Prefix: station.mp3_filename_prefix ?? 'kpfk',
   }
-  const confessorCtx = { id: station.id, confessorBase: station.confessor_base_url ?? '' }
+  const confessorCtx = {
+    id: station.id,
+    confessorBase: station.confessor_base_url ?? '',
+    archiveBase: station.rss_base_url ?? '',
+  }
   // How many recent episodes to request per show from Confessor (matches the
   // RSS feed depth roughly; archive only returns non-expired rows anyway).
   const CONFESSOR_NUM = 10

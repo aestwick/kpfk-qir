@@ -1,5 +1,40 @@
 import { describe, it, expect } from 'vitest'
-import { parseLooseJson, confessorUrl, projectPubfile } from './confessor'
+import { parseLooseJson, confessorUrl, normalizeConfessorMp3Url, projectPubfile } from './confessor'
+
+describe('normalizeConfessorMp3Url', () => {
+  const ARCHIVE_BASE = 'https://archive.kpfk.org/getrss.php?id='
+
+  it('rewrites a docroot filesystem path onto the archive origin', () => {
+    expect(
+      normalizeConfessorMp3Url(
+        'https://confessor.kpfk.org/home/kpfkarch/public_html/mp3/kpfk_260702_180000kpfknews.mp3',
+        ARCHIVE_BASE
+      )
+    ).toBe('https://archive.kpfk.org/mp3/kpfk_260702_180000kpfknews.mp3')
+  })
+
+  it('rewrites a bare filesystem path (no scheme/host)', () => {
+    expect(
+      normalizeConfessorMp3Url('/home/kpfkarch/public_html/mp3/kpfk_260702_140000larb.mp3', ARCHIVE_BASE)
+    ).toBe('https://archive.kpfk.org/mp3/kpfk_260702_140000larb.mp3')
+  })
+
+  it('passes a proper public URL through untouched', () => {
+    const url = 'https://archive.kpfk.org/mp3/2kpfk_260304_150000bradcast2.mp3'
+    expect(normalizeConfessorMp3Url(url, ARCHIVE_BASE)).toBe(url)
+  })
+
+  it('leaves a docroot path alone when no archive base is configured', () => {
+    const bad = 'https://confessor.kpfk.org/home/kpfkarch/public_html/mp3/x.mp3'
+    expect(normalizeConfessorMp3Url(bad, '')).toBe(bad)
+    expect(normalizeConfessorMp3Url(bad, null)).toBe(bad)
+  })
+
+  it('leaves the URL alone when the archive base is unparseable', () => {
+    const bad = 'https://confessor.kpfk.org/home/kpfkarch/public_html/mp3/x.mp3'
+    expect(normalizeConfessorMp3Url(bad, 'not a url')).toBe(bad)
+  })
+})
 
 describe('parseLooseJson', () => {
   it('parses clean JSON', () => {

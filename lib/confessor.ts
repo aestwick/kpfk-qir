@@ -79,6 +79,28 @@ export async function fetchConfessorEpisodes(
   return Array.isArray(parsed) ? parsed : [parsed]
 }
 
+/**
+ * The `fil` endpoint sometimes emits the archive server's FILESYSTEM path for
+ * `mp3` instead of its public URL — e.g.
+ *   https://confessor.kpfk.org/home/kpfkarch/public_html/mp3/kpfk_260702_180000kpfknews.mp3
+ * for a file that is actually served at
+ *   https://archive.kpfk.org/mp3/kpfk_260702_180000kpfknews.mp3
+ * (`public_html` is the archive host's docroot). Rewrite anything carrying a
+ * docroot path onto the archive origin (derived from the station's
+ * rss_base_url, which points at the archive host); URLs without the marker
+ * pass through untouched. Doing this before the dedupe check also lets a
+ * Confessor row dedupe against the same airing ingested via RSS fallback.
+ */
+export function normalizeConfessorMp3Url(mp3: string, archiveBaseUrl?: string | null): string {
+  const docrootPath = mp3.match(/\/public_html(\/.+)$/)
+  if (!docrootPath || !archiveBaseUrl) return mp3
+  try {
+    return new URL(docrootPath[1], new URL(archiveBaseUrl).origin).toString()
+  } catch {
+    return mp3
+  }
+}
+
 const dedupe = (vals: (string | undefined)[]): string[] => {
   const seen = new Set<string>()
   const out: string[] = []
