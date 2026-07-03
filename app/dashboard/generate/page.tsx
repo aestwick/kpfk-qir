@@ -475,6 +475,32 @@ export default function GenerateQirPage() {
     }
   }
 
+  // Export downloads must carry the Supabase bearer token, which a plain <a href>
+  // navigation does not send (→ "Missing bearer token" from getStationContext).
+  // Fetch with authedFetch, then trigger a client-side download from the blob.
+  async function handleExport(format: 'csv' | 'text') {
+    if (!activeDraft) return
+    try {
+      const res = await authedFetch(`/api/qir/export?id=${activeDraft.id}&format=${format}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || `Export failed (${res.status})`)
+        return
+      }
+      const blob = await res.blob()
+      const ext = format === 'csv' ? 'csv' : 'txt'
+      const filename = `QIR_Q${activeDraft.quarter}_${activeDraft.year}_v${activeDraft.version}.${ext}`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Export failed')
+    }
+  }
+
   function handleSelectAll() {
     setSelectedShows(new Set(availableShows.map(s => s.group)))
   }
@@ -890,18 +916,18 @@ export default function GenerateQirPage() {
                   Full Report
                 </button>
               </div>
-              <a
-                href={`/api/qir/export?id=${activeDraft.id}&format=csv`}
+              <button
+                onClick={() => handleExport('csv')}
                 className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-700"
               >
                 Export CSV
-              </a>
-              <a
-                href={`/api/qir/export?id=${activeDraft.id}&format=text`}
+              </button>
+              <button
+                onClick={() => handleExport('text')}
                 className="text-xs px-3 py-1.5 border rounded hover:bg-gray-50 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-700"
               >
                 Export Text
-              </a>
+              </button>
             </div>
           </div>
 

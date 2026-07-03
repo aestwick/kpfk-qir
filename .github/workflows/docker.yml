@@ -1,0 +1,87 @@
+name: Build and push Docker images
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The NEXT_PUBLIC_* values live on the "QIR env" environment (Settings →
+    # Environments), not as repository variables. A job only sees
+    # environment-scoped variables/secrets when it references the environment.
+    environment: QIR env
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            dockerfile: Dockerfile.app
+            image: kpfk-qir-app
+          - name: worker
+            dockerfile: Dockerfile.worker
+            image: kpfk-qir-worker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/aestwick/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      # NEXT_PUBLIC_* values are baked into the client bundle and are public
+      # by design — no secrets may be passed as build args. Resolved at step
+      # level (not in the matrix) so environment-scoped variables are in
+      # scope, with a hard failure if the anon key is missing: an app image
+      # built without it "succeeds" but crashes every page in the browser.
+      - name: Resolve app build args
+        id: args
+        if: matrix.name == 'app'
+        env:
+          SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://czjhwhfqohpmwprhasve.supabase.co' }}
+          SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY || secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL || 'https://qir.kpfk.org' }}
+        run: |
+          if [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::NEXT_PUBLIC_SUPABASE_ANON_KEY resolved empty — check the 'QIR env' environment variables/secrets"
+            exit 1
+          fi
+          {
+            echo "build-args<<EOF"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$SUPABASE_URL"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY"
+            echo "NEXT_PUBLIC_APP_URL=$APP_URL"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ steps.args.outputs.build-args }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
