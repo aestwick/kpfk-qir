@@ -1,4 +1,5 @@
 import { ConfessorPubfile } from './types'
+import { decodeEntities } from './rss'
 
 /**
  * Client for the Pacifica "Confessor" archive API (see references/api-reference.html
@@ -76,7 +77,17 @@ export async function fetchConfessorEpisodes(
   const text = await response.text()
   if (!text.trim()) return [] // empty body = no episodes (not an error)
   const parsed = parseLooseJson<ConfessorFilRow[] | ConfessorFilRow>(text)
-  return Array.isArray(parsed) ? parsed : [parsed]
+  const rows = Array.isArray(parsed) ? parsed : [parsed]
+  // Confessor emits pre-encoded HTML entities in its text fields ("Espa&ntilde;ol"),
+  // same quirk as CDATA-wrapped RSS nodes — decode the fields that land on
+  // episode_log so category/title match the values the RSS path (rssText) and
+  // migration 039 normalized to. The raw pubfile stays verbatim (it's stored
+  // losslessly in confessor_meta); its projections are decoded in projectPubfile.
+  return rows.map((row) => ({
+    ...row,
+    title: row.title ? decodeEntities(row.title) : row.title,
+    category: row.category ? decodeEntities(row.category) : row.category,
+  }))
 }
 
 /**
@@ -105,7 +116,7 @@ const dedupe = (vals: (string | undefined)[]): string[] => {
   const seen = new Set<string>()
   const out: string[] = []
   for (const v of vals) {
-    const s = v?.trim()
+    const s = v ? decodeEntities(v).trim() : undefined
     if (s && !seen.has(s.toLowerCase())) {
       seen.add(s.toLowerCase())
       out.push(s)
@@ -142,9 +153,10 @@ export function projectPubfile(pubfile: ConfessorPubfile[] | undefined): Pubfile
   // Build a readable narrative from each segment that carries a guest, topic,
   // or notes. "<guest> — <topic>: <notes>", dropping any empty piece.
   const blocks: string[] = []
+  const dec = (v?: string) => (v ? decodeEntities(v).trim() : undefined)
   for (const s of segments) {
-    const head = [s.pf_gname?.trim(), s.pf_gtopic?.trim()].filter(Boolean).join(' — ')
-    const notes = s.pf_notes?.trim()
+    const head = [dec(s.pf_gname), dec(s.pf_gtopic)].filter(Boolean).join(' — ')
+    const notes = dec(s.pf_notes)
     const block = [head, notes].filter(Boolean).join(': ')
     if (block) blocks.push(block)
   }

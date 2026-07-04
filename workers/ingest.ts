@@ -140,7 +140,11 @@ async function processShowConfessor(
         station_id: station.id,
         show_key: show.key,
         show_name: show.show_name,
-        category: row.category || show.category,
+        // Prefer the curated show_keys category (what the RSS path snapshots and
+        // what the genre filter / exclusion lists match). The Confessor row's own
+        // category drifts from the archive's ("Public Affairs- National+Syndicated"
+        // vs "Public Affairs - National+Syndicated"), splitting the genre filter.
+        category: show.category || row.category,
         title: row.title || null,
         date: startStr?.date ?? null,
         start_time: startStr?.startTime ?? null,
@@ -405,7 +409,7 @@ export async function processIngest(job: Job) {
   // without affecting sibling airings that share the same show name.
   const excludedKeySet = new Set(excludedShowKeys.map((k) => k.trim()))
 
-  // Get this station's active shows, excluding Music/Español
+  // Get this station's active shows, minus any configured category/key exclusions
   const { data: shows, error: showsErr } = await supabaseAdmin
     .from('show_keys')
     .select('*')

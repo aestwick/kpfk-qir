@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { parseLooseJson, confessorUrl, normalizeConfessorMp3Url, projectPubfile } from './confessor'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { parseLooseJson, confessorUrl, normalizeConfessorMp3Url, projectPubfile, fetchConfessorEpisodes } from './confessor'
 
 describe('normalizeConfessorMp3Url', () => {
   const ARCHIVE_BASE = 'https://archive.kpfk.org/getrss.php?id='
@@ -63,6 +63,29 @@ describe('confessorUrl', () => {
   })
 })
 
+describe('fetchConfessorEpisodes', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('decodes HTML entities in category and title, leaving pubfile verbatim', async () => {
+    const body = JSON.stringify([
+      {
+        title: 'Salud &amp; Comunidad',
+        category: 'Espa&ntilde;ol',
+        mp3: 'https://archive.kpfk.org/mp3/x.mp3',
+        pubfile: [{ pf_gtopic: 'Espa&ntilde;ol' }],
+      },
+    ])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body, { status: 200 })))
+
+    const rows = await fetchConfessorEpisodes('https://confessor.kpfk.org/_nu_do_api.php', 'enfoque', 5)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].category).toBe('Español')
+    expect(rows[0].title).toBe('Salud & Comunidad')
+    // raw pubfile is stored losslessly in confessor_meta — must stay untouched
+    expect(rows[0].pubfile).toEqual([{ pf_gtopic: 'Espa&ntilde;ol' }])
+  })
+})
+
 describe('projectPubfile', () => {
   it('returns all-null for an empty/absent pubfile', () => {
     expect(projectPubfile(undefined)).toEqual({
@@ -100,5 +123,23 @@ describe('projectPubfile', () => {
     expect(p.humanSummary).toBe(
       'Dr. Smith — Vaccines: Full hour interview\n\nClosing segment on local news'
     )
+  })
+
+  it('decodes HTML entities the Confessor API pre-encodes into pubfile text', () => {
+    // The fil endpoint emits entity-encoded strings ("Espa&ntilde;ol") — same
+    // quirk migration 039 cleaned for RSS CDATA. Projections must decode so
+    // filters/exclusions match; the raw pubfile stays verbatim in confessor_meta.
+    const p = projectPubfile([
+      {
+        pf_host: 'Mar&iacute;a L&oacute;pez',
+        pf_gname: 'Jos&eacute; Pe&ntilde;a',
+        pf_issue1: 'Espa&ntilde;ol',
+        pf_gtopic: 'Salud &amp; Educaci&oacute;n',
+      },
+    ])
+    expect(p.host).toBe('María López')
+    expect(p.guest).toBe('José Peña')
+    expect(p.issueCategory).toBe('Español')
+    expect(p.humanSummary).toBe('José Peña — Salud & Educación')
   })
 })
