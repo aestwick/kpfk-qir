@@ -188,6 +188,19 @@ supabase/migrations/
                                   diarization_enabled defaults in qir_settings
 ```
 
+**Migrations are tracked** — QIR has its own tracker, **`public.schema_migrations`**
+(filename + applied_at), driven by **`scripts/migrate.sh`**: each file in
+`supabase/migrations/` runs at most once, in filename order, each in its own
+transaction with its bookkeeping row (needs `DATABASE_URL` — the *direct*
+5432 connection, not the pooler; psql runs in a throwaway Docker container).
+Run during deploy (DECISION_LOG A12.1) so schema and code land together.
+Do **not** confuse this with `supabase_migrations.schema_migrations` (the
+Supabase CLI's table) — that one belongs to the KPFK CMS repo, which shares
+this Supabase project; QIR migrations must never be registered there. New
+migrations: add the next-numbered `NNN_name.sql` file and let `migrate.sh`
+apply it — prefer idempotent SQL so a hand-applied hotfix can be re-run
+harmlessly at deploy.
+
 **Key tables:**
 - `episode_log` — Core episode data + processing status + AI outputs (`station_id`-scoped)
 - `transcripts` — Full transcript text + VTT captions (1:1 with episode; scoped via episode)
