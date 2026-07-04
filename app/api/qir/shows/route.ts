@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     // Get all completed episodes in this quarter
     const { data: episodes, error } = await supabase
       .from('episode_log')
-      .select('show_key, show_name')
+      .select('show_key, show_name, issue_category')
       .eq('station_id', stationId)
       .in('status', ['summarized', 'compliance_checked'])
       .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
@@ -63,20 +63,22 @@ export async function GET(request: NextRequest) {
     // so generation can filter on them.
     const showMap = new Map<
       string,
-      { group: string; show_keys: string[]; episode_count: number }
+      { group: string; show_keys: string[]; episode_count: number; categories: Record<string, number> }
     >()
     for (const ep of episodes ?? []) {
       if (!ep.show_key) continue
       const row = keyMap.get(ep.show_key)
       const group = resolveShowGroup({ key: ep.show_key, show_group: row?.show_group ?? null })
+      const category = ep.issue_category || 'Uncategorized'
       const existing = showMap.get(group)
       if (existing) {
         existing.episode_count++
+        existing.categories[category] = (existing.categories[category] ?? 0) + 1
         if (!existing.show_keys.includes(ep.show_key)) {
           existing.show_keys.push(ep.show_key)
         }
       } else {
-        showMap.set(group, { group, show_keys: [ep.show_key], episode_count: 1 })
+        showMap.set(group, { group, show_keys: [ep.show_key], episode_count: 1, categories: { [category]: 1 } })
       }
     }
 
@@ -91,7 +93,7 @@ export async function GET(request: NextRequest) {
         const show_name = feeds.length
           ? resolveGroupDisplayName(feeds, stripPrefixes)
           : s.show_keys[0]
-        return { group: s.group, show_name, show_keys: s.show_keys, episode_count: s.episode_count }
+        return { group: s.group, show_name, show_keys: s.show_keys, episode_count: s.episode_count, categories: s.categories }
       })
       .sort((a, b) => a.show_name.localeCompare(b.show_name))
 

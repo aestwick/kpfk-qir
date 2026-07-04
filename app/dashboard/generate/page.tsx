@@ -56,6 +56,8 @@ interface AvailableShow {
   /** Every underlying feed key for this logical show (a show may air on several). */
   show_keys: string[]
   episode_count: number
+  /** Episode count per issue category ('Uncategorized' for episodes without one). */
+  categories?: Record<string, number>
 }
 
 interface ValidationCheck {
@@ -372,6 +374,32 @@ export default function GenerateQirPage() {
     [availableShows, selectedShows]
   )
 
+  // Episode availability per issue category, split into total pool vs. currently
+  // selected shows. Configured categories always appear (a zero is the signal that
+  // the report can't cover that category); extra categories found in the data
+  // follow, with Uncategorized last.
+  const categoryAvailability = useMemo(() => {
+    const counts = new Map<string, { total: number; selected: number }>()
+    for (const show of availableShows) {
+      const isSelected = selectedShows.has(show.group)
+      for (const [cat, n] of Object.entries(show.categories ?? {})) {
+        const entry = counts.get(cat) ?? { total: 0, selected: 0 }
+        entry.total += n
+        if (isSelected) entry.selected += n
+        counts.set(cat, entry)
+      }
+    }
+    const extras = Array.from(counts.keys())
+      .filter(c => !issueCategories.includes(c) && c !== 'Uncategorized')
+      .sort()
+    const ordered = [...issueCategories, ...extras]
+    if (counts.has('Uncategorized')) ordered.push('Uncategorized')
+    return ordered.map(category => ({
+      category,
+      ...(counts.get(category) ?? { total: 0, selected: 0 }),
+    }))
+  }, [availableShows, selectedShows, issueCategories])
+
   async function handleGenerate() {
     setGenerating(true)
     try {
@@ -667,6 +695,50 @@ export default function GenerateQirPage() {
               </div>
             )}
           </div>
+
+          {/* Category availability. Updates live with the show selection so gaps
+              (e.g. a category with no summarized episodes) are visible before
+              generating — no guidance can fill a category with nothing in it. */}
+          {availableShows.some(s => s.categories) && (
+            <div className="px-5 pb-4 border-t dark:border-warm-700 pt-4">
+              <p className="text-sm font-medium text-gray-700 dark:text-warm-200 mb-2">
+                Available by Category
+                <span className="text-xs font-normal text-gray-400 dark:text-warm-500 ml-1.5">(selected / total episodes)</span>
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+                {categoryAvailability.map(({ category, total, selected }) => (
+                  <div
+                    key={category}
+                    className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded text-sm ${
+                      total === 0
+                        ? 'bg-red-50 dark:bg-red-900/20'
+                        : selected === 0
+                          ? 'bg-amber-50 dark:bg-amber-900/20'
+                          : 'bg-gray-50 dark:bg-warm-700/50'
+                    }`}
+                  >
+                    <span className="truncate text-gray-800 dark:text-warm-200" title={category}>{category}</span>
+                    <span
+                      className={`text-xs shrink-0 ${
+                        total === 0
+                          ? 'text-red-600 dark:text-red-400 font-medium'
+                          : selected === 0
+                            ? 'text-amber-600 dark:text-amber-400 font-medium'
+                            : 'text-gray-400 dark:text-warm-500'
+                      }`}
+                    >
+                      {total === 0 ? 'none' : `${selected} / ${total}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {categoryAvailability.some(c => c.total === 0) && (
+                <p className="text-xs text-red-500 dark:text-red-400 mt-2">
+                  Categories marked &quot;none&quot; have no summarized episodes this quarter and cannot appear in the report.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Guidance / custom instructions */}
           <div className="px-5 pb-4 border-t dark:border-warm-700 pt-4">
