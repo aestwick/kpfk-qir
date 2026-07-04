@@ -405,7 +405,7 @@ export async function processIngest(job: Job) {
   // without affecting sibling airings that share the same show name.
   const excludedKeySet = new Set(excludedShowKeys.map((k) => k.trim()))
 
-  // Get this station's active shows, excluding Music/Español
+  // Get this station's active shows, minus any configured category/key exclusions
   const { data: shows, error: showsErr } = await supabaseAdmin
     .from('show_keys')
     .select('*')
