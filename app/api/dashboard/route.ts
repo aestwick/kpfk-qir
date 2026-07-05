@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { getIssueCategories, getSetting, isPipelinePaused } from '@/lib/settings'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
 export const dynamic = 'force-dynamic'
@@ -16,13 +16,21 @@ function getQuarterBounds() {
   return { year, quarter, start, end, label: `Q${quarter} ${year}` }
 }
 
+// Queue counts are a peripheral widget backed by Redis. A Redis hiccup must
+// never take down the whole dashboard, so a failed count degrades to zeros
+// instead of rejecting the route's Promise.all (which had no catch → bare 500).
 async function getQueueCounts(queue: typeof ingestQueue) {
-  const counts = await queue.getJobCounts()
-  return {
-    active: counts.active ?? 0,
-    waiting: counts.waiting ?? 0,
-    completed: counts.completed ?? 0,
-    failed: counts.failed ?? 0,
+  try {
+    const counts = await queue.getJobCounts()
+    return {
+      active: counts.active ?? 0,
+      waiting: counts.waiting ?? 0,
+      completed: counts.completed ?? 0,
+      failed: counts.failed ?? 0,
+    }
+  } catch (err) {
+    console.error('[dashboard] queue counts unavailable:', err instanceof Error ? err.message : err)
+    return { active: 0, waiting: 0, completed: 0, failed: 0 }
   }
 }
 
@@ -31,6 +39,24 @@ export async function GET(request: NextRequest) {
   if (result.error) return stationErrorResponse(result.error)
   const { supabase, stationId, isSuperAdmin } = result.context
 
+  try {
+    return await buildDashboard(supabase, stationId, isSuperAdmin)
+  } catch (err) {
+    // Never crash the dashboard with a bare 500 — surface a diagnosable error
+    // so the client can show something better than a blank "failed to load".
+    console.error('[dashboard] failed to build dashboard:', err)
+    return NextResponse.json(
+      { error: 'Failed to build dashboard', detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    )
+  }
+}
+
+async function buildDashboard(
+  supabase: StationContext['supabase'],
+  stationId: string,
+  isSuperAdmin: boolean
+) {
   const qtr = getQuarterBounds()
 
   const [

@@ -150,6 +150,7 @@ const STATUS_VERB: Record<string, string> = {
 export default function DashboardOverview() {
   const [data, setData] = useState<DashData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [gapsCollapsed, setGapsCollapsed] = useState(false)
   const [nextIngest, setNextIngest] = useState(getNextIngestMinutes())
@@ -158,7 +159,16 @@ export default function DashboardOverview() {
   const fetchData = useCallback(async () => {
     try {
       const res = await authedFetch('/api/dashboard')
-      if (res.ok) setData(await res.json())
+      if (res.ok) {
+        setData(await res.json())
+        setLoadError(null)
+      } else {
+        // Surface the server's reason instead of a blank failure.
+        const body = await res.json().catch(() => null)
+        setLoadError(body?.error ?? `Request failed (${res.status})`)
+      }
+    } catch {
+      setLoadError('Could not reach the server. Retrying…')
     } finally {
       setLoading(false)
     }
@@ -271,7 +281,18 @@ export default function DashboardOverview() {
     </div>
   )
 
-  if (!data) return <div className="text-red-600 card p-6">Failed to load dashboard data.</div>
+  if (!data) return (
+    <div className="card p-6 space-y-3">
+      <p className="text-red-600">Failed to load dashboard data.</p>
+      {loadError && <p className="text-sm text-warm-500">{loadError}</p>}
+      <button
+        onClick={() => { setLoading(true); fetchData() }}
+        className="badge text-xs px-3 py-1 rounded-full border border-warm-200 dark:border-warm-600 hover:border-warm-400 transition-colors"
+      >
+        Retry
+      </button>
+    </div>
+  )
 
   const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
   const qtrCounts = counts.quarter
