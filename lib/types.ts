@@ -214,7 +214,7 @@ export interface UsageLog {
   episode_id: number | null
   service: 'groq' | 'openai'
   model: string
-  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance' | 'embed'
+  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance' | 'embed' | 'verify'
   input_tokens: number
   output_tokens: number
   duration_seconds: number | null

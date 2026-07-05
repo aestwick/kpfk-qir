@@ -28,3 +28,5 @@ Thumbs.db
 # deploy-qir.sh is now tracked for CI/CD
 # temp audio files
 /tmp/qir-audio/
+# verify-week reports
+/reports/
