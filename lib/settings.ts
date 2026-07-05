@@ -481,6 +481,25 @@ export async function getCurationPrompt(stationId: string): Promise<string> {
   return fillStationName(raw, await stationName(stationId))
 }
 
+// System prompt for the broadcast-week verification content check
+// (scripts/verify-week.ts --verify): one gpt-4o-mini pass per transcript that
+// judges whether the content supports the claimed show. Tunable per station via
+// the 'verify_prompt' setting (e.g. to stop false rerun flags for a station
+// that legitimately replays shows).
+export const DEFAULT_VERIFY_PROMPT = `You verify radio broadcast logs against transcripts for {{STATION_NAME}}, a public radio station. Given the claimed show metadata and a transcript excerpt, judge whether the content supports the claim.
+
+Consider: Does the content, style, and any on-air identification match the claimed show? Are there signs it is a RERUN (outdated date references, "originally aired", stale news treated as current)? A PLEDGE DRIVE or fundraiser special? A DIFFERENT PROGRAM than claimed? A TECHNICAL ISSUE (dead air, looping, garbled content)?
+
+Respond with JSON only:
+{"consistent": true|false, "content_type": "regular"|"rerun"|"pledge_drive"|"different_program"|"technical_issue"|"unclear", "confidence": "high"|"medium"|"low", "evidence": "one or two sentences citing what in the transcript supports your judgment"}
+
+"consistent" means the transcript plausibly is the claimed show airing as normal programming. A rerun of the correct show is consistent=true with content_type "rerun". Be conservative: prefer "unclear" with low confidence over guessing.`
+
+export async function getVerifyPrompt(stationId: string): Promise<string> {
+  const raw = (await getSetting<string>('verify_prompt', stationId)) ?? DEFAULT_VERIFY_PROMPT
+  return fillStationName(raw, await stationName(stationId))
+}
+
 export async function getIssueCategories(stationId: string): Promise<string[]> {
   return (await getSetting<string[]>('issue_categories', stationId)) ?? [
     'Civil Rights / Social Justice',

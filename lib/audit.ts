@@ -77,6 +77,9 @@ export const AUDIT_ACTIONS = {
   SUMMARIZE_COMPLETE: 'summarize.complete',
   COMPLIANCE_COMPLETE: 'compliance.complete',
   QIR_GENERATE_COMPLETE: 'qir.generate.complete',
+  // Broadcast-week verification run (scripts/verify-week.ts): bulk transcript
+  // read + report file export, plus the optional AI content-check pass.
+  VERIFY_WEEK_COMPLETE: 'verify.week.complete',
 } as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
 

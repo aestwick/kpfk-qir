@@ -1,6 +1,7 @@
 import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
+import { getCurrentQuarterBounds } from '../lib/quarters'
 import { logSummarizationUsage, logEmbeddingUsage } from '../lib/usage'
 import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
@@ -15,16 +16,6 @@ interface SummaryResponse {
   guest: string
   discrepancy: string
   issue_category: string
-}
-
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
 }
 
 /**

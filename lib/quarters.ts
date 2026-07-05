@@ -15,6 +15,22 @@ export function getCurrentQuarter(now: Date = new Date()): { year: number; quart
 }
 
 /**
+ * The current quarter's date window — THE definition of the pipeline's
+ * current-quarter gate. The transcribe/summarize/compliance candidate queries
+ * pin to exactly these bounds (server-local clock, like every worker), so any
+ * code reasoning about the gate (e.g. verify-week's "stuck pending" diagnosis)
+ * must use this helper rather than re-deriving the quarter in another timezone.
+ */
+export function getCurrentQuarterBounds(now: Date = new Date()): { start: string; end: string } {
+  const year = now.getFullYear()
+  const quarter = Math.floor(now.getMonth() / 3)
+  const startMonth = quarter * 3
+  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
+  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
+  return { start, end }
+}
+
+/**
  * Quarter options from the current quarter backwards, newest first.
  * Never includes future quarters.
  *

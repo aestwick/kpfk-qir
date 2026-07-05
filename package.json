@@ -9,6 +9,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "backfill-quarter": "tsx scripts/backfill-quarter.ts",
+    "verify-week": "tsx scripts/verify-week.ts",
     "transcribe-r2": "tsx scripts/transcribe-r2.ts",
     "backfill-transcript-cues": "tsx scripts/backfill-transcript-cues.ts",
     "backfill-transcript-embeddings": "tsx scripts/backfill-transcript-embeddings.ts",

@@ -105,6 +105,33 @@ export async function logComplianceUsage(
   }, 'compliance')
 }
 
+// Broadcast verification (scripts/verify-week.ts): one call per transcript
+// checked against its claimed show/schedule slot.
+export async function logVerificationUsage(
+  stationId: string,
+  episodeId: number,
+  inputTokens: number,
+  outputTokens: number,
+  metadata?: Record<string, unknown>
+) {
+  const estimatedCost =
+    inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
+    outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
+
+  await insertUsage({
+    station_id: stationId,
+    episode_id: episodeId,
+    service: 'openai',
+    model: 'gpt-4o-mini',
+    operation: 'verify',
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    duration_seconds: null,
+    estimated_cost: estimatedCost,
+    metadata: metadata ?? {},
+  }, 'verification')
+}
+
 // Corpus embedding for semantic search (Phase 2). episode_id may be null
 // (e.g. a future ad-hoc embed); for the per-episode corpus embed it is set.
 export async function logEmbeddingUsage(
