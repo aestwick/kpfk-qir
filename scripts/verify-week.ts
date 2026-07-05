@@ -32,12 +32,18 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { supabaseAdmin } from '../lib/supabase'
 import { logVerificationUsage } from '../lib/usage'
+import { getCurrentQuarterBounds } from '../lib/quarters'
+import { resolveShowDisplayName, cleanFeedName } from '../lib/shows'
+import { getVerifyPrompt, isStationOverBudget, isUniversalOverBudget } from '../lib/settings'
+import { isSpendLimitError } from '../lib/retry-policy'
+import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import {
   expandBlocks,
   enrichBlocks,
   reconcileDay,
   datesInWindow,
   minToTime,
+  timeToMin,
   weekdayOf,
   type Airing,
   type CmsShow,
@@ -78,11 +84,29 @@ function localDate(timeZone: string, daysAgo = 0): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, dateStyle: 'short' }).format(d)
 }
 
-function currentQuarterStart(timeZone: string): string {
-  const today = localDate(timeZone)
-  const [y, m] = today.split('-').map((v) => parseInt(v, 10))
-  const startMonth = Math.floor((m - 1) / 3) * 3 + 1
-  return `${y}-${String(startMonth).padStart(2, '0')}-01`
+/** The date N days after/before a YYYY-MM-DD string (UTC arithmetic, no TZ drift). */
+function shiftDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400_000).toISOString().slice(0, 10)
+}
+
+/**
+ * Fetch every row of a query, paging with .range(). PostgREST silently caps a
+ * response at the server's max-rows (1000 by default on hosted Supabase) even
+ * when .limit() asks for more, so a plain capped select can truncate a long
+ * window with no error — later days would just read "missing".
+ */
+async function fetchAllRows<T>(
+  context: string,
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  pageSize = 500
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await page(from, from + pageSize - 1)
+    if (error) throw new Error(`Failed to load ${context}: ${error.message}`)
+    rows.push(...(data ?? []))
+    if (!data || data.length < pageSize) return rows
+  }
 }
 
 function parseArgs(argv: string[]): Args {
@@ -113,20 +137,27 @@ function parseArgs(argv: string[]): Args {
 async function resolveStation(slug: string) {
   const { data, error } = await supabaseAdmin
     .from('stations')
-    .select('id, slug, name, timezone')
+    .select('id, slug, name, timezone, show_name_strip_prefixes')
     .eq('slug', slug)
     .maybeSingle()
   if (error) throw new Error(`Failed to load station "${slug}": ${error.message}`)
   if (!data) throw new Error(`No station with slug "${slug}"`)
-  return data as { id: string; slug: string; name: string; timezone: string | null }
+  return data as {
+    id: string
+    slug: string
+    name: string
+    timezone: string | null
+    show_name_strip_prefixes: string[] | null
+  }
 }
 
 /**
  * Load the expected-side data from the CMS tables (read-only). The CMS keeps its
- * own station rows — join by slug. Prefers the concrete per-date published
- * schedule when rows exist for the window; otherwise falls back to the recurring
- * weekly grid (the published table is empty today, but if the CMS starts
- * publishing, per-date rows are strictly better — they capture one-off changes).
+ * own station rows — join by slug. Per-date published rows (cms_schedule_published)
+ * override the recurring grid for the time they cover; the recurring weekly grid
+ * fills the rest of each day. (The published table is empty today; nothing
+ * enforces that the CMS publishes complete days, so a single published one-off
+ * must not erase the rest of that day's expected schedule.)
  */
 async function loadSchedule(slug: string, start: string, end: string) {
   const { data: cmsStation, error: stErr } = await supabaseAdmin
@@ -142,48 +173,56 @@ async function loadSchedule(slug: string, start: string, end: string) {
     )
   }
 
-  const { data: showRows, error: shErr } = await supabaseAdmin
-    .from('cms_shows')
-    .select('id, title, program_slug')
-    .eq('station_id', cmsStation.id)
-    .limit(2000)
-  if (shErr) throw new Error(`Failed to load cms_shows: ${shErr.message}`)
+  const showRows = await fetchAllRows('cms_shows', (from, to) =>
+    supabaseAdmin
+      .from('cms_shows')
+      .select('id, title, program_slug')
+      .eq('station_id', cmsStation.id)
+      .order('id')
+      .range(from, to)
+  )
   const showsById = new Map<string, CmsShow>(
-    (showRows ?? []).map((s) => [s.id as string, { id: s.id, title: s.title, programSlug: s.program_slug }])
+    showRows.map((s) => [s.id as string, { id: s.id, title: s.title, programSlug: s.program_slug }])
   )
 
-  const { data: sourceRows, error: srcErr } = await supabaseAdmin
-    .from('cms_show_source')
-    .select('qir_show_key, cms_show_id')
-    .eq('station_id', cmsStation.id)
-    .not('qir_show_key', 'is', null)
-    .not('cms_show_id', 'is', null)
-    .limit(2000)
-  if (srcErr) throw new Error(`Failed to load cms_show_source: ${srcErr.message}`)
+  const sourceRows = await fetchAllRows('cms_show_source', (from, to) =>
+    supabaseAdmin
+      .from('cms_show_source')
+      .select('qir_show_key, cms_show_id')
+      .eq('station_id', cmsStation.id)
+      .not('qir_show_key', 'is', null)
+      .not('cms_show_id', 'is', null)
+      .order('id')
+      .range(from, to)
+  )
   const keysByShowId = new Map<string, string[]>()
-  for (const row of sourceRows ?? []) {
+  for (const row of sourceRows) {
     const list = keysByShowId.get(row.cms_show_id) ?? []
     list.push(row.qir_show_key)
     keysByShowId.set(row.cms_show_id, list)
   }
 
   // Per-date published rows for the window, if the CMS has published any.
-  const { data: published, error: pubErr } = await supabaseAdmin
-    .from('cms_schedule_published')
-    .select('air_date, start_time, end_time, show_id, label')
-    .eq('station_id', cmsStation.id)
-    .gte('air_date', start)
-    .lte('air_date', end)
-    .limit(2000)
-  if (pubErr) throw new Error(`Failed to load cms_schedule_published: ${pubErr.message}`)
+  const published = await fetchAllRows('cms_schedule_published', (from, to) =>
+    supabaseAdmin
+      .from('cms_schedule_published')
+      .select('air_date, start_time, end_time, show_id, label')
+      .eq('station_id', cmsStation.id)
+      .gte('air_date', start)
+      .lte('air_date', end)
+      .order('id')
+      .range(from, to)
+  )
 
-  const { data: slotRows, error: slErr } = await supabaseAdmin
-    .from('cms_schedule_slots')
-    .select('day_of_week, start_time, end_time, show_id, label, effective_date, expires_date')
-    .eq('station_id', cmsStation.id)
-    .limit(2000)
-  if (slErr) throw new Error(`Failed to load cms_schedule_slots: ${slErr.message}`)
-  const slots: ScheduleSlot[] = (slotRows ?? []).map((s) => ({
+  const slotRows = await fetchAllRows('cms_schedule_slots', (from, to) =>
+    supabaseAdmin
+      .from('cms_schedule_slots')
+      .select('day_of_week, start_time, end_time, show_id, label, effective_date, expires_date')
+      .eq('station_id', cmsStation.id)
+      .order('id')
+      .range(from, to)
+  )
+  const slots: ScheduleSlot[] = slotRows.map((s) => ({
     dayOfWeek: s.day_of_week,
     startTime: s.start_time,
     endTime: s.end_time,
@@ -192,14 +231,14 @@ async function loadSchedule(slug: string, start: string, end: string) {
     effectiveDate: s.effective_date,
     expiresDate: s.expires_date,
   }))
-  if (!slots.length && !published?.length) {
+  if (!slots.length && !published.length) {
     throw new Error(`CMS has no schedule for "${slug}" (cms_schedule_slots and cms_schedule_published are empty)`)
   }
 
   // Published rows become date-pinned "slots" so expandBlocks treats both
   // sources identically (day_of_week recomputed from the date).
   const publishedByDate = new Map<string, ScheduleSlot[]>()
-  for (const p of published ?? []) {
+  for (const p of published) {
     const list = publishedByDate.get(p.air_date) ?? []
     list.push({
       dayOfWeek: weekdayOf(p.air_date),
@@ -213,7 +252,26 @@ async function loadSchedule(slug: string, start: string, end: string) {
     publishedByDate.set(p.air_date, list)
   }
 
-  const slotsForDate = (date: string): ScheduleSlot[] => publishedByDate.get(date) ?? slots
+  const slotSpan = (s: ScheduleSlot): { start: number; end: number } => {
+    const start = timeToMin(s.startTime)
+    let end = timeToMin(s.endTime)
+    if (end <= start) end += 1440
+    return { start, end }
+  }
+  // Published rows override the recurring grid only where they overlap in time;
+  // the rest of the day still comes from the weekly grid.
+  const slotsForDate = (date: string): ScheduleSlot[] => {
+    const pub = publishedByDate.get(date)
+    if (!pub?.length) return slots
+    const pubSpans = pub.map(slotSpan)
+    const dow = weekdayOf(date)
+    const rest = slots.filter((s) => {
+      if (s.dayOfWeek !== dow) return false
+      const span = slotSpan(s)
+      return !pubSpans.some((p) => Math.max(p.start, span.start) < Math.min(p.end, span.end))
+    })
+    return [...pub, ...rest]
+  }
   const scheduleSource = (date: string): 'published' | 'recurring' =>
     publishedByDate.has(date) ? 'published' : 'recurring'
 
@@ -221,36 +279,41 @@ async function loadSchedule(slug: string, start: string, end: string) {
 }
 
 /** QIR's own show registry — drives show_group key expansion + the
- *  tracked/untracked distinction (see lib/verify-week.ts#enrichBlocks). */
-async function loadQirShows(stationId: string): Promise<QirShowKeyInfo[]> {
-  const { data, error } = await supabaseAdmin
-    .from('show_keys')
-    .select('key, show_group, show_name, feed_name, display_name, active')
-    .eq('station_id', stationId)
-    .is('archived_at', null)
-    .limit(2000)
-  if (error) throw new Error(`Failed to load show_keys: ${error.message}`)
-  return (data ?? []).map((r) => ({
+ *  tracked/untracked distinction (see lib/verify-week.ts#enrichBlocks). Names
+ *  resolve through the canonical chain (lib/shows.ts#resolveShowDisplayName)
+ *  with the station's strip prefixes, so name matching sees the same names as
+ *  the dashboard — and the same cleaning loadAirings applies (symmetry). */
+async function loadQirShows(stationId: string, stripPrefixes: string[] | null): Promise<QirShowKeyInfo[]> {
+  const rows = await fetchAllRows('show_keys', (from, to) =>
+    supabaseAdmin
+      .from('show_keys')
+      .select('key, show_group, show_name, feed_name, display_name, active')
+      .eq('station_id', stationId)
+      .is('archived_at', null)
+      .order('id')
+      .range(from, to)
+  )
+  return rows.map((r) => ({
     key: r.key,
     showGroup: r.show_group,
-    showName: r.display_name ?? r.feed_name ?? r.show_name,
+    showName: resolveShowDisplayName(r, stripPrefixes),
     active: r.active,
   }))
 }
 
-async function loadAirings(stationId: string, start: string, end: string) {
-  const { data, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('id, show_key, show_name, host, guest, air_date, air_start, air_end, duration, status')
-    .eq('station_id', stationId)
-    .gte('air_date', start)
-    .lte('air_date', end)
-    .order('air_date')
-    .order('air_start')
-    .limit(3000)
-  if (error) throw new Error(`Failed to load episodes: ${error.message}`)
-  const rows = data ?? []
-  if (rows.length === 3000) console.warn('[verify-week] episode query hit its 3000-row cap — window too large?')
+async function loadAirings(stationId: string, start: string, end: string, stripPrefixes: string[] | null) {
+  const rows = await fetchAllRows('episode_log', (from, to) =>
+    supabaseAdmin
+      .from('episode_log')
+      .select('id, show_key, show_name, host, guest, air_date, air_start, air_end, duration, status')
+      .eq('station_id', stationId)
+      .gte('air_date', start)
+      .lte('air_date', end)
+      .order('air_date')
+      .order('air_start')
+      .order('id')
+      .range(from, to)
+  )
 
   const ids = rows.map((r) => r.id)
   const withTranscript = new Set<number>()
@@ -267,7 +330,8 @@ async function loadAirings(stationId: string, start: string, end: string) {
   const airings: Airing[] = rows.map((r) => ({
     episodeId: r.id,
     showKey: r.show_key,
-    showName: r.show_name,
+    // Same prefix cleaning as the show registry, so name matching is symmetric.
+    showName: r.show_name ? cleanFeedName(r.show_name, stripPrefixes) : null,
     airDate: r.air_date,
     airStart: r.air_start,
     airEnd: r.air_end,
@@ -277,6 +341,17 @@ async function loadAirings(stationId: string, start: string, end: string) {
   }))
   const meta = new Map(rows.map((r) => [r.id, { host: r.host as string | null, guest: r.guest as string | null }]))
   return { airings, meta }
+}
+
+// Every stage before compliance_checked is pinned to the current quarter
+// (transcribe, summarize, AND compliance) — an episode from a prior quarter
+// parked at any of these statuses is stranded, not just 'pending' ones.
+const QUARTER_GATED_STAGE: Record<string, string> = {
+  pending: 'transcription',
+  transcribing: 'transcription',
+  transcribed: 'summarization',
+  summarizing: 'summarization',
+  summarized: 'the compliance check',
 }
 
 function findPipelineIssues(airings: Airing[], quarterStart: string): PipelineIssue[] {
@@ -289,10 +364,10 @@ function findPipelineIssues(airings: Airing[], quarterStart: string): PipelineIs
       airStart: a.airStart,
       status: a.status,
     }
-    if (a.status === 'pending' && a.airDate < quarterStart) {
+    if (a.airDate < quarterStart && QUARTER_GATED_STAGE[a.status]) {
       issues.push({
         ...base,
-        issue: 'stuck pending behind the current-quarter gate — run backfill-quarter --kick for its quarter',
+        issue: `stuck before ${QUARTER_GATED_STAGE[a.status]} behind the current-quarter gate — run backfill-quarter --kick for its quarter`,
       })
     } else if (['failed', 'dead', 'unavailable', 'transcript_missing'].includes(a.status)) {
       issues.push({ ...base, issue: `status ${a.status}` })
@@ -304,17 +379,10 @@ function findPipelineIssues(airings: Airing[], quarterStart: string): PipelineIs
 }
 
 // ---------------------------------------------------------------------------
-// Layer 2 — AI content verification
+// Layer 2 — AI content verification. The system prompt lives in lib/settings.ts
+// (DEFAULT_VERIFY_PROMPT, overridable per station via the 'verify_prompt'
+// setting) like every other AI prompt in the app.
 // ---------------------------------------------------------------------------
-
-const VERIFY_SYSTEM_PROMPT = `You verify radio broadcast logs against transcripts for a public radio station. Given the claimed show metadata and a transcript excerpt, judge whether the content supports the claim.
-
-Consider: Does the content, style, and any on-air identification match the claimed show? Are there signs it is a RERUN (outdated date references, "originally aired", stale news treated as current)? A PLEDGE DRIVE or fundraiser special? A DIFFERENT PROGRAM than claimed? A TECHNICAL ISSUE (dead air, looping, garbled content)?
-
-Respond with JSON only:
-{"consistent": true|false, "content_type": "regular"|"rerun"|"pledge_drive"|"different_program"|"technical_issue"|"unclear", "confidence": "high"|"medium"|"low", "evidence": "one or two sentences citing what in the transcript supports your judgment"}
-
-"consistent" means the transcript plausibly is the claimed show airing as normal programming. A rerun of the correct show is consistent=true with content_type "rerun". Be conservative: prefer "unclear" with low confidence over guessing.`
 
 /** Head + tail excerpt — the head carries the show intro/IDs, the tail catches
  *  sign-offs and next-episode teasers that expose reruns. */
@@ -325,6 +393,7 @@ function excerptTranscript(text: string, headChars = 12000, tailChars = 4000): s
 
 async function aiVerifyEpisode(
   openai: OpenAI,
+  systemPrompt: string,
   claim: { showTitle: string; host: string | null; guest: string | null; airDate: string; airStart: string | null; stationName: string },
   transcript: string
 ): Promise<{ verdict: AiVerdict; inputTokens: number; outputTokens: number }> {
@@ -348,7 +417,7 @@ async function aiVerifyEpisode(
       response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: VERIFY_SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: user },
         ],
         temperature: 0.2,
@@ -558,69 +627,123 @@ async function main() {
   const start = args.start || localDate(tz, 7)
   console.log(`[verify-week] ${station.name} — ${start} .. ${end}${args.verify ? ' (with AI transcript check)' : ''}`)
 
+  // Fetch one extra day past the window: a block that wraps past midnight is
+  // completed by airings the archive logs under the NEXT date. The extra day
+  // feeds wrap coverage only — it gets no DayReport of its own.
   const schedule = await loadSchedule(station.slug, start, end)
-  const qirShows = await loadQirShows(station.id)
-  const { airings, meta } = await loadAirings(station.id, start, end)
+  const qirShows = await loadQirShows(station.id, station.show_name_strip_prefixes)
+  const { airings: fetched, meta } = await loadAirings(
+    station.id,
+    start,
+    shiftDate(end, 1),
+    station.show_name_strip_prefixes
+  )
+  const airings = fetched.filter((a) => a.airDate <= end)
   console.log(`[verify-week] ${airings.length} logged airings, ${airings.filter((a) => a.hasTranscript).length} with transcripts`)
+
+  const airingsByDate = new Map<string, Airing[]>()
+  for (const a of fetched) {
+    const list = airingsByDate.get(a.airDate) ?? []
+    list.push(a)
+    airingsByDate.set(a.airDate, list)
+  }
+  const blockCache = new Map<string, ReturnType<typeof enrichBlocks>>()
+  const blocksFor = (date: string) => {
+    let blocks = blockCache.get(date)
+    if (!blocks) {
+      blocks = enrichBlocks(
+        expandBlocks(schedule.slotsForDate(date), schedule.showsById, schedule.keysByShowId, date),
+        qirShows
+      )
+      blockCache.set(date, blocks)
+    }
+    return blocks
+  }
 
   const dates = datesInWindow(start, end)
   const scheduleSourceByDate: Record<string, 'published' | 'recurring'> = {}
   const days: DayReport[] = dates.map((date) => {
     scheduleSourceByDate[date] = schedule.scheduleSource(date)
-    const blocks = enrichBlocks(
-      expandBlocks(schedule.slotsForDate(date), schedule.showsById, schedule.keysByShowId, date),
-      qirShows
-    )
-    return reconcileDay(date, blocks, airings.filter((a) => a.airDate === date))
+    return reconcileDay(date, blocksFor(date), airingsByDate.get(date) ?? [], {
+      nextDayAirings: airingsByDate.get(shiftDate(date, 1)) ?? [],
+      prevDayBlocks: blocksFor(shiftDate(date, -1)),
+    })
   })
 
-  const pipelineIssues = findPipelineIssues(airings, currentQuarterStart(tz))
+  // The stuck-episode diagnosis must use THE gate's own clock (server-local,
+  // lib/quarters.ts#getCurrentQuarterBounds) — not the station timezone — or it
+  // diverges from the workers exactly at quarter boundaries.
+  const pipelineIssues = findPipelineIssues(airings, getCurrentQuarterBounds().start)
 
   // Layer 2: content-check every transcript-bearing airing (matched, unscheduled,
   // or unplaced — each still claims to be a specific show).
   const aiVerdicts: Record<number, AiVerdict> = {}
+  let aiRan = false
   if (args.verify) {
     const openaiKey = process.env.OPENAI_API_KEY
     if (!openaiKey) throw new Error('--verify needs OPENAI_API_KEY in the environment')
-    const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
+    // Same spend controls as the pipeline workers: no AI calls past the budget.
+    if ((await isUniversalOverBudget()) || (await isStationOverBudget(station.id))) {
+      console.warn('[verify-week] AI check SKIPPED — spend limit reached (see Settings → Budget)')
+    } else {
+      aiRan = true
+      const openai = new OpenAI({ apiKey: openaiKey, timeout: 5 * 60 * 1000 })
+      const verifyPrompt = await getVerifyPrompt(station.id)
 
-    const targets = airings.filter((a) => a.hasTranscript)
-    console.log(`[verify-week] AI-checking ${targets.length} transcripts...`)
-    let done = 0
-    await mapPool(targets, 4, async (a) => {
-      const { data: t, error } = await supabaseAdmin
-        .from('transcripts')
-        .select('transcript')
-        .eq('episode_id', a.episodeId)
-        .maybeSingle()
-      if (error || !t?.transcript) return null
-      const m = meta.get(a.episodeId)
-      const { verdict, inputTokens, outputTokens } = await aiVerifyEpisode(
-        openai,
-        {
-          showTitle: a.showName ?? a.showKey,
-          host: m?.host ?? null,
-          guest: m?.guest ?? null,
-          airDate: a.airDate,
-          airStart: a.airStart,
-          stationName: station.name,
-        },
-        t.transcript
-      )
-      aiVerdicts[a.episodeId] = verdict
-      if (inputTokens > 0) {
-        await logVerificationUsage(station.id, a.episodeId, inputTokens, outputTokens, {
-          job: 'verify-week',
-          window: { start, end },
-          content_type: verdict.content_type,
-          consistent: verdict.consistent,
-        })
-      }
-      done++
-      if (done % 25 === 0) console.log(`[verify-week]   ${done}/${targets.length}`)
-      return verdict
-    })
-    console.log(`[verify-week] AI check complete (${Object.keys(aiVerdicts).length}/${targets.length} verdicts)`)
+      const targets = airings.filter((a) => a.hasTranscript)
+      console.log(`[verify-week] AI-checking ${targets.length} transcripts...`)
+      let done = 0
+      let spendAborted = false
+      await mapPool(targets, 4, async (a) => {
+        if (spendAborted) return null
+        const { data: t, error } = await supabaseAdmin
+          .from('transcripts')
+          .select('transcript')
+          .eq('episode_id', a.episodeId)
+          .maybeSingle()
+        if (error || !t?.transcript) return null
+        const m = meta.get(a.episodeId)
+        try {
+          const { verdict, inputTokens, outputTokens } = await aiVerifyEpisode(
+            openai,
+            verifyPrompt,
+            {
+              showTitle: a.showName ?? a.showKey,
+              host: m?.host ?? null,
+              guest: m?.guest ?? null,
+              airDate: a.airDate,
+              airStart: a.airStart,
+              stationName: station.name,
+            },
+            t.transcript
+          )
+          aiVerdicts[a.episodeId] = verdict
+          if (inputTokens > 0) {
+            await logVerificationUsage(station.id, a.episodeId, inputTokens, outputTokens, {
+              job: 'verify-week',
+              window: { start, end },
+              content_type: verdict.content_type,
+              consistent: verdict.consistent,
+            })
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          // A spend-limit block is org-wide, not episode-specific — stop the
+          // whole pass instead of burning 200 attempts against a closed door.
+          if (isSpendLimitError(msg)) {
+            if (!spendAborted) console.warn('[verify-week] spend limit hit mid-run — aborting remaining AI checks')
+            spendAborted = true
+          } else {
+            console.warn(`[verify-week] AI check failed for episode ${a.episodeId}: ${msg}`)
+          }
+          return null
+        }
+        done++
+        if (done % 25 === 0) console.log(`[verify-week]   ${done}/${targets.length}`)
+        return null
+      })
+      console.log(`[verify-week] AI check complete (${Object.keys(aiVerdicts).length}/${targets.length} verdicts)`)
+    }
   }
 
   const report: ReportData = {
@@ -631,7 +754,7 @@ async function main() {
     days,
     pipelineIssues,
     aiVerdicts,
-    aiRan: args.verify,
+    aiRan,
   }
 
   await fs.mkdir(args.out, { recursive: true })
@@ -653,9 +776,29 @@ async function main() {
     )
   }
   const flagged = Object.values(aiVerdicts).filter((v) => !v.consistent || !['regular', 'unclear'].includes(v.content_type)).length
-  if (args.verify) console.log(`  AI transcript check: ${flagged} flagged of ${Object.keys(aiVerdicts).length}`)
+  if (aiRan) console.log(`  AI transcript check: ${flagged} flagged of ${Object.keys(aiVerdicts).length}`)
+  else if (args.verify) console.log('  AI transcript check: skipped (spend limit)')
   if (pipelineIssues.length) console.log(`  Pipeline issues: ${pipelineIssues.length} (see report)`)
   console.log(`\n[verify-week] report: ${base}.md`)
+
+  // Bulk transcript read + report export + AI pass — leave an audit trail like
+  // the workers do (awaited: the audit insert must land before process.exit).
+  await logAuditEvent({
+    action: AUDIT_ACTIONS.VERIFY_WEEK_COMPLETE,
+    operation: 'export',
+    stationId: station.id,
+    resourceType: 'report',
+    metadata: {
+      window: { start, end },
+      airings: airings.length,
+      blocks: days.reduce((n, d) => n + d.blocks.length, 0),
+      unscheduled: days.reduce((n, d) => n + d.unscheduled.length, 0),
+      pipelineIssues: pipelineIssues.length,
+      aiRan,
+      aiChecked: Object.keys(aiVerdicts).length,
+      aiFlagged: flagged,
+    },
+  })
   process.exit(0)
 }
 

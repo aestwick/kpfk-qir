@@ -8,6 +8,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused, isDiarizationEnabled } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
+import { getCurrentQuarterBounds } from '../lib/quarters'
 import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
@@ -39,16 +40,6 @@ const execFileAsync = promisify(execFile)
 
 const MAX_CHUNK_SIZE_BYTES = 25 * 1024 * 1024 // 25MB
 const CHUNK_DURATION_SECONDS = 900 // 15 minutes
-
-function getCurrentQuarterBounds(): { start: string; end: string } {
-  const now = new Date()
-  const year = now.getFullYear()
-  const quarter = Math.floor(now.getMonth() / 3)
-  const startMonth = quarter * 3
-  const start = new Date(year, startMonth, 1).toISOString().split('T')[0]
-  const end = new Date(year, startMonth + 3, 0).toISOString().split('T')[0]
-  return { start, end }
-}
 
 /**
  * Date window for candidate selection. Defaults to the current quarter (steady

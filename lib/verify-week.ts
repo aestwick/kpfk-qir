@@ -210,12 +210,18 @@ export function expandBlocks(
  *    the name (CLAUDE.md convention);
  *  - mark blocks whose show QIR doesn't actively ingest as untracked, so a
  *    "missing" verdict on them reads as "not recorded" rather than "not aired".
+ *
+ * Name comparison is EXACT on normalized names — the same rule reconcileDay's
+ * airing fallback uses, so tracked-by-name implies matchable-by-name. That
+ * symmetry requires the caller to pass names with station display prefixes
+ * already stripped (lib/shows.ts#resolveShowDisplayName / cleanFeedName with
+ * stations.show_name_strip_prefixes) on BOTH this registry and the airings.
  */
 export function enrichBlocks(blocks: ExpectedBlock[], qirShows: QirShowKeyInfo[]): ExpectedBlock[] {
   const groupOf = new Map<string, string>()
   const keysInGroup = new Map<string, string[]>()
   const activeKeys = new Set<string>()
-  const activeNames: string[] = []
+  const activeNames = new Set<string>()
   for (const s of qirShows) {
     if (s.showGroup) {
       groupOf.set(s.key, s.showGroup)
@@ -226,7 +232,7 @@ export function enrichBlocks(blocks: ExpectedBlock[], qirShows: QirShowKeyInfo[]
     if (s.active) {
       activeKeys.add(s.key)
       const n = normalizeName(s.showName)
-      if (n) activeNames.push(n)
+      if (n) activeNames.add(n)
     }
   }
 
@@ -237,12 +243,9 @@ export function enrichBlocks(blocks: ExpectedBlock[], qirShows: QirShowKeyInfo[]
       if (group) for (const gk of keysInGroup.get(group) ?? []) expanded.add(gk)
     }
     const acceptedKeys = Array.from(expanded)
-    // Name comparison tolerates the "KPFK - " style display prefix on show_keys
-    // names (suffix match), since schedule labels never carry it.
-    const nameTracked =
-      !!block.nameKey &&
-      activeNames.some((n) => n === block.nameKey || n.endsWith(` ${block.nameKey}`))
-    const tracked = acceptedKeys.some((k) => activeKeys.has(k)) || nameTracked
+    const tracked =
+      acceptedKeys.some((k) => activeKeys.has(k)) ||
+      (!!block.nameKey && activeNames.has(block.nameKey))
     return { ...block, acceptedKeys, tracked }
   })
 }
@@ -287,13 +290,41 @@ function coveredMinutes(
   return covered
 }
 
+/** Show-identity test between a block and an airing (time overlap is separate). */
+function identityMatch(block: ExpectedBlock, airing: Airing): 'key' | 'name' | null {
+  if (block.acceptedKeys.includes(airing.showKey)) return 'key'
+  if (block.nameKey && block.nameKey === normalizeName(airing.showName)) return 'name'
+  return null
+}
+
+export interface ReconcileOpts {
+  /**
+   * The following day's airings. A block that wraps past midnight
+   * (endMin > 1440) is covered by its post-midnight portion via these — the
+   * archive logs that portion under the NEXT date, so same-date airings alone
+   * can never complete a wrapping block.
+   */
+  nextDayAirings?: Airing[]
+  /**
+   * The PREVIOUS day's expected blocks. An early-morning airing that belongs to
+   * yesterday's wrapping block (same show, overlapping its post-midnight span)
+   * is scheduled programming, not an unscheduled finding.
+   */
+  prevDayBlocks?: ExpectedBlock[]
+}
+
 /**
  * Reconcile one day: score every expected block against the day's airings and
  * classify airings that satisfied no block as unscheduled (noting any scheduled
  * show they displaced). An airing may legitimately match several blocks (one
  * long recording spanning consecutive slots of the same show).
  */
-export function reconcileDay(date: string, blocks: ExpectedBlock[], airings: Airing[]): DayReport {
+export function reconcileDay(
+  date: string,
+  blocks: ExpectedBlock[],
+  airings: Airing[],
+  opts: ReconcileOpts = {}
+): DayReport {
   const unplaced: Airing[] = []
   const placed: Array<{ airing: Airing; startMin: number; endMin: number }> = []
   for (const airing of airings) {
@@ -301,15 +332,22 @@ export function reconcileDay(date: string, blocks: ExpectedBlock[], airings: Air
     if (!interval) unplaced.push(airing)
     else placed.push({ airing, ...interval })
   }
+  // Next-day airings shifted onto this day's clock (+1440) so they can cover
+  // the post-midnight span of a wrapping block. Only relevant past 1440, so
+  // non-wrapping blocks never see them (their endMin caps at 1440).
+  const placedNext: Array<{ airing: Airing; startMin: number; endMin: number }> = []
+  for (const airing of opts.nextDayAirings ?? []) {
+    const interval = airingInterval(airing)
+    if (interval) placedNext.push({ airing, startMin: interval.startMin + 1440, endMin: interval.endMin + 1440 })
+  }
 
   const matchedEpisodes = new Set<number>()
   const results: BlockResult[] = blocks.map((block) => {
     const matches: MatchedAiring[] = []
-    for (const { airing, startMin, endMin } of placed) {
+    const candidates = block.endMin > 1440 ? [...placed, ...placedNext] : placed
+    for (const { airing, startMin, endMin } of candidates) {
       if (overlapMin(startMin, endMin, block.startMin, block.endMin) < MIN_OVERLAP_MIN) continue
-      let matchType: 'key' | 'name' | null = null
-      if (block.acceptedKeys.includes(airing.showKey)) matchType = 'key'
-      else if (block.nameKey && block.nameKey === normalizeName(airing.showName)) matchType = 'name'
+      const matchType = identityMatch(block, airing)
       if (!matchType) continue
       matches.push({
         episodeId: airing.episodeId,
@@ -329,8 +367,18 @@ export function reconcileDay(date: string, blocks: ExpectedBlock[], airings: Air
     return { ...block, verdict, coverage, airings: matches }
   })
 
+  // An unmatched airing that satisfies YESTERDAY's wrapping block (shift this
+  // day's clock +1440 onto yesterday's) aired as scheduled — suppress it.
+  const coveredByPrevDay = ({ airing, startMin, endMin }: { airing: Airing; startMin: number; endMin: number }) =>
+    (opts.prevDayBlocks ?? []).some(
+      (b) =>
+        b.endMin > 1440 &&
+        identityMatch(b, airing) !== null &&
+        overlapMin(startMin + 1440, endMin + 1440, b.startMin, b.endMin) >= MIN_OVERLAP_MIN
+    )
+
   const unscheduled: UnscheduledAiring[] = placed
-    .filter(({ airing }) => !matchedEpisodes.has(airing.episodeId))
+    .filter((p) => !matchedEpisodes.has(p.airing.episodeId) && !coveredByPrevDay(p))
     .map(({ airing, startMin, endMin }) => ({
       airing,
       startMin,

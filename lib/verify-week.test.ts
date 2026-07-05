@@ -127,14 +127,17 @@ describe('expandBlocks', () => {
 })
 
 describe('enrichBlocks', () => {
+  // Names in the registry arrive already resolved/cleaned (the script runs
+  // resolveShowDisplayName with the station's strip prefixes) — matching is
+  // exact on normalized names, symmetric with reconcileDay's airing fallback.
   const registry: QirShowKeyInfo[] = [
-    { key: 'dn', showGroup: 'Democracy Now', showName: 'KPFK - Democracy Now!', active: true },
+    { key: 'dn', showGroup: 'Democracy Now', showName: 'Democracy Now!', active: true },
     { key: 'democragoodman', showGroup: null, showName: 'Democracy Now!', active: true },
     // The overnight strip: one logical show, many feed keys, one show_group.
     { key: 'somethingshappening', showGroup: "Something's Happening", showName: 'A hour 1', active: true },
     { key: 'somethihappenihour', showGroup: "Something's Happening", showName: 'A hour 2', active: true },
     { key: 'somethingshappeningb', showGroup: "Something's Happening", showName: 'B hour 1', active: true },
-    { key: 'lawsnddisor', showGroup: null, showName: 'KPFK - Law and Disorder', active: true },
+    { key: 'lawsnddisor', showGroup: null, showName: 'Law and Disorder', active: true },
     { key: 'reggaecent', showGroup: null, showName: 'Reggae Central', active: false },
   ]
 
@@ -162,7 +165,7 @@ describe('enrichBlocks', () => {
         [
           slot({ label: 'Reggae Central', startTime: '14:00:00', endTime: '17:00:00' }), // inactive key
           slot({ label: 'CinemaScore', startTime: '17:00:00', endTime: '18:00:00' }), // no row at all
-          slot({ label: 'Law and Disorder', startTime: '08:00:00', endTime: '09:00:00' }), // active, prefixed name
+          slot({ label: 'Law & Disorder', startTime: '08:00:00', endTime: '09:00:00' }), // active, name variant
         ],
         shows,
         keys,
@@ -173,8 +176,17 @@ describe('enrichBlocks', () => {
     const byTitle = new Map(blocks.map((b) => [b.showTitle, b.tracked]))
     expect(byTitle.get('Reggae Central')).toBe(false)
     expect(byTitle.get('CinemaScore')).toBe(false)
-    // "KPFK - Law and Disorder" suffix-matches the label despite the display prefix.
-    expect(byTitle.get('Law and Disorder')).toBe(true)
+    // Exact match after normalization ('&' ≡ 'and'); prefixes were already
+    // stripped by the caller (resolveShowDisplayName), not tolerated here.
+    expect(byTitle.get('Law & Disorder')).toBe(true)
+  })
+
+  it('does NOT suffix-match: "Best of X" never marks an "X" block tracked', () => {
+    const blocks = enrichBlocks(
+      expandBlocks([slot({ label: 'Democracy Hour', startTime: '07:00:00', endTime: '08:00:00' })], shows, keys, '2026-07-02'),
+      [{ key: 'bestdem', showGroup: null, showName: 'Best of Democracy Hour', active: true }]
+    )
+    expect(blocks[0].tracked).toBe(false)
   })
 
   it('after group expansion, sibling-feed airings match the block', () => {
@@ -296,6 +308,62 @@ describe('reconcileDay', () => {
     const report = reconcileDay('2026-07-02', dnBlock(), [airing({ airStart: null })])
     expect(report.unplaced).toHaveLength(1)
     expect(report.blocks[0].verdict).toBe('missing')
+  })
+
+  describe('cross-midnight wrap', () => {
+    // Thursday 23:00 → Friday 01:00, one block wrapping past midnight.
+    const wrapBlocks = () =>
+      expandBlocks(
+        [slot({ label: 'Overnight Jazz', startTime: '23:00:00', endTime: '01:00:00' })],
+        shows,
+        keys,
+        '2026-07-02'
+      )
+
+    it('covers the post-midnight span via next-day airings', () => {
+      const report = reconcileDay(
+        '2026-07-02',
+        wrapBlocks(),
+        [airing({ episodeId: 1, showName: 'Overnight Jazz', showKey: 'jazz', airStart: '23:00:00', airEnd: '00:00:00' })],
+        {
+          nextDayAirings: [
+            airing({ episodeId: 2, showName: 'Overnight Jazz', showKey: 'jazz', airDate: '2026-07-03', airStart: '00:00:00', airEnd: '01:00:00' }),
+          ],
+        }
+      )
+      expect(report.blocks[0].verdict).toBe('aired')
+      expect(report.blocks[0].coverage).toBe(1)
+    })
+
+    it('is only half covered without the next-day airings', () => {
+      const report = reconcileDay('2026-07-02', wrapBlocks(), [
+        airing({ episodeId: 1, showName: 'Overnight Jazz', showKey: 'jazz', airStart: '23:00:00', airEnd: '00:00:00' }),
+      ])
+      expect(report.blocks[0].verdict).toBe('partial')
+      expect(report.blocks[0].coverage).toBeCloseTo(0.5)
+    })
+
+    it("suppresses next-day early-morning airings that belong to yesterday's wrapping block", () => {
+      // Friday's report: the 00:00–01:00 airing satisfies Thursday's wrap block,
+      // so it must not be flagged unscheduled on Friday.
+      const report = reconcileDay(
+        '2026-07-03',
+        [], // Friday has no blocks of its own in this scenario
+        [airing({ episodeId: 2, showName: 'Overnight Jazz', showKey: 'jazz', airDate: '2026-07-03', airStart: '00:00:00', airEnd: '01:00:00' })],
+        { prevDayBlocks: wrapBlocks() }
+      )
+      expect(report.unscheduled).toHaveLength(0)
+    })
+
+    it('still flags a next-day airing of a DIFFERENT show as unscheduled', () => {
+      const report = reconcileDay(
+        '2026-07-03',
+        [],
+        [airing({ episodeId: 3, showName: 'Mystery Hour', showKey: 'mystery', airDate: '2026-07-03', airStart: '00:00:00', airEnd: '01:00:00' })],
+        { prevDayBlocks: wrapBlocks() }
+      )
+      expect(report.unscheduled).toHaveLength(1)
+    })
   })
 })
 
