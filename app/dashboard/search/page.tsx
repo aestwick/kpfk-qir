@@ -184,7 +184,7 @@ export default function SearchPage() {
         <input
           type="text"
           autoFocus
-          placeholder="Search transcripts…"
+          placeholder="Search every transcript…"
           value={queryLocal}
           onChange={(e) => setQuery(e.target.value)}
           className="border rounded px-3 py-2 text-sm w-80 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
