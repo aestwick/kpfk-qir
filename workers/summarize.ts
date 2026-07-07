@@ -56,16 +56,19 @@ export async function processSummarize(job: Job) {
   const { start, end } = resolveWindow(job)
 
   // Get candidate transcribed episodes from the window (including those with null
-  // air_date that were created during it — older ingests didn't populate it). As in
-  // transcribe.ts, we do NOT `.limit(batchSize)` here: excluded categories must be
-  // dropped BEFORE the batch is sliced, or a head-of-queue block of excluded episodes
+  // air_date that were created during it — older ingests didn't populate it).
+  // Audit-flagged `priority` episodes are also pulled in regardless of window, and
+  // ordered ahead of the backlog, so a compliance audit can complete any show's data.
+  // As in transcribe.ts, we do NOT `.limit(batchSize)` here: excluded categories must
+  // be dropped BEFORE the batch is sliced, or a head-of-queue block of excluded episodes
   // would fill the batch, claim nothing, and dead-end the continue-chain.
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
     .select('id, category')
     .eq('station_id', stationId)
     .eq('status', 'transcribed')
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    .order('priority', { ascending: false })
     .order('created_at', { ascending: true })
 
   if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
@@ -263,7 +266,8 @@ ${transcriptText}`
 
   // More claimable transcribed episodes beyond this batch? Excluded-category episodes
   // are NOT counted — they intentionally stay `transcribed` and must not keep the
-  // chain alive (mirrors transcribe.ts; the continue job re-queries fresh).
+  // chain alive (mirrors transcribe.ts; the continue job re-queries fresh). Audit
+  // `priority` episodes are already part of `claimable`, so this covers them too.
   const remaining = claimable.length > claimIds.length
   if (remaining) {
     console.log(`[summarize] ${claimable.length - claimIds.length} more claimable transcribed — will continue`)

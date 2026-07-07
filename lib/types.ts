@@ -117,6 +117,7 @@ export interface EpisodeLog {
   field_sources: import('./field-sources').FieldSources | null
   error_message: string | null
   retry_count: number
+  priority: boolean
   created_at: string
   updated_at: string
 }

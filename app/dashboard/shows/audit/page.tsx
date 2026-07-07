@@ -36,6 +36,7 @@ interface AuditEpisode {
   error_message: string | null
   compliance_status: string | null
   mp3_url: string
+  retry_count: number
   compliance_flags: ComplianceFlag[]
   // Cost/spend is super-admin-only; the API omits it for everyone else.
   actual_cost?: number
@@ -67,6 +68,8 @@ const statusColors: Record<string, string> = {
   summarized: 'bg-green-100 text-green-800',
   compliance_checked: 'bg-emerald-100 text-emerald-800',
   failed: 'bg-red-100 text-red-800',
+  transcript_missing: 'bg-red-100 text-red-800',
+  dead: 'bg-gray-200 text-gray-600',
   unavailable: 'bg-gray-100 text-gray-600',
 }
 
@@ -76,8 +79,15 @@ const statusLabels: Record<string, string> = {
   summarized: 'Summarized',
   compliance_checked: 'Checked',
   failed: 'Failed',
+  transcript_missing: 'Transcript Missing',
+  dead: 'Dead',
   unavailable: 'Unavailable',
 }
+
+// Episodes the pipeline has stopped on — the audit offers retry/drop for these.
+// Unscannable ones (unavailable/dead) are excluded from the audit's failure
+// count, but can still be retried in case their source audio became available.
+const RESOLVABLE_STATUSES = new Set(['failed', 'dead', 'transcript_missing', 'unavailable'])
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-100 text-red-700',
@@ -102,6 +112,7 @@ export default function ShowAuditPage() {
   const [auditData, setAuditData] = useState<AuditData | null>(null)
   const [loading, setLoading] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [resolvingId, setResolvingId] = useState<number | null>(null)
   const [processMessage, setProcessMessage] = useState('')
   const [expandedEpisode, setExpandedEpisode] = useState<number | null>(null)
   const [pollCount, setPollCount] = useState(0)
@@ -274,6 +285,25 @@ export default function ShowAuditPage() {
     setProcessing(false)
   }
 
+  // Retry (fresh attempt + priority) or drop (exclude) a stuck episode
+  const handleResolve = async (episodeId: number, action: 'retry' | 'drop') => {
+    if (action === 'drop' && !confirm('Drop this episode? It will be excluded from processing and the report.')) return
+    setResolvingId(episodeId)
+    try {
+      const res = await authedFetch('/api/shows/audit/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ episode_ids: [episodeId], action }),
+      })
+      const data = await res.json()
+      setProcessMessage(data.ok ? data.message : `Error: ${data.error}`)
+      if (data.ok) await fetchAudit()
+    } catch {
+      setProcessMessage('Failed to update episode')
+    }
+    setResolvingId(null)
+  }
+
   const handleViewReport = () => {
     setStep('report')
   }
@@ -324,6 +354,16 @@ export default function ShowAuditPage() {
   ) ?? []
 
   const episodesNeedingWork = auditData?.processing.episodesNeedingWork ?? 0
+  // Genuinely failed episodes the auditor can act on (retry or drop).
+  const failedCount = auditData
+    ? (auditData.statusCounts['failed'] ?? 0) + (auditData.statusCounts['transcript_missing'] ?? 0)
+    : 0
+  // Unscannable episodes (missing/404 audio, or given up on / dropped). These
+  // can't be processed, so they're excluded from the audit — NOT counted as
+  // failures and they never block a complete audit.
+  const unscannableCount = auditData
+    ? (auditData.statusCounts['unavailable'] ?? 0) + (auditData.statusCounts['dead'] ?? 0)
+    : 0
 
   return (
     <div className="space-y-6">
@@ -332,7 +372,7 @@ export default function ShowAuditPage() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Show Audit</h2>
           <p className="text-sm text-gray-500 dark:text-warm-500 mt-1">
-            Audit specific shows for a date range &mdash; review, process, and generate reports
+            Audit specific shows for a date range &mdash; review existing data, prioritize what&apos;s missing, and generate reports
           </p>
         </div>
         {step !== 'select' && (
@@ -498,24 +538,21 @@ export default function ShowAuditPage() {
             )}
           </div>
 
-          {/* Past quarter warning */}
+          {/* Out-of-quarter note — these are still prioritized and completed */}
           {!auditData.isCurrentQuarter && episodesNeedingWork > 0 && (
             <div className="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-xl p-4">
               <p className="text-sm text-orange-800 dark:text-orange-300">
-                <strong>Note:</strong> This date range is outside the current quarter. The processing pipeline
-                only picks up episodes from the current quarter. To process these episodes, use the{' '}
-                <a href="/dashboard/episodes" className="underline hover:no-underline">Episodes page</a>{' '}
-                to re-transcribe or re-summarize individual episodes, or use the{' '}
-                <a href="/dashboard/jobs" className="underline hover:no-underline">Jobs page</a>{' '}
-                to advance the pipeline.
+                <strong>Note:</strong> This date range is outside the current quarter. These episodes are
+                normally skipped by the pipeline, but prioritizing them here flags them so the workers
+                complete their data regardless of when they aired.
               </p>
             </div>
           )}
 
-          {/* Cost estimate + Process button */}
-          {episodesNeedingWork > 0 && auditData.isCurrentQuarter && (
+          {/* Cost estimate + Prioritize button */}
+          {episodesNeedingWork > 0 && (
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Processing Required</h3>
+              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-2">Complete Missing Data</h3>
               {auditData.processing.estimatedCost && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm mb-3">
                   {auditData.processing.estimatedCost.transcription > 0 && (
@@ -551,7 +588,7 @@ export default function ShowAuditPage() {
                   disabled={processing}
                   className="px-5 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
                 >
-                  {processing ? 'Queuing...' : 'Process All Episodes'}
+                  {processing ? 'Queuing...' : 'Prioritize & Complete'}
                 </button>
               </div>
               {processMessage && (
@@ -590,6 +627,28 @@ export default function ShowAuditPage() {
               >
                 View Report
               </button>
+            </div>
+          )}
+
+          {/* Failed episodes — actionable, these do represent incomplete audit work */}
+          {failedCount > 0 && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl p-4">
+              <p className="text-sm text-red-800 dark:text-red-300">
+                <strong>{failedCount} episode{failedCount !== 1 ? 's' : ''} failed.</strong>{' '}
+                Expand an episode below to <span className="font-medium">Retry</span> it with a fresh attempt or{' '}
+                <span className="font-medium">Drop</span> it from the report.
+              </p>
+            </div>
+          )}
+
+          {/* Unscannable episodes — excluded from the audit, NOT counted as failures */}
+          {unscannableCount > 0 && (
+            <div className="bg-gray-50 dark:bg-warm-800 border border-gray-200 dark:border-warm-700 rounded-xl p-4">
+              <p className="text-sm text-gray-600 dark:text-warm-400">
+                <strong>{unscannableCount} episode{unscannableCount !== 1 ? 's' : ''} unscannable</strong>{' '}
+                (missing audio or dropped). These are excluded from the audit and don&apos;t count as failures.
+                Expand one to retry if its source audio is now available.
+              </p>
             </div>
           )}
 
@@ -681,6 +740,28 @@ export default function ShowAuditPage() {
                       {ep.error_message && (
                         <div className="text-xs bg-red-50 dark:bg-red-900/20 p-2 rounded text-red-600 dark:text-red-400">
                           Error: {ep.error_message}
+                          {ep.retry_count > 0 && <span className="ml-1 opacity-75">(retries: {ep.retry_count})</span>}
+                        </div>
+                      )}
+                      {RESOLVABLE_STATUSES.has(ep.status) && (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleResolve(ep.id, 'retry')}
+                            disabled={resolvingId === ep.id}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {resolvingId === ep.id ? 'Working…' : 'Retry'}
+                          </button>
+                          <button
+                            onClick={() => handleResolve(ep.id, 'drop')}
+                            disabled={resolvingId === ep.id}
+                            className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 text-gray-600 font-medium hover:bg-gray-100 dark:border-warm-600 dark:text-warm-300 dark:hover:bg-warm-700 disabled:opacity-50"
+                          >
+                            Drop
+                          </button>
+                          <span className="text-[11px] text-gray-400 dark:text-warm-500">
+                            Retry gives a fresh attempt &amp; prioritizes it; Drop excludes it from the report.
+                          </span>
                         </div>
                       )}
                       {ep.compliance_flags.length > 0 && (
@@ -745,6 +826,11 @@ export default function ShowAuditPage() {
               {' '}&middot;{' '}
               {completedEpisodes.length} episode{completedEpisodes.length !== 1 ? 's' : ''}
             </p>
+            {unscannableCount > 0 && (
+              <p className="text-xs text-gray-400 dark:text-warm-500 mt-1">
+                {unscannableCount} episode{unscannableCount !== 1 ? 's' : ''} excluded as unscannable (missing audio or dropped).
+              </p>
+            )}
           </div>
 
           {/* Issue Categories */}
