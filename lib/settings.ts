@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase'
 import { getStation } from './stations'
+import { resolveChatModel } from './openai-models'
 
 const settingsCache = new Map<string, { value: unknown; fetchedAt: number }>()
 const CACHE_TTL_MS = 60_000 // 1 minute
@@ -479,6 +480,18 @@ export async function getSummarizationPrompt(stationId: string): Promise<string>
 export async function getCurationPrompt(stationId: string): Promise<string> {
   const raw = (await getSetting<string>('curation_prompt', stationId)) ?? DEFAULT_CURATION_PROMPT
   return fillStationName(raw, await stationName(stationId))
+}
+
+// Which OpenAI chat model runs each prompt (Settings → Prompts dropdowns).
+// Per-station overridable like the prompts themselves; unknown or unset values
+// resolve to the pipeline default (lib/openai-models) so a stale stored id can
+// never reach the API.
+export async function getSummarizationModel(stationId: string): Promise<string> {
+  return resolveChatModel(await getSetting<string>('summarization_model', stationId))
+}
+
+export async function getCurationModel(stationId: string): Promise<string> {
+  return resolveChatModel(await getSetting<string>('curation_model', stationId))
 }
 
 // System prompt for the broadcast-week verification content check

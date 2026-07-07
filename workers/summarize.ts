@@ -3,7 +3,7 @@ import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { getCurrentQuarterBounds } from '../lib/quarters'
 import { logSummarizationUsage, logEmbeddingUsage } from '../lib/usage'
-import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
+import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, getSummarizationModel, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
@@ -49,6 +49,7 @@ export async function processSummarize(job: Job) {
   const excludedCategories = await getExcludedCategories(stationId)
   const batchSize = await getSummarizeBatchSize(stationId)
   const systemPrompt = await getSummarizationPrompt(stationId)
+  const summarizationModel = await getSummarizationModel(stationId)
   // Phase 2 semantic search: embed each episode's transcript right after the
   // summary (resolved once per batch — the 60s settings cache makes this cheap).
   const embeddingsEnabled = await isEmbeddingsEnabled(stationId)
@@ -150,7 +151,7 @@ ${transcriptText}`
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: summarizationModel,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userMessage },
@@ -222,7 +223,8 @@ ${transcriptText}`
           stationId,
           episode.id,
           usage.prompt_tokens,
-          usage.completion_tokens
+          usage.completion_tokens,
+          summarizationModel
         )
       }
 

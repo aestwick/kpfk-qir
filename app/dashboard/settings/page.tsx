@@ -7,6 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
+import { OPENAI_CHAT_MODELS, resolveChatModel } from '@/lib/openai-models'
 import { resolveGroupDisplayName, showGroupKey, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
@@ -119,6 +120,28 @@ const DEFAULT_CATEGORIES = [
 
 type Tab = 'pipeline' | 'prompts' | 'shows' | 'compliance' | 'corrections' | 'members'
 
+/* ─── model dropdown shared by the prompt cards ─── */
+// Hovering the select shows the current model's one-line description; each
+// option carries its own description as a native tooltip too.
+function ModelSelect({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) {
+  const selected = OPENAI_CHAT_MODELS.find((m) => m.id === value)
+  return (
+    <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-warm-400 shrink-0">
+      Model
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        title={selected?.description}
+        className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 disabled:opacity-50"
+      >
+        {OPENAI_CHAT_MODELS.map((m) => (
+          <option key={m.id} value={m.id} title={m.description}>{m.label}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('pipeline')
@@ -143,6 +166,8 @@ export default function SettingsPage() {
   const [savedCompliancePrompt, setSavedCompliancePrompt] = useState('')
   const [summarizationPrompt, setSummarizationPrompt] = useState('')
   const [savedSummarizationPrompt, setSavedSummarizationPrompt] = useState('')
+  const [summarizationModel, setSummarizationModel] = useState(resolveChatModel(undefined))
+  const [curationModel, setCurationModel] = useState(resolveChatModel(undefined))
   const [curationPrompt, setCurationPrompt] = useState('')
   const [savedCurationPrompt, setSavedCurationPrompt] = useState('')
   const [loading, setLoading] = useState(true)
@@ -277,6 +302,8 @@ export default function SettingsPage() {
       const curPrompt = (data.settings?.curation_prompt as string) || DEFAULT_CURATION_PROMPT
       setCurationPrompt(curPrompt)
       setSavedCurationPrompt(curPrompt)
+      setSummarizationModel(resolveChatModel(data.settings?.summarization_model))
+      setCurationModel(resolveChatModel(data.settings?.curation_model))
     }
     if (correctionsRes.ok) {
       const data = await correctionsRes.json()
@@ -656,6 +683,30 @@ export default function SettingsPage() {
         toast('error', 'Failed to save compliance prompt')
       }
     } catch {
+      toast('error', 'Network error')
+    }
+    setSaving(null)
+  }
+
+  // Model dropdowns save immediately on change (no draft state like the prompt
+  // textareas — a wrong click is one more click to undo). Reverts on failure.
+  async function saveModel(key: string, value: string, label: string, setCurrent: (v: string) => void, previous: string) {
+    setCurrent(value)
+    setSaving(key)
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+      if (res.ok) {
+        toast('success', `${label} set to ${value}`)
+      } else {
+        setCurrent(previous)
+        toast('error', `Failed to save ${label.toLowerCase()}`)
+      }
+    } catch {
+      setCurrent(previous)
       toast('error', 'Network error')
     }
     setSaving(null)
@@ -1343,6 +1394,11 @@ export default function SettingsPage() {
                   System prompt sent to OpenAI when summarizing each episode transcript. Controls headline, summary, host/guest extraction, and issue categorization.
                 </p>
               </div>
+              <ModelSelect
+                value={summarizationModel}
+                disabled={saving === 'summarization_model'}
+                onChange={(v) => saveModel('summarization_model', v, 'Summarization model', setSummarizationModel, summarizationModel)}
+              />
             </div>
             <div className={summarizationPrompt !== savedSummarizationPrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
               <textarea
@@ -1389,6 +1445,11 @@ export default function SettingsPage() {
                   System prompt sent to OpenAI when selecting episodes for the QIR draft. Controls how entries are prioritized and filtered for the final report.
                 </p>
               </div>
+              <ModelSelect
+                value={curationModel}
+                disabled={saving === 'curation_model'}
+                onChange={(v) => saveModel('curation_model', v, 'Curation model', setCurationModel, curationModel)}
+              />
             </div>
             <div className={curationPrompt !== savedCurationPrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
               <textarea
