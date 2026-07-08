@@ -2,7 +2,7 @@ import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
 import { logCurationUsage } from '../lib/usage'
-import { getSetting, getCurationPrompt, isComplianceBlocking } from '../lib/settings'
+import { getSetting, getCurationPrompt, getCurationModel, isComplianceBlocking } from '../lib/settings'
 import { getStation } from '../lib/stations'
 import { resolveGroupDisplayName, showGroupKey } from '../lib/shows'
 import {
@@ -41,6 +41,7 @@ export async function processGenerateQir(job: Job) {
   const { start, end } = getQuarterDateRange(year, quarter)
 
   const curationSystemPrompt = await getCurationPrompt(stationId)
+  const curationModel = await getCurationModel(stationId)
   const maxPerCategory =
     (await getSetting<number>('max_entries_per_category', stationId)) ?? 12
   const issueCategories =
@@ -169,7 +170,7 @@ ${guidanceSection}
 ${categorySummaries.join('\n')}`
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: curationModel,
     messages: [
       { role: 'system', content: curationSystemPrompt },
       { role: 'user', content: userMessage },
@@ -285,7 +286,7 @@ ${categorySummaries.join('\n')}`
   // Log usage
   const usage = response.usage
   if (usage) {
-    await logCurationUsage(stationId, usage.prompt_tokens, usage.completion_tokens, {
+    await logCurationUsage(stationId, usage.prompt_tokens, usage.completion_tokens, curationModel, {
       year,
       quarter,
       draft_id: draft?.id,

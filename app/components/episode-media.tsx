@@ -159,6 +159,19 @@ export function TranscriptViewer({
   const onTextSelectedRef = useRef(onTextSelected)
   onTextSelectedRef.current = onTextSelected
 
+  const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const matchCount = searchQuery
+    ? (transcript.match(new RegExp(escapedQuery, 'gi'))?.length ?? 0)
+    : null
+
+  // Matches highlight in place, so without this the box looks dead whenever the
+  // first hit sits below the fold — jump to it as the query changes.
+  useEffect(() => {
+    if (!searchQuery || !containerRef.current) return
+    const mark = containerRef.current.querySelector('mark')
+    if (mark) mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [searchQuery])
+
   // Handle text selection for "Add Correction" toolbar
   useEffect(() => {
     const container = containerRef.current
@@ -222,13 +235,20 @@ export function TranscriptViewer({
     <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Transcript</h3>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search transcript..."
-          className="border dark:border-warm-600 rounded px-2 py-1 text-sm w-64 dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
-        />
+        <div className="flex items-center gap-2">
+          {matchCount != null && (
+            <span className={`text-xs ${matchCount === 0 ? 'text-gray-400 dark:text-warm-500' : 'text-gray-500 dark:text-warm-400'}`}>
+              {matchCount === 0 ? 'No matches' : `${matchCount} match${matchCount === 1 ? '' : 'es'}`}
+            </span>
+          )}
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Find in this transcript..."
+            className="border dark:border-warm-600 rounded px-2 py-1 text-sm w-64 dark:bg-warm-800 dark:text-warm-100 dark:placeholder-warm-500"
+          />
+        </div>
       </div>
       <div ref={containerRef} className="max-h-96 overflow-y-auto text-sm leading-relaxed whitespace-pre-wrap">
         {renderTranscript()}
