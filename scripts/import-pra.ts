@@ -41,7 +41,6 @@ import { supabaseAdmin } from '../lib/supabase'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 
-const KPFK_STATION_ID = '00000000-0000-4000-8000-000000000001'
 const SHOW_KEY = 'pra'
 const STATUS = 'archived'
 const INGEST_SOURCE = 'pra'
@@ -100,11 +99,28 @@ function parseCsv(text: string): Record<string, string>[] {
     .map((r) => Object.fromEntries(header.map((h, idx) => [h, r[idx] ?? ''])))
 }
 
-function toEpisode(row: ManifestRow) {
+/**
+ * Resolve KPFK's station id by slug at runtime rather than hardcoding a UUID.
+ * The id is owned by the beacon system (source of truth) and mirrored here via
+ * migration 042; looking it up keeps this seed correct no matter what the id is.
+ */
+async function resolveKpfkStationId(): Promise<string> {
+  const { data, error } = await supabaseAdmin
+    .from('stations')
+    .select('id')
+    .eq('slug', 'kpfk')
+    .single()
+  if (error || !data) {
+    throw new Error(`[pra] could not resolve KPFK station id by slug: ${error?.message ?? 'not found'}`)
+  }
+  return data.id as string
+}
+
+function toEpisode(row: ManifestRow, stationId: string) {
   const ref = row.reference.trim()
   const transcript = row.transcript_url.trim()
   return {
-    station_id: KPFK_STATION_ID,
+    station_id: stationId,
     show_key: SHOW_KEY,
     ingest_source: INGEST_SOURCE,
     status: STATUS,
@@ -128,7 +144,8 @@ async function main() {
   // Guard: only .mp3 objects are episodes. The manifest already excludes
   // .txt/.xlsx/etc, but assert the contract and drop anything malformed.
   const mp3s = rows.filter((r) => r.mp3_url && r.mp3_url.toLowerCase().endsWith('.mp3'))
-  const episodes = mp3s.map(toEpisode)
+  const stationId = await resolveKpfkStationId()
+  const episodes = mp3s.map((r) => toEpisode(r, stationId))
 
   const withRef = episodes.filter((e) => e.source_ref).length
   const withTranscript = episodes.filter((e) => e.transcript_url).length
