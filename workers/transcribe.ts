@@ -158,12 +158,25 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   // Resolve the provider fallback plan once per batch (it's station-level config,
   // not per-episode). If nothing is enabled+configured, bail BEFORE claiming so a
   // misconfiguration doesn't mark episodes failed and burn their retries.
-  const providerPlan = await resolveProviderPlan(stationId)
+  let providerPlan = await resolveProviderPlan(stationId)
   if (!providerPlan.length) {
     console.warn(`[transcribe] no transcription provider enabled+configured for station ${stationId} — skipping`)
     return { transcribed: 0, skipped: 'no-provider' as const }
   }
-  const diarize = await isDiarizationEnabled(stationId)
+  let diarize = await isDiarizationEnabled(stationId)
+  // Windowed backfills go through Groq ONLY (cheap chunked Whisper), no diarization:
+  // speaker labels aren't needed for a historical QIR, and the fallback providers
+  // (Deepgram/AssemblyAI) cost more and diarize. If Groq isn't configured for this
+  // station, keep the resolved plan as a safety net rather than failing the backfill.
+  if (job.data?.window) {
+    const groqOnly = providerPlan.filter((p) => p.id === 'groq')
+    if (groqOnly.length) {
+      providerPlan = groqOnly
+      diarize = false
+    } else {
+      console.warn('[transcribe] windowed backfill but groq not configured — using full provider plan')
+    }
+  }
   console.log(`[transcribe] provider order: ${providerPlan.map((p) => p.id).join(' → ')} (diarize=${diarize})`)
 
   // Get candidate pending episodes from the window (including those with null

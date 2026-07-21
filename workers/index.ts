@@ -6,6 +6,7 @@ import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
 import { processDiscoverSync } from './discover-sync'
+import { resumeWindowedBackfills } from './resume-backfills'
 import { isPipelinePaused } from '../lib/settings'
 import { jobPriority } from '../lib/tier'
 
@@ -121,7 +122,10 @@ transcribeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
+      // Carry chain/source through the backoff too — otherwise a backed-off backfill
+      // resumes transcribing but stops cascading into summarize (episodes pile at
+      // 'transcribed'). Mirrors the continue branch below.
+      await transcribeQueue.add('transcribe-backoff', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { delay: 5 * 60 * 1000, priority })
     } else {
       await transcribeQueue.add('transcribe-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
     }
@@ -157,7 +161,9 @@ summarizeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
+      // Carry chain/source through the backoff (see transcribe-backoff above) so the
+      // cascade into compliance survives a backed-off summarize.
+      await summarizeQueue.add('summarize-backoff', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { delay: 5 * 60 * 1000, priority })
     } else {
       await summarizeQueue.add('summarize-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
     }
@@ -309,6 +315,17 @@ discoverSyncQueue.add('discover-sync-startup', {}).then(() => {
   console.log('[workers] startup discovery sync queued')
 }).catch(console.error)
 
+// Self-healing backfill resume: a windowed historical backfill's continue-chain
+// lives only in Redis, so a restart drops it and nothing re-kicks an off-current-
+// quarter window. Re-scan for mid-drain backfills and resume them. Delayed so the
+// startup orphan recovery (above) has reset any mid-stage episodes to pending first.
+const resumeTimer = setTimeout(() => {
+  resumeWindowedBackfills(transcribeQueue, summarizeQueue).catch((err) =>
+    console.error('[resume] failed to resume backfills:', err instanceof Error ? err.message : err),
+  )
+}, 45_000)
+if (typeof resumeTimer.unref === 'function') resumeTimer.unref()
+
 // -- Pause Polling --
 // pipeline_paused is the global kill switch (toggled from the dashboard). Poll it
 // and pause/resume every worker to match. The steady/catch-up mode toggle was
@@ -358,6 +375,7 @@ console.log('[workers] all workers started')
 async function shutdown() {
   console.log('[workers] shutting down...')
   clearInterval(pauseInterval)
+  clearTimeout(resumeTimer)
   await Promise.all([
     ingestWorker.close(),
     transcribeWorker.close(),
