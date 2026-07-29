@@ -12,6 +12,21 @@ interface Correction {
   correct: string
   caseSensitive: boolean
   isRegex: boolean
+  /** When set, the correction applies ONLY to this episode (migration 006). */
+  episodeId?: number | null
+}
+
+/**
+ * Narrow a station's correction list to the ones that apply to a given episode:
+ * station-wide rules (no episodeId) plus rules scoped to exactly this episode.
+ * An episode-scoped rule must never leak onto other episodes — a single-letter
+ * fix meant for one show would silently corrupt every transcript after it.
+ */
+export function correctionsForEpisode<T extends Correction>(
+  corrections: T[],
+  episodeId: number,
+): T[] {
+  return corrections.filter((c) => c.episodeId == null || c.episodeId === episodeId)
 }
 
 export function applyCorrections(text: string, corrections: Correction[]): string {

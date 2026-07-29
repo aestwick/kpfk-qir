@@ -13,7 +13,7 @@ import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
 import { resolveProviderPlan, runTranscription, AudioUnavailableError } from '../lib/transcription'
-import { applyCorrections, buildVtt } from '../lib/transcription/vtt'
+import { applyCorrections, buildVtt, correctionsForEpisode } from '../lib/transcription/vtt'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -55,11 +55,11 @@ function resolveWindow(job: Job): { start: string; end: string } {
 }
 
 async function loadCorrections(stationId: string): Promise<
-  Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean }>
+  Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean; episodeId: number | null }>
 > {
   const { data } = await supabaseAdmin
     .from('transcript_corrections')
-    .select('wrong, correct, case_sensitive, is_regex')
+    .select('wrong, correct, case_sensitive, is_regex, episode_id')
     .eq('station_id', stationId)
     .eq('active', true)
 
@@ -68,6 +68,7 @@ async function loadCorrections(stationId: string): Promise<
     correct: c.correct,
     caseSensitive: c.case_sensitive,
     isRegex: c.is_regex,
+    episodeId: c.episode_id,
   }))
 }
 
@@ -245,10 +246,12 @@ async function runTranscribeBatch(job: Job, stationId: string) {
         providerPlan,
       )
 
-      // Stitch and apply corrections. Speaker labels (when diarized) go into the
+      // Stitch and apply corrections — station-wide rules plus any scoped to THIS
+      // episode only (episode_id). Speaker labels (when diarized) go into the
       // VTT as voice spans; the plain transcript stays speaker-free for summarize.
-      const correctedTranscript = applyCorrections(result.text, corrections)
-      const vtt = buildVtt(result.segments, corrections, result.diarized)
+      const episodeCorrections = correctionsForEpisode(corrections, episode.id)
+      const correctedTranscript = applyCorrections(result.text, episodeCorrections)
+      const vtt = buildVtt(result.segments, episodeCorrections, result.diarized)
       const totalDuration = result.durationSec
 
       // Store transcript — check for errors before marking episode as transcribed
