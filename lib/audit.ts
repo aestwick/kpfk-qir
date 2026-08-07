@@ -80,6 +80,9 @@ export const AUDIT_ACTIONS = {
   // Broadcast-week verification run (scripts/verify-week.ts): bulk transcript
   // read + report file export, plus the optional AI content-check pass.
   VERIFY_WEEK_COMPLETE: 'verify.week.complete',
+  // Fund-drive pitch analytics run (scripts/pitch-report.ts): bulk cue read +
+  // report file export.
+  PITCH_REPORT_COMPLETE: 'pitch.report.complete',
 } as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
 
