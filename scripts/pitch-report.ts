@@ -31,6 +31,7 @@ import {
   buildReport,
   buildStationLexicon,
   formatDuration,
+  renderAskersCsv,
   renderHoursCsv,
   renderMarkdown,
   renderSegmentsCsv,
@@ -149,7 +150,7 @@ async function main() {
   let episodeRows = await fetchAllRows('episodes', (from, to) => {
     let q = supabaseAdmin
       .from('episode_log')
-      .select('id, show_key, show_name, air_date, air_start, air_end, duration')
+      .select('id, show_key, show_name, host, air_date, air_start, air_end, duration')
       .eq('station_id', station.id)
       .gte('air_date', start)
       .lte('air_date', end)
@@ -169,6 +170,7 @@ async function main() {
       showKey: e.show_key,
       showGroup: show?.group ?? e.show_key,
       showName: show?.name ?? e.show_name,
+      host: e.host,
       airDate: e.air_date,
       airStart: e.air_start,
       airEnd: e.air_end,
@@ -232,11 +234,18 @@ async function main() {
     )
   }
 
-  console.log('\nTop shows by pitch time')
-  for (const s of report.byShow.slice(0, 15)) {
-    if (!s.pitchMs) continue
+  console.log(
+    `\nAsk quality: ${t.complete} named phone+web, ${t.partial} named one, ${t.noChannel} named neither | ${t.withAmount} named an amount | ${t.sustainerAsks} sustainer | ${t.premiumAsks} premium`
+  )
+
+  console.log('\nWho asked, and for what')
+  console.log(
+    `  ${'show'.padEnd(30)} ${'host'.padEnd(18)} ${'n'.padStart(4)} ${'time'.padStart(8)} ${'mean'.padStart(6)} ${'ph+web'.padStart(7)} ${'$ask'.padStart(5)} ${'sust'.padStart(4)} usual`
+  )
+  for (const a of report.byAsker.slice(0, 20)) {
+    if (!a.segmentCount) continue
     console.log(
-      `  ${s.showName.slice(0, 38).padEnd(38)} ${String(s.segmentCount).padStart(3)} pitches  ${formatDuration(s.pitchMs).padStart(8)}  ${(s.pitchRatio * 100).toFixed(1).padStart(5)}% of ${formatDuration(s.airtimeMs)}`
+      `  ${a.showName.slice(0, 30).padEnd(30)} ${(a.host ?? '—').slice(0, 18).padEnd(18)} ${String(a.segmentCount).padStart(4)} ${formatDuration(a.pitchMs).padStart(8)} ${formatDuration(a.meanSegmentMs).padStart(6)} ${`${a.complete}/${a.segmentCount}`.padStart(7)} ${String(a.withAmount).padStart(5)} ${String(a.sustainerAsks).padStart(4)} ${a.modalAmount ? `$${a.modalAmount}` : '—'}`
     )
   }
 
@@ -245,9 +254,12 @@ async function main() {
   const stem = path.join(args.out, `pitch-${station.slug}-${start}_${end}`)
   await fs.writeFile(`${stem}.md`, renderMarkdown(report))
   await fs.writeFile(`${stem}-segments.csv`, renderSegmentsCsv(report))
+  await fs.writeFile(`${stem}-askers.csv`, renderAskersCsv(report))
   await fs.writeFile(`${stem}-hours.csv`, renderHoursCsv(report))
   if (args.json) await fs.writeFile(`${stem}.json`, JSON.stringify(report, null, 2))
-  console.log(`\nWrote ${stem}.md, ${stem}-segments.csv, ${stem}-hours.csv${args.json ? `, ${stem}.json` : ''}`)
+  console.log(
+    `\nWrote ${stem}.md, ${stem}-segments.csv, ${stem}-askers.csv, ${stem}-hours.csv${args.json ? `, ${stem}.json` : ''}`
+  )
 
   await logAuditEvent({
     action: AUDIT_ACTIONS.PITCH_REPORT_COMPLETE,

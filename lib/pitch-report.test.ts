@@ -6,13 +6,16 @@ import {
   buildStationLexicon,
   detectSegments,
   episodeAirtimeMs,
+  extractAmounts,
   formatDuration,
   renderSegmentsCsv,
+  rollupByAsker,
   rollupByHour,
   rollupByShow,
   scoreCue,
   secToClock,
   timeToSec,
+  usualAmount,
   type PitchCue,
   type PitchEpisode,
 } from './pitch-report'
@@ -36,6 +39,7 @@ function episode(overrides: Partial<PitchEpisode> = {}): PitchEpisode {
     showKey: 'demo',
     showGroup: 'demo',
     showName: 'Demo Show',
+    host: 'Demo Host',
     airDate: '2026-07-31',
     airStart: '09:00:00',
     airEnd: '10:00:00',
@@ -171,6 +175,145 @@ describe('detectSegments', () => {
   })
 })
 
+describe('the intent veto (station promos)', () => {
+  it('does not count a program promo that names the channel but asks for nothing', () => {
+    // Real false positive: a promo for a show, carrying the station URL.
+    const timeline = cues(0, [
+      'Join us and be a part of the solution, Mondays at 5 a.m. on KPFK 90.7 FM in Los Angeles.',
+      'And online for everyone, everywhere, at kpfk.org.',
+      'That is California Solartopia, every Monday morning.',
+      'Tune in and be part of the conversation on KPFK 90.7 FM.',
+      'You can also find us on the web at kpfk.org.',
+    ])
+    expect(detectSegments(timeline, { lexicon })).toHaveLength(0)
+  })
+
+  it('still counts the same channel language once an ask is attached', () => {
+    const timeline = cues(0, [
+      'Join us and be a part of the solution, Mondays at 5 a.m. on KPFK 90.7 FM.',
+      'Make your donation of $100 right now.',
+      'Call 818-985-5735, or give online at kpfk.org.',
+    ])
+    const segments = detectSegments(timeline, { lexicon })
+    expect(segments).toHaveLength(1)
+    expect(segments[0].ask.completeness).toBe('complete')
+  })
+})
+
+describe('ask classification', () => {
+  it('reads amounts in digits, words and Spanish', () => {
+    expect(extractAmounts('a $100 pledge')).toEqual([100])
+    expect(extractAmounts('that is 75 dollars')).toEqual([75])
+    expect(extractAmounts('un certificado de 75 dólares')).toEqual([75])
+    expect(extractAmounts('for seventy-five dollars you get the CD')).toEqual([75])
+    expect(extractAmounts('$5, $10 or $25 a month')).toEqual([5, 10, 25])
+  })
+
+  it('ignores bare numbers and news-scale money', () => {
+    expect(extractAmounts('we are at 60 percent of goal with 20 minutes left')).toEqual([])
+    expect(extractAmounts('a $1.8 billion fund')).toEqual([])
+    expect(extractAmounts('the $250,000 grant')).toEqual([])
+  })
+
+  it("separates the station's own numbers from what the listener is asked for", () => {
+    // Real KPFK copy: the goal is not an ask, and neither is the shortfall.
+    expect(extractAmounts('our hope and our goal is to raise $200,000 for KPFK')).toEqual([])
+    expect(extractAmounts('we are $700 short of our goal for the Tom Hartman Program')).toEqual([])
+    expect(
+      extractAmounts('We are $700 short of our goal — make that $100 pledge right now.')
+    ).toEqual([100])
+    // A genuinely expensive premium still reads as an ask.
+    expect(extractAmounts('It is a $2,000 tax-deductible charitable contribution')).toEqual([2000])
+    // The hour's target, stated either side of the word.
+    expect(extractAmounts('We have a $1,000 goal for Tom Hartman, and we only have $300.')).toEqual([300])
+    expect(extractAmounts("Now, our goal for today's program is $1,000.")).toEqual([])
+  })
+
+  it('reports the level an asker drives to, not the biggest number they said', () => {
+    expect(usualAmount([[100, 6], [1000, 1]])).toBe(100)
+    // Nothing repeats: the median, not the maximum.
+    expect(usualAmount([[50, 1], [100, 1], [1000, 1]])).toBe(100)
+    expect(usualAmount([])).toBeNull()
+  })
+
+  it('marks completeness from the channels actually named', () => {
+    const both = detectSegments(
+      cues(0, ['Pledge now: call 818-985-5735 or give online at kpfk.org.']),
+      { lexicon }
+    )[0]
+    expect(both.ask.completeness).toBe('complete')
+
+    const phoneOnly = detectSegments(cues(0, ['Make that pledge now, call 818-985-5735.']), { lexicon })[0]
+    expect(phoneOnly.ask.completeness).toBe('partial')
+    expect(phoneOnly.ask.phone).toBe(true)
+    expect(phoneOnly.ask.web).toBe(false)
+
+    // The interesting case: an ask with nowhere to act on it.
+    const orphan = detectSegments(
+      cues(0, ['We are asking you to become a sustaining member of this station today.']),
+      { lexicon }
+    )[0]
+    expect(orphan.ask.completeness).toBe('none')
+  })
+
+  it('flags sustainer, premium, matching and deadline asks', () => {
+    const seg = detectSegments(
+      cues(0, [
+        'Become a sustainer at $10 every month and we will send you the book as a thank you gift.',
+        'Your gift is matched dollar for dollar in the next ten minutes.',
+      ]),
+      { lexicon }
+    )[0]
+    expect(seg.ask.sustainer).toBe(true)
+    expect(seg.ask.premium).toBe(true)
+    expect(seg.ask.matching).toBe(true)
+    expect(seg.ask.deadline).toBe(true)
+    expect(seg.ask.amounts).toEqual([10])
+  })
+})
+
+describe('rollupByAsker', () => {
+  const pitch = (text: string) => cues(0, [text])
+
+  it('scores each host separately and reports the level they drive to', () => {
+    const a = analyzeEpisode(
+      episode({ id: 1, host: 'Alice' }),
+      pitch('Pledge $100 now, call 818-985-5735 or give online at kpfk.org.'),
+      { lexicon }
+    )
+    const b = analyzeEpisode(
+      episode({ id: 2, host: 'Alice' }),
+      pitch('Pledge $100 today by calling 818-985-5735.'),
+      { lexicon }
+    )
+    const c = analyzeEpisode(
+      episode({ id: 3, host: 'Bob' }),
+      pitch('Become a sustainer for $25 a month — pledge now at kpfk.org.'),
+      { lexicon }
+    )
+
+    const askers = rollupByAsker([a, b, c])
+    expect(askers).toHaveLength(2)
+
+    const alice = askers.find((x) => x.host === 'Alice')!
+    expect(alice.segmentCount).toBe(2)
+    expect(alice.complete).toBe(1)
+    expect(alice.partial).toBe(1)
+    expect(alice.modalAmount).toBe(100)
+    expect(alice.sustainerAsks).toBe(0)
+
+    const bob = askers.find((x) => x.host === 'Bob')!
+    expect(bob.sustainerAsks).toBe(1)
+    expect(bob.maxAmount).toBe(25)
+  })
+
+  it('collapses hosts when asked to', () => {
+    const a = analyzeEpisode(episode({ id: 1, host: 'Alice' }), pitch('Pledge now at kpfk.org.'), { lexicon })
+    const b = analyzeEpisode(episode({ id: 2, host: 'Bob' }), pitch('Pledge now at kpfk.org.'), { lexicon })
+    expect(rollupByAsker([a, b], false)).toHaveLength(1)
+  })
+})
+
 describe('airtime', () => {
   it('prefers the logged duration', () => {
     expect(episodeAirtimeMs(episode({ durationMin: 58 }), [])).toBe(58 * 60_000)
@@ -188,12 +331,40 @@ describe('airtime', () => {
 })
 
 describe('roll-ups', () => {
+  it('refuses to measure an episode whose transcript arrived as one giant caption', () => {
+    // Real case: a 2-hour show with a single cue spanning 0s → 7205s. Counting
+    // that as one 2-hour pitch is worse than reporting it as unmeasured.
+    const ep = episode({ durationMin: 120 })
+    const giant = [{ startMs: 1000, endMs: 7_205_000, text: 'Pledge now, call 818-985-5735, kpfk.org.' }]
+    const r = analyzeEpisode(ep, giant, { lexicon })
+    expect(r.hasTranscript).toBe(true)
+    expect(r.timedCues).toBe(false)
+    expect(r.segments).toHaveLength(0)
+  })
+
   it('splits a segment that straddles the top of the hour', () => {
     const ep = episode({ airStart: '09:00:00', durationMin: 120 })
     const result = analyzeEpisode(ep, [], { lexicon })
     // 59:00 → 61:00 of the show = 30s in hour 09, 90s in hour 10.
     result.segments = [
-      { startMs: 59 * 60_000, endMs: 61 * 60_000, durationMs: 120_000, tier: 'strong', terms: ['pledge'], excerpt: '' },
+      {
+        startMs: 59 * 60_000,
+        endMs: 61 * 60_000,
+        durationMs: 120_000,
+        tier: 'strong',
+        terms: ['pledge'],
+        ask: {
+          phone: false,
+          web: false,
+          completeness: 'none',
+          amounts: [],
+          sustainer: false,
+          premium: false,
+          matching: false,
+          deadline: false,
+        },
+        excerpt: '',
+      },
     ]
     result.pitchMs = 120_000
     result.segmentCount = 1
