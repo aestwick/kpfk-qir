@@ -39,6 +39,8 @@
 // that never names an ask, and it cannot tell a live break from a produced
 // spot. An AI pass over the candidate regions is the intended second layer.
 
+import { datesInWindow } from './verify-week'
+
 export type PitchTier = 'strong' | 'medium' | 'weak'
 
 /**
@@ -158,6 +160,26 @@ export interface HourBucket {
   segmentCount: number
   /** Shows logged in this hour (KPFK logs overlapping feeds, so this can be >1). */
   shows: string[]
+  /** Dates in the window on which SOMETHING was logged in this hour. */
+  daysWithAiring: number
+  /** Dates on which nothing was logged — hours we did not scan, not silent hours. */
+  daysUnlogged: number
+}
+
+/**
+ * What the report could and could not see. Every hour of every day in the window
+ * is a slot; a slot with no logged airing was never scanned, and saying "0% pitch"
+ * for it would be a lie of omission. QIR only ingests shows whose show_keys row is
+ * ACTIVE, so an inactive show (KPFK's fund-drive specials, for one) leaves an
+ * hour-shaped hole that this section makes visible.
+ */
+export interface Coverage {
+  daysInWindow: number
+  hourSlots: number
+  hourSlotsLogged: number
+  ratio: number
+  /** Every unscanned slot, so a gap can be chased to a specific hour. */
+  gaps: { date: string; hour: number }[]
 }
 
 export interface ShowBucket {
@@ -224,6 +246,7 @@ export interface PitchReport {
   byHour: HourBucket[]
   byShow: ShowBucket[]
   byAsker: AskerBucket[]
+  coverage: Coverage
   totals: {
     episodes: number
     episodesWithTranscript: number
@@ -704,17 +727,31 @@ export const MAX_PLAUSIBLE_CUE_MS = 120_000
  * the "which hours" question. Episodes with no air_start can't be placed and
  * are skipped here (they still count in the show and day roll-ups).
  */
-export function rollupByHour(results: EpisodePitch[]): HourBucket[] {
+export function rollupByHour(results: EpisodePitch[], dates: string[] = []): HourBucket[] {
+  // Every hour exists in the output whether or not anything aired in it: an hour
+  // missing from the table reads as "nothing was pitched", when the truth may be
+  // "nothing was recorded". See Coverage.
   const buckets = new Map<number, HourBucket>()
+  const loggedSlots = new Set<string>()
   const bucket = (hour: number): HourBucket => {
     const h = ((hour % 24) + 24) % 24
     let b = buckets.get(h)
     if (!b) {
-      b = { hour: h, pitchMs: 0, airtimeMs: 0, pitchRatio: 0, segmentCount: 0, shows: [] }
+      b = {
+        hour: h,
+        pitchMs: 0,
+        airtimeMs: 0,
+        pitchRatio: 0,
+        segmentCount: 0,
+        shows: [],
+        daysWithAiring: 0,
+        daysUnlogged: 0,
+      }
       buckets.set(h, b)
     }
     return b
   }
+  for (let h = 0; h < 24; h++) bucket(h)
 
   for (const r of results) {
     const startSec = timeToSec(r.episode.airStart)
@@ -727,6 +764,7 @@ export function rollupByHour(results: EpisodePitch[]): HourBucket[] {
       const b = bucket(hour)
       b.airtimeMs += ms
       if (!b.shows.includes(label)) b.shows.push(label)
+      loggedSlots.add(`${r.episode.airDate} ${((hour % 24) + 24) % 24}`)
     })
 
     for (const seg of r.segments) {
@@ -741,8 +779,38 @@ export function rollupByHour(results: EpisodePitch[]): HourBucket[] {
   }
 
   const out = Array.from(buckets.values()).sort((a, b) => a.hour - b.hour)
-  for (const b of out) b.pitchRatio = ratio(b.pitchMs, b.airtimeMs)
+  for (const b of out) {
+    b.pitchRatio = ratio(b.pitchMs, b.airtimeMs)
+    b.daysWithAiring = dates.filter((d) => loggedSlots.has(`${d} ${b.hour}`)).length
+    b.daysUnlogged = dates.length - b.daysWithAiring
+  }
   return out
+}
+
+/** Which (date, hour) slots in the window had no logged airing at all. */
+export function computeCoverage(results: EpisodePitch[], dates: string[]): Coverage {
+  const logged = new Set<string>()
+  for (const r of results) {
+    const startSec = timeToSec(r.episode.airStart)
+    if (startSec === null) continue
+    spanByHour(startSec * 1000, startSec * 1000 + r.airtimeMs, (hour) => {
+      logged.add(`${r.episode.airDate} ${((hour % 24) + 24) % 24}`)
+    })
+  }
+  const gaps: { date: string; hour: number }[] = []
+  for (const date of dates) {
+    for (let hour = 0; hour < 24; hour++) {
+      if (!logged.has(`${date} ${hour}`)) gaps.push({ date, hour })
+    }
+  }
+  const hourSlots = dates.length * 24
+  return {
+    daysInWindow: dates.length,
+    hourSlots,
+    hourSlotsLogged: hourSlots - gaps.length,
+    ratio: hourSlots > 0 ? (hourSlots - gaps.length) / hourSlots : 0,
+    gaps,
+  }
 }
 
 /** Call back with (hourOfDay, msInThatHour) for each hour a span touches. */
@@ -904,11 +972,13 @@ export function buildReport(
   const pitchMs = results.reduce((s, r) => s + r.pitchMs, 0)
   const airtimeMs = results.reduce((s, r) => s + r.airtimeMs, 0)
   const segments = results.flatMap((r) => r.segments)
+  const dates = datesInWindow(meta.start, meta.end)
   return {
     ...meta,
     episodes: results,
     byDay: rollupByDay(results),
-    byHour: rollupByHour(results),
+    byHour: rollupByHour(results, dates),
+    coverage: computeCoverage(results, dates),
     byShow: rollupByShow(results),
     byAsker: rollupByAsker(results),
     totals: {
@@ -936,6 +1006,7 @@ const pct = (r: number) => `${(r * 100).toFixed(1)}%`
 
 export function renderMarkdown(report: PitchReport): string {
   const t = report.totals
+  const c = report.coverage
   const lines: string[] = []
   lines.push(`# Fund-drive pitch report — ${report.stationName}`)
   lines.push('')
@@ -990,14 +1061,35 @@ export function renderMarkdown(report: PitchReport): string {
 
   lines.push('## By hour')
   lines.push('')
-  lines.push('| Hour | Pitches | Pitch time | Airtime | % pitch | Shows |')
-  lines.push('| --- | ---: | ---: | ---: | ---: | --- |')
+  lines.push('Every hour of the broadcast day, whether or not anything was logged in it.')
+  lines.push('')
+  lines.push('| Hour | Pitches | Pitch time | Airtime | % pitch | Days unlogged | Shows |')
+  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | --- |')
   for (const h of report.byHour) {
+    const unlogged = h.daysUnlogged ? `${h.daysUnlogged} of ${c.daysInWindow}` : '—'
+    const shows = h.shows.length ? h.shows.join(', ') : '_no airing logged_'
     lines.push(
-      `| ${secToClock(h.hour * 3600)} | ${h.segmentCount} | ${formatDuration(h.pitchMs)} | ${formatDuration(h.airtimeMs)} | ${pct(h.pitchRatio)} | ${h.shows.join(', ')} |`
+      `| ${secToClock(h.hour * 3600)} | ${h.segmentCount} | ${formatDuration(h.pitchMs)} | ${formatDuration(h.airtimeMs)} | ${h.airtimeMs ? pct(h.pitchRatio) : '—'} | ${unlogged} | ${shows} |`
     )
   }
   lines.push('')
+
+  lines.push('## Coverage')
+  lines.push('')
+  lines.push(
+    `${c.hourSlotsLogged} of ${c.hourSlots} hour-slots in the window had a logged airing (${pct(c.ratio)}). An unlogged hour was never scanned — it is not an hour without pitching.`
+  )
+  lines.push('')
+  if (c.gaps.length) {
+    lines.push('| Date | Unscanned hours |')
+    lines.push('| --- | --- |')
+    const byDate = new Map<string, number[]>()
+    for (const g of c.gaps) byDate.set(g.date, [...(byDate.get(g.date) ?? []), g.hour])
+    for (const [date, hrs] of Array.from(byDate.entries())) {
+      lines.push(`| ${date} | ${hrs.map((h) => secToClock(h * 3600)).join(', ')} |`)
+    }
+    lines.push('')
+  }
 
   if (report.byDay.length > 1) {
     lines.push('## By day')
@@ -1179,7 +1271,9 @@ export function renderAskersCsv(report: PitchReport): string {
 
 /** One row per aired hour — the "which hours had pitches" view. */
 export function renderHoursCsv(report: PitchReport): string {
-  const rows = [['hour', 'pitches', 'pitch_seconds', 'airtime_seconds', 'pct_pitch', 'shows'].join(',')]
+  const rows = [
+    ['hour', 'pitches', 'pitch_seconds', 'airtime_seconds', 'pct_pitch', 'days_logged', 'days_unlogged', 'shows'].join(','),
+  ]
   for (const h of report.byHour) {
     rows.push(
       [
@@ -1188,6 +1282,8 @@ export function renderHoursCsv(report: PitchReport): string {
         Math.round(h.pitchMs / 1000),
         Math.round(h.airtimeMs / 1000),
         (h.pitchRatio * 100).toFixed(1),
+        h.daysWithAiring,
+        h.daysUnlogged,
         `"${h.shows.join('; ').replace(/"/g, '""')}"`,
       ].join(',')
     )

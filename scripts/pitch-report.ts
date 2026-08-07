@@ -226,11 +226,17 @@ async function main() {
     `${t.episodesWithPitch}/${t.episodes} airings had a pitch; ${t.episodes - t.episodesWithTranscript} airings have no transcript (counted as zero)`
   )
 
-  console.log('\nBy hour')
+  const c = report.coverage
+  console.log(
+    `Coverage: ${c.hourSlotsLogged}/${c.hourSlots} hour-slots logged (${(c.ratio * 100).toFixed(1)}%) across ${c.daysInWindow} days — ${c.gaps.length} hours were never scanned`
+  )
+
+  console.log('\nBy hour (all 24, whether or not anything was logged)')
   for (const h of report.byHour) {
     const bar = '█'.repeat(Math.round(h.pitchRatio * 40))
+    const gap = h.daysUnlogged ? `  ⚠ no airing on ${h.daysUnlogged}/${c.daysInWindow} days` : ''
     console.log(
-      `  ${secToClock(h.hour * 3600)}  ${String(h.segmentCount).padStart(3)} pitches  ${formatDuration(h.pitchMs).padStart(8)}  ${(h.pitchRatio * 100).toFixed(1).padStart(5)}%  ${bar}`
+      `  ${secToClock(h.hour * 3600)}  ${String(h.segmentCount).padStart(3)} pitches  ${formatDuration(h.pitchMs).padStart(8)}  ${(h.pitchRatio * 100).toFixed(1).padStart(5)}%  ${bar}${gap}`
     )
   }
 

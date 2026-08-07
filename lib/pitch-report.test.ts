@@ -4,6 +4,7 @@ import {
   analyzeEpisode,
   buildReport,
   buildStationLexicon,
+  computeCoverage,
   detectSegments,
   episodeAirtimeMs,
   extractAmounts,
@@ -269,6 +270,35 @@ describe('ask classification', () => {
     expect(seg.ask.matching).toBe(true)
     expect(seg.ask.deadline).toBe(true)
     expect(seg.ask.amounts).toEqual([10])
+  })
+})
+
+describe('coverage', () => {
+  it('keeps every hour in the table and marks the ones nothing was logged in', () => {
+    const r = analyzeEpisode(episode({ airStart: '09:00:00', durationMin: 60 }), [], { lexicon })
+    const hours = rollupByHour([r], ['2026-07-31'])
+    expect(hours).toHaveLength(24)
+    expect(hours.find((h) => h.hour === 9)!.daysUnlogged).toBe(0)
+    // 10:00 aired nothing we recorded — that is a hole, not a quiet hour.
+    expect(hours.find((h) => h.hour === 10)!.daysUnlogged).toBe(1)
+  })
+
+  it('counts unscanned hour-slots across the window', () => {
+    const day1 = analyzeEpisode(
+      episode({ id: 1, airDate: '2026-07-30', airStart: '09:00:00', durationMin: 120 }),
+      [],
+      { lexicon }
+    )
+    const day2 = analyzeEpisode(
+      episode({ id: 2, airDate: '2026-07-31', airStart: '09:00:00', durationMin: 60 }),
+      [],
+      { lexicon }
+    )
+    const cov = computeCoverage([day1, day2], ['2026-07-30', '2026-07-31'])
+    expect(cov.hourSlots).toBe(48)
+    expect(cov.hourSlotsLogged).toBe(3) // 09+10 on the 30th, 09 on the 31st
+    expect(cov.gaps).toHaveLength(45)
+    expect(cov.gaps[0]).toEqual({ date: '2026-07-30', hour: 0 })
   })
 })
 
