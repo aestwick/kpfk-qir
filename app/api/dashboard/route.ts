@@ -288,8 +288,7 @@ async function buildDashboard(
   }
   const showData = Array.from(shows.entries())
     .map(([name, data]) => ({ name, ...data }))
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 15)
+    .sort((a, b) => b.summarized - a.summarized || b.total - a.total)
 
   // Activity timeline with duration/cost from usage_log
   const activityUsageMap = new Map<number, { duration_seconds: number | null; cost: number | null; operation: string | null }>()
