@@ -199,7 +199,10 @@ async function runInsert(args: Args) {
         key: k,
         show_name: meta?.name ?? k,
         feed_name: meta?.name ?? null,
-        show_group: k,
+        // Leave show_group null: grouping defaults to the key (resolveShowGroup),
+        // but a non-null group is treated as a human display label — setting it to
+        // the key made the picker/report show the bare key instead of feed_name.
+        show_group: null,
         category: meta?.category ?? null,
         active: false,
       }

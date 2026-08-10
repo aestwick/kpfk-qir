@@ -111,8 +111,15 @@ export function resolveGroupDisplayName(feeds: ShowNameFields[], stripPrefixes?:
   const overridden = feeds.find((f) => f.display_name?.trim())
   if (overridden) return resolveShowDisplayName(overridden, stripPrefixes)
   // An explicit show_group is a human-entered label shared across the feeds; use
-  // it as the name. (Ungrouped feeds have show_group null and fall through.)
-  const grouped = feeds.find((f) => f.show_group?.trim())
+  // it as the name — but ONLY when it's a real label, not just the feed's own key
+  // copied into show_group. Backfills/imports set show_group = key as the default
+  // grouping identity (equivalent to null for grouping; see resolveShowGroup), and
+  // that key is not a display name. A key-equal group falls through to the feed's
+  // resolved name (feed_name → show_name) so the bare key never surfaces.
+  // (Ungrouped feeds have show_group null and fall through here too.)
+  const grouped = feeds.find(
+    (f) => f.show_group?.trim() && f.show_group.trim().toLowerCase() !== f.key.trim().toLowerCase(),
+  )
   if (grouped) return grouped.show_group!.trim()
   return feeds.length ? resolveShowDisplayName(feeds[0], stripPrefixes) : 'Unknown Show'
 }
