@@ -35,6 +35,7 @@ import {
   renderHoursCsv,
   renderMarkdown,
   renderSegmentsCsv,
+  renderShowsCsv,
   secToClock,
   type EpisodePitch,
   type PitchCue,
@@ -261,10 +262,11 @@ async function main() {
   await fs.writeFile(`${stem}.md`, renderMarkdown(report))
   await fs.writeFile(`${stem}-segments.csv`, renderSegmentsCsv(report))
   await fs.writeFile(`${stem}-askers.csv`, renderAskersCsv(report))
+  await fs.writeFile(`${stem}-shows.csv`, renderShowsCsv(report))
   await fs.writeFile(`${stem}-hours.csv`, renderHoursCsv(report))
   if (args.json) await fs.writeFile(`${stem}.json`, JSON.stringify(report, null, 2))
   console.log(
-    `\nWrote ${stem}.md, ${stem}-segments.csv, ${stem}-askers.csv, ${stem}-hours.csv${args.json ? `, ${stem}.json` : ''}`
+    `\nWrote ${stem}.md + segments/askers/shows/hours CSVs${args.json ? ' + .json' : ''} in ${args.out}/`
   )
 
   await logAuditEvent({

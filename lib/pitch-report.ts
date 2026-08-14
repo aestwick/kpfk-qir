@@ -185,12 +185,30 @@ export interface Coverage {
 export interface ShowBucket {
   showGroup: string
   showName: string
+  /** Airings logged in the window. */
   episodes: number
   episodesWithTranscript: number
+  /** Airings we could actually measure: transcript present AND cue clock usable. */
+  episodesMeasurable: number
+  /** Airings logged but not measurable — the show-level blind spot. */
+  episodesUnmeasured: number
+  /** Measurable airings that carried at least one pitch. */
+  episodesWithPitch: number
+  /** episodesWithPitch / episodesMeasurable — the "how often do they pitch" rate. */
+  pitchedRate: number
   segmentCount: number
+  /** Segments whose evidence is an explicit ask (tier 'strong'). */
+  segmentsStrong: number
+  /** Segments carried by corroboration only (tier 'medium') — likelier, not certain. */
+  segmentsMedium: number
   pitchMs: number
   airtimeMs: number
   pitchRatio: number
+  /** Ask quality across this show's pitches. */
+  complete: number
+  partial: number
+  noChannel: number
+  withAmount: number
 }
 
 /**
@@ -838,21 +856,48 @@ export function rollupByShow(results: EpisodePitch[]): ShowBucket[] {
         showName: r.episode.showName ?? r.episode.showKey,
         episodes: 0,
         episodesWithTranscript: 0,
+        episodesMeasurable: 0,
+        episodesUnmeasured: 0,
+        episodesWithPitch: 0,
+        pitchedRate: 0,
         segmentCount: 0,
+        segmentsStrong: 0,
+        segmentsMedium: 0,
         pitchMs: 0,
         airtimeMs: 0,
         pitchRatio: 0,
+        complete: 0,
+        partial: 0,
+        noChannel: 0,
+        withAmount: 0,
       }
       buckets.set(key, b)
     }
     b.episodes++
     if (r.hasTranscript) b.episodesWithTranscript++
+    const measurable = r.hasTranscript && r.timedCues
+    if (measurable) b.episodesMeasurable++
+    else b.episodesUnmeasured++
+    if (r.segmentCount > 0) b.episodesWithPitch++
     b.segmentCount += r.segmentCount
     b.pitchMs += r.pitchMs
     b.airtimeMs += r.airtimeMs
+    for (const seg of r.segments) {
+      if (seg.tier === 'strong') b.segmentsStrong++
+      else b.segmentsMedium++
+      if (seg.ask.completeness === 'complete') b.complete++
+      else if (seg.ask.completeness === 'partial') b.partial++
+      else b.noChannel++
+      if (seg.ask.amounts.length) b.withAmount++
+    }
   }
   const out = Array.from(buckets.values())
-  for (const b of out) b.pitchRatio = ratio(b.pitchMs, b.airtimeMs)
+  for (const b of out) {
+    b.pitchRatio = ratio(b.pitchMs, b.airtimeMs)
+    // Rate is over MEASURABLE airings only: an airing we never transcribed is
+    // not evidence that the show didn't pitch.
+    b.pitchedRate = b.episodesMeasurable > 0 ? b.episodesWithPitch / b.episodesMeasurable : 0
+  }
   return out.sort((a, b) => b.pitchMs - a.pitchMs)
 }
 
@@ -1049,15 +1094,36 @@ export function renderMarkdown(report: PitchReport): string {
 
   lines.push('## By show')
   lines.push('')
-  lines.push('| Show | Airings | Pitches | Pitch time | Airtime | % pitch |')
-  lines.push('| --- | ---: | ---: | ---: | ---: | ---: |')
-  for (const s of report.byShow) {
-    const airings = s.episodesWithTranscript < s.episodes ? `${s.episodes} (${s.episodesWithTranscript} w/ transcript)` : `${s.episodes}`
+  lines.push(
+    'Rates are over MEASURABLE airings — an airing we never transcribed is not evidence the show did not pitch. "Claim strength" splits the pitches by how firm the evidence is: **firm** = an explicit ask was spoken (pledge, donate now, premium, the pledge line); **inferred** = no explicit ask phrase, but donation-specific language clustered densely enough to call it a pitch.'
+  )
+  lines.push('')
+  lines.push(
+    '| Show | Airings | Measured | Gap | Eps w/ pitch | Rate | Pitches | Firm | Inferred | Pitch time | % of airtime |'
+  )
+  lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |')
+  for (const s2 of report.byShow) {
     lines.push(
-      `| ${s.showName} | ${airings} | ${s.segmentCount} | ${formatDuration(s.pitchMs)} | ${formatDuration(s.airtimeMs)} | ${pct(s.pitchRatio)} |`
+      `| ${s2.showName} | ${s2.episodes} | ${s2.episodesMeasurable} | ${s2.episodesUnmeasured || '—'} | ${s2.episodesWithPitch}/${s2.episodesMeasurable} | ${s2.episodesMeasurable ? pct(s2.pitchedRate) : 'n/a'} | ${s2.segmentCount} | ${s2.segmentsStrong} | ${s2.segmentsMedium} | ${formatDuration(s2.pitchMs)} | ${s2.airtimeMs ? pct(s2.pitchRatio) : '—'} |`
     )
   }
   lines.push('')
+
+  const blind = report.byShow.filter((s2) => s2.episodesUnmeasured > 0)
+  if (blind.length) {
+    lines.push('### Show-level gaps')
+    lines.push('')
+    lines.push('Airings that aired but could not be measured (no transcript, or no usable cue clock). Every number above for these shows is a floor.')
+    lines.push('')
+    lines.push('| Show | Aired | Measured | Unmeasured | Blind spot |')
+    lines.push('| --- | ---: | ---: | ---: | ---: |')
+    for (const s2 of blind.sort((a, b) => b.episodesUnmeasured - a.episodesUnmeasured)) {
+      lines.push(
+        `| ${s2.showName} | ${s2.episodes} | ${s2.episodesMeasurable} | ${s2.episodesUnmeasured} | ${pct(s2.episodesUnmeasured / s2.episodes)} |`
+      )
+    }
+    lines.push('')
+  }
 
   lines.push('## By hour')
   lines.push('')
@@ -1208,6 +1274,57 @@ export function renderSegmentsCsv(report: PitchReport): string {
           .join(',')
       )
     }
+  }
+  return rows.join('\n')
+}
+
+/** One row per show — episodes, capture gap, pitch counts by claim strength. */
+export function renderShowsCsv(report: PitchReport): string {
+  const rows = [
+    [
+      'show_name',
+      'show_group',
+      'airings_logged',
+      'airings_measured',
+      'airings_unmeasured',
+      'episodes_with_pitch',
+      'pitched_rate_pct',
+      'pitches',
+      'pitches_firm',
+      'pitches_inferred',
+      'pitch_seconds',
+      'pitch_minutes',
+      'airtime_seconds',
+      'pct_of_airtime',
+      'asks_phone_and_web',
+      'asks_one_channel',
+      'asks_no_channel',
+      'asks_with_amount',
+    ].join(','),
+  ]
+  for (const s of report.byShow) {
+    rows.push(
+      [
+        `"${s.showName.replace(/"/g, '""')}"`,
+        s.showGroup,
+        s.episodes,
+        s.episodesMeasurable,
+        s.episodesUnmeasured,
+        s.episodesWithPitch,
+        (s.pitchedRate * 100).toFixed(1),
+        s.segmentCount,
+        s.segmentsStrong,
+        s.segmentsMedium,
+        Math.round(s.pitchMs / 1000),
+        (s.pitchMs / 60000).toFixed(1),
+        Math.round(s.airtimeMs / 1000),
+        (s.pitchRatio * 100).toFixed(1),
+        s.complete,
+        s.partial,
+        s.noChannel,
+        s.withAmount,
+      ].join(',')
+    )
   }
   return rows.join('\n')
 }
