@@ -80,6 +80,9 @@ export const AUDIT_ACTIONS = {
   // Broadcast-week verification run (scripts/verify-week.ts): bulk transcript
   // read + report file export, plus the optional AI content-check pass.
   VERIFY_WEEK_COMPLETE: 'verify.week.complete',
+  // Aircheck scan (scripts/scan-airchecks.ts): bulk caption read + report
+  // export covering hour-boundary station IDs, promos and start/stop hygiene.
+  AIRCHECK_SCAN_COMPLETE: 'aircheck.scan.complete',
 } as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
 
