@@ -158,14 +158,67 @@ export function cityFromStationName(name: string): string[] {
 // Station ID detection
 // ---------------------------------------------------------------------------
 
-/** How complete an ID is. A legal ID needs call sign + community of license. */
+/**
+ * How complete an ID is.
+ *  - `legal`     — call letters immediately followed by the community of
+ *                  license, i.e. the official station identification form.
+ *  - `callsign`  — the call sign was said, but not in legal-ID form.
+ *  - `frequency` — only the frequency was said; no call letters.
+ *  - `none`      — the station was not named at all.
+ */
 export type IdStrength = 'legal' | 'callsign' | 'frequency' | 'none'
+
+/**
+ * What may sit between the call letters and the community of license without
+ * breaking legal-ID form. 47 CFR 73.1201(b)(1) requires the call letters to be
+ * "immediately followed by" the community, permitting only the licensee's name,
+ * the station's frequency and its channel number in between.
+ *
+ * Testing that as a character distance proved far too brittle — the gap in a
+ * legitimate spoken-frequency ID ("KPFK ninety point seven FM Los Angeles") is
+ * almost exactly the gap in a non-ID ("KPFK. Our guest joins us from Los
+ * Angeles"). So the intervening words are checked against what the rule allows
+ * instead: numbers and number words (the frequency), band and channel markers,
+ * and the licensee's name. Anything else means the announcement was not in
+ * legal-ID form, however close together the two parts happened to fall.
+ */
+const LEGAL_ID_FILLER = new Set([
+  // band / channel markers
+  'fm', 'am', 'mhz', 'khz', 'channel', 'canal',
+  // licensee
+  'pacifica', 'foundation', 'radio', 'fundacion',
+  // the small connectors broadcasters idiomatically use ("KPFK in Los Angeles")
+  'in', 'en', 'de',
+  // spoken-number vocabulary, English and Spanish
+  'point', 'punto', 'coma', 'oh', 'zero', 'cero',
+  'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez',
+  'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety', 'hundred',
+  'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa', 'cien',
+])
+
+/** Cap on intervening words, so a long permitted-word run can't drift. */
+const LEGAL_ID_MAX_FILLER_WORDS = 8
+
+/** Is `gap` composed only of what may separate call letters from the community? */
+function isPermittedFiller(gap: string): boolean {
+  const words = gap.split(/\s+/).filter(Boolean)
+  if (words.length > LEGAL_ID_MAX_FILLER_WORDS) return false
+  return words.every((w) => /^\d+$/.test(w) || LEGAL_ID_FILLER.has(w))
+}
 
 export interface IdMatcher {
   /** Strongest ID form present in the text. */
   strength(text: string): IdStrength
   /** The matched substring, for quoting as evidence. */
   evidence(text: string): string | null
+  /**
+   * Whether the community of license appears anywhere in the text, regardless
+   * of whether it followed the call sign closely enough to be a legal ID.
+   * Lets a report separate "never said the city" from "said it, but not in
+   * legal-ID form".
+   */
+  mentionsCity(text: string): boolean
 }
 
 /**
@@ -178,9 +231,8 @@ export function buildIdMatcher(cfg: AircheckConfig): IdMatcher {
   const callTokens = cfg.idPatterns.filter((p) => /^[a-z]{4}$/i.test(p.trim()))
   const freqTokens = cfg.idPatterns.filter((p) => !/^[a-z]{4}$/i.test(p.trim()))
 
-  const callRe = callTokens.length
-    ? new RegExp(`\\b(${callTokens.map(patternFor).join('|')})\\b`, 'i')
-    : null
+  const callSource = callTokens.length ? `\\b(?:${callTokens.map(patternFor).join('|')})\\b` : null
+  const callRe = callSource ? new RegExp(callSource, 'i') : null
   const freqRe = freqTokens.length
     ? new RegExp(`(${freqTokens.map(patternFor).join('|')})`, 'i')
     : null
@@ -188,11 +240,31 @@ export function buildIdMatcher(cfg: AircheckConfig): IdMatcher {
     ? new RegExp(`(${cfg.cityNames.map(patternFor).join('|')})`, 'i')
     : null
 
+  /**
+   * Legal-ID form: the call letters with the community of license following
+   * close behind. Scans every call-sign occurrence, because the compliant
+   * mention may not be the first one in the caption.
+   */
+  function inLegalForm(t: string): boolean {
+    if (!callSource || !cityRe) return false
+    const scan = new RegExp(callSource, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = scan.exec(t)) !== null) {
+      const from = m.index + m[0].length
+      const rest = t.slice(from)
+      const city = cityRe.exec(rest)
+      // The community must follow, with only permitted material in between.
+      if (city && isPermittedFiller(rest.slice(0, city.index).trim())) return true
+      if (m.index === scan.lastIndex) scan.lastIndex++ // guard zero-length matches
+    }
+    return false
+  }
+
   return {
     strength(text: string): IdStrength {
       const t = normalizeText(text)
       const call = callRe?.test(t) ?? false
-      if (call && (cityRe?.test(t) ?? false)) return 'legal'
+      if (call && inLegalForm(t)) return 'legal'
       if (call) return 'callsign'
       if (freqRe?.test(t) ?? false) return 'frequency'
       return 'none'
@@ -203,6 +275,9 @@ export function buildIdMatcher(cfg: AircheckConfig): IdMatcher {
       if (!m) return null
       const start = Math.max(0, m.index - 60)
       return t.slice(start, Math.min(t.length, m.index + m[0].length + 60)).trim()
+    },
+    mentionsCity(text: string): boolean {
+      return cityRe?.test(normalizeText(text)) ?? false
     },
   }
 }
@@ -357,6 +432,12 @@ export interface BoundaryResult extends Boundary {
   coveredByNeighbor: boolean
   /** No cues at all in the window — nothing was transcribed to judge. */
   noCoverage: boolean
+  /**
+   * The community of license was named somewhere in the window even though the
+   * announcement did not reach legal-ID form. Separates "never said Los
+   * Angeles" from "said it, but not immediately after the call letters".
+   */
+  cityInWindow: boolean
 }
 
 export type EdgeIssue =
@@ -559,6 +640,7 @@ export function scanStreamNight(
       evidence,
       coveredByNeighbor: best !== 'none' && foundIn !== null && foundIn !== (owner?.ep.episodeId ?? null),
       noCoverage: inWindow.length === 0,
+      cityInWindow: inWindow.some((c) => matcher.mentionsCity(c.text)),
     }
   })
 

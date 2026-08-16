@@ -75,6 +75,43 @@ describe('buildIdMatcher', () => {
   it('quotes surrounding context as evidence', () => {
     expect(m.evidence('You are listening to KPFK 90.7 FM')).toContain('kpfk')
   })
+
+  // 47 CFR 73.1201(b)(1): call letters "immediately followed by" the community
+  // of license, with only the licensee name / frequency / channel permitted in
+  // between. Both parts appearing somewhere in the same breath is not enough.
+  it('accepts the frequency inserted between call sign and community', () => {
+    expect(m.strength('This is KPFK 90.7 FM Los Angeles')).toBe('legal')
+    expect(m.strength('KPFK, Los Angeles')).toBe('legal')
+  })
+
+  it('rejects a call sign and a city that are not in legal-ID form', () => {
+    expect(
+      m.strength('You are listening to KPFK. Our next guest joins us from a community group in Los Angeles.')
+    ).toBe('callsign')
+  })
+
+  it('accepts the frequency spoken as words, and the licensee name', () => {
+    expect(m.strength('This is KPFK ninety point seven FM Los Angeles')).toBe('legal')
+    expect(m.strength('KPFK, Pacifica Radio, Los Angeles')).toBe('legal')
+    expect(m.strength('You are listening to KPFK in Los Angeles')).toBe('legal')
+  })
+
+  it('rejects a city that follows the call sign but behind ordinary speech', () => {
+    // Nearly the same character distance as a spoken-frequency ID — the
+    // intervening WORDS are what separates the two.
+    expect(m.strength('KPFK and we are back with our guest here in Los Angeles')).toBe('callsign')
+  })
+
+  it('finds the compliant mention even when an earlier one is not in form', () => {
+    expect(m.strength('KPFK has a great lineup tonight. You are listening to KPFK 90.7 Los Angeles.')).toBe('legal')
+  })
+
+  it('reports a city mention separately from legal-ID form', () => {
+    const text = 'You are listening to KPFK. Our guest joins us from Los Angeles.'
+    expect(m.strength(text)).toBe('callsign')
+    expect(m.mentionsCity(text)).toBe(true)
+    expect(m.mentionsCity('You are listening to KPFK.')).toBe(false)
+  })
 })
 
 describe('detectPromos', () => {

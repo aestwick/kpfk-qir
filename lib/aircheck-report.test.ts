@@ -13,6 +13,7 @@ function boundary(over: Partial<BoundaryResult> = {}): BoundaryResult {
     evidence: null,
     coveredByNeighbor: false,
     noCoverage: false,
+    cityInWindow: false,
     ...over,
   }
 }
