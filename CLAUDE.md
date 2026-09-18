@@ -91,6 +91,9 @@ lib/
   ratelimit.ts      — Redis sliding-window rate limiter (per key)
   api-cache.ts      — Redis response cache with versioned invalidation
   api-handler.ts    — withApiKey() wrapper: auth → scope → rate-limit → cache → ETag
+  episode-feed.ts   — Pure logic behind GET /api/v1/episodes: the published-status
+                      contract, field allowlist, param parsing/validation, keyset
+                      cursor codec, response envelopes, public_id ref resolution
 ```
 
 ### API Routes
@@ -120,8 +123,8 @@ app/api/
   v1/                       — Public read API (API-key auth, GET-only). See "Public Read API".
     qir/route.ts                  — finalized reports (filter year/quarter/status)
     qir/[year]/q[quarter]/route.ts — one finalized report + curated entries
-    episodes/route.ts             — paginated episodes (?since cursor for sync)
-    episodes/[id]/route.ts        — episode detail (?include=transcript)
+    episodes/route.ts             — published episode feed (keyset cursor + updated_since)
+    episodes/[id]/route.ts        — episode detail by public_id (?include=transcript)
     episodes/[id]/transcript/route.ts — captions: VTT (?format=vtt) or JSON
     shows/route.ts                — program list
     usage/route.ts                — AI cost/usage summary
@@ -255,6 +258,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
 
 **Public Read API (`/api/v1/*`)** is a versioned, read-only (GET) API for external consumers (e.g. a sibling podcast app pulling captions/VTT and generating tags). Every route is built from `lib/api-handler.ts#withApiKey(handler, { scope, cache })`, which runs the request through, in order: **API-key auth** (`lib/api-auth.ts` — sha256 hash lookup against `api_keys`, no Supabase JWT) → **scope gate** (`requireScope`) → **per-key rate limit** (`lib/ratelimit.ts` — atomic Redis sliding window, fails *open*) → **Redis response cache** (`lib/api-cache.ts` — versioned invalidation, fails *open*) → the handler, then sets `ETag` (with `If-None-Match` → 304), `Cache-Control: private`, `X-RateLimit-*`, and `X-Cache`. Handlers run as **service-role** (`supabaseAdmin`) with an explicit `.eq('station_id', ctx.stationId)` as the tenancy guard (the worker convention) — RLS on `api_keys` and the tenant tables is the backstop. Keys are **station-scoped** and carry **scopes**: `qir`, `episodes`, `transcripts` (captions — opt-in, *not* in the default scope set), `shows`, `usage`. The cache is invalidated on QIR finalize via `bumpCacheVersion(stationId, 'qir')` in `app/api/qir/route.ts`; volatile resources (episodes/usage) rely on short TTLs and the `?since` updated_at cursor instead. Keys are minted/revoked by station admins at `/dashboard/api-keys` (→ `app/api/keys/route.ts`); the raw secret is shown **once** at creation and only its hash is stored. **When you add a new v1 endpoint, reuse `withApiKey`; when you add a scope, add it to `ApiScope` in `lib/types.ts` and `VALID_SCOPES` in `app/api/keys/route.ts`.**
+
+**The episode feed (`GET /api/v1/episodes`) is the published contract** — the consumer-facing doc is `docs/specs/public-episodes-api.md`. Its pure logic lives in `lib/episode-feed.ts` (unit-tested; the route is a thin Supabase query built from it). Three things are deliberate: (1) **published-only** — `PUBLISHED_STATUSES` is `summarized` + `compliance_checked`; every earlier/failed pipeline state is unreachable, and asking for one is a `400` rather than an empty page. (2) **Field allowlist** — `FEED_SELECT` names every exposed column, so adding a column to `episode_log` never silently widens the contract. (3) **Keyset pagination** on `(updated_at, id)` ascending with an opaque base64url `cursor`, `limit + 1` lookahead for `has_more`, envelope `{ data, next_cursor, has_more, count, limit }`. Offset pagination loses rows while workers are writing, which is why sync uses the cursor. The **legacy** offset shape (`{ episodes, total, page, limit }`, desc) is still served, additively, to any request carrying `page`/`sort`/`order`/`since`. The stable public identifier is **`episode_log.public_id`** (opaque uuid, migration 043) — `resolveEpisodeRef()` accepts it *or* the legacy integer row id on `/episodes/{id}` and `/episodes/{id}/transcript` so issued links keep resolving. A publish **webhook** is the deliberate next step (latency), not a replacement for this feed (backfill + reconciliation).
 
 **Audit logging** is hybrid and append-only (`audit_log`, migration 028; super-admin-only at `/dashboard/audit`). DB triggers (`audit_row_change()`) capture *every* mutation on tenant tables — user-attributed via `auth.uid()`, or `system` for worker/service-role writes. App-layer `lib/audit.ts#logAuditEvent` captures what triggers can't: reads/views, auth events, exports/downloads, and worker stage-completion events. Retention is **permanent** (no TTL/cron cleanup); the dashboard shows a trailing 30-day window with a "full history retained" banner. **When you add a new app-layer event type, register it in `lib/audit.ts` — `AUDIT_OPERATIONS` (must also match the DB `operation` CHECK) and `AUDIT_ACTIONS` are the single source of truth; client-postable events go in `CLIENT_AUDIT_EVENTS`. When you add a new tenant table, add it to the trigger loop in migration 028.** Heavy strings (>2000 chars) are redacted to `<redacted: N chars>` markers at capture so the permanent table stays lean.
 
