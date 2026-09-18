@@ -44,5 +44,17 @@ export const GET = withApiKey(
 
     return { json: payload }
   },
-  { scope: 'episodes', cache: { resource: 'episodes', ttlSec: 300 } },
+  {
+    scope: 'episodes',
+    // This body depends on the CALLING KEY, not just on station + params: with
+    // ?include=transcript the transcript is embedded only for a key holding the
+    // 'transcripts' scope. Cache entries are shared across a station's keys, so
+    // without this discriminator a key holding the scope warms the entry and a
+    // key without it receives the captions on a cache HIT — a scope bypass.
+    cache: {
+      resource: 'episodes',
+      ttlSec: 300,
+      vary: (ctx) => (ctx.scopes.includes('transcripts') ? 'transcripts' : ''),
+    },
+  },
 )

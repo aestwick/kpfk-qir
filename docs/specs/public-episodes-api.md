@@ -152,10 +152,16 @@ next poll. The pull feed above stays the source of truth for backfill and
 reconciliation either way — the webhook is a latency optimisation to add when
 polling latency starts to annoy someone, not a replacement for it.
 
-## Legacy shape
+## Retired: offset pagination
 
-The route previously returned `{ episodes, total, page, limit }` with
-offset pagination. That shape is still served, unchanged, to any request
-carrying a legacy parameter (`page`, `sort`, `order`, `since`), with `data`
-added as an alias of `episodes`. New consumers should not use it: offset
-pagination over a table workers are actively writing to loses rows.
+An earlier revision of this route served `{ episodes, total, page, limit }` with
+offset pagination whenever a request carried `page`, `sort`, `order` or `since`.
+
+That is gone. Those four parameters now return a `400` pointing at the cursor
+contract, and `since` is no longer an alias for `updated_since`.
+
+Offset pagination over this table **skips and repeats rows**: our workers
+rewrite `updated_at` continuously as episodes move through the pipeline, so a
+row updated mid-walk shifts every later page. No consumer was on it, so rather
+than keep a broken mode alive it was removed outright. Use `cursor` and
+`updated_since`, as above.
