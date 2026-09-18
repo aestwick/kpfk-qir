@@ -8,7 +8,6 @@ import {
   parseFeedRequest,
   keysetFilter,
   buildCursorEnvelope,
-  buildLegacyEnvelope,
   resolveEpisodeRef,
   type FeedRow,
 } from './episode-feed'
@@ -42,27 +41,37 @@ describe('cursor codec', () => {
   })
 })
 
-describe('parseFeedRequest — mode selection', () => {
-  it('defaults to cursor mode with no params', () => {
+describe('parseFeedRequest — retired offset params', () => {
+  it('parses a bare request', () => {
     const { request } = parse('')
-    expect(request?.mode).toBe('cursor')
     expect(request?.limit).toBe(DEFAULT_LIMIT)
+    expect(request?.cursor).toBeNull()
   })
 
-  it('falls back to legacy offset mode when a legacy param is present', () => {
-    for (const qs of ['page=2', 'sort=air_date', 'order=asc', 'since=2026-01-01']) {
-      expect(parse(qs).request?.mode).toBe('legacy')
+  it('400s on every retired offset param', () => {
+    for (const param of ['page', 'sort', 'order', 'since']) {
+      const { request, error } = parse(`${param}=2`)
+      expect(request).toBeUndefined()
+      expect(error?.error).toContain(param)
+      expect(error?.error).toContain('cursor')
     }
   })
 
-  it('computes the legacy offset from page and limit', () => {
-    const { request } = parse('page=3&limit=25')
-    expect(request).toMatchObject({ mode: 'legacy', page: 3, limit: 25, offset: 50, order: 'desc' })
+  it('names every offending param at once', () => {
+    const { error } = parse('page=2&order=asc')
+    expect(error?.error).toContain('page')
+    expect(error?.error).toContain('order')
   })
 
-  it('treats the legacy ?since as updated_since', () => {
-    const { request } = parse('since=2026-01-01T00:00:00Z')
-    expect(request?.filters.updatedSince).toBe('2026-01-01T00:00:00Z')
+  it('points ?since at updated_since rather than aliasing it', () => {
+    const { request, error } = parse('since=2026-01-01T00:00:00Z')
+    expect(request).toBeUndefined()
+    expect(error?.error).toContain('updated_since')
+  })
+
+  it('reports the retired param, not a downstream validation error', () => {
+    // ?since is also a timestamp; the message must name the real problem.
+    expect(parse('since=garbage').error?.error).toContain('Unsupported parameter')
   })
 })
 
@@ -118,7 +127,7 @@ describe('parseFeedRequest — filters', () => {
   it('ignores unknown params — every supported filter narrows', () => {
     const { request, error } = parse('station_id=other&select=*&nonsense=1')
     expect(error).toBeUndefined()
-    expect(request?.mode).toBe('cursor')
+    expect(request?.limit).toBe(DEFAULT_LIMIT)
   })
 })
 
@@ -187,16 +196,6 @@ describe('buildCursorEnvelope', () => {
     const pos = decodeCursor(first.next_cursor!)!
     const rest = batch.filter((r) => r.updated_at > pos.updated_at || (r.updated_at === pos.updated_at && r.id > pos.id))
     expect(rest.map((r) => r.id)).toEqual([12])
-  })
-})
-
-describe('buildLegacyEnvelope', () => {
-  it('keeps the original keys and adds data as an alias', () => {
-    const rows = [row(1, '2026-01-01T00:00:00Z')]
-    const env = buildLegacyEnvelope(rows, 1, 1, 50)
-    expect(env).toMatchObject({ total: 1, page: 1, limit: 50 })
-    expect(env.episodes).toBe(rows)
-    expect(env.data).toBe(rows)
   })
 })
 

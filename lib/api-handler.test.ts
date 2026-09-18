@@ -122,3 +122,54 @@ describe('withApiKey', () => {
     expect(await res.json()).toEqual({ year: '2025' })
   })
 })
+
+// A route whose response depends on a property of the CALLING KEY must declare
+// `cache.vary`. Cache entries are shared by every key of a station, so without
+// it one key's body is served to another: the episode detail route embeds a
+// transcript only for a key holding the 'transcripts' scope, and a shared entry
+// hands those captions to a key that lacks the scope on a HIT.
+describe('withApiKey — per-key cache vary', () => {
+  const subkeys = () => mCached.mock.calls.map((c) => (c[0] as { subkey: string }).subkey)
+  const scopedHandler = () =>
+    withApiKey(async () => ({ json: { ok: true } }), {
+      scope: 'episodes',
+      cache: {
+        resource: 'episodes',
+        ttlSec: 300,
+        vary: (ctx) => (ctx.scopes.includes('transcripts') ? 'transcripts' : ''),
+      },
+    })
+
+  it('omits a discriminator when the route declares no vary', async () => {
+    const handler = withApiKey(async () => ({ json: { ok: true } }), {
+      scope: 'qir',
+      cache: { resource: 'qir', ttlSec: 60 },
+    })
+    await handler(req())
+    expect(subkeys()[0]).toBe('/api/v1/qir?')
+  })
+
+  it('separates entries for keys that differ on the varied property', async () => {
+    const handler = scopedHandler()
+
+    await handler(req()) // key without the transcripts scope
+    mAuth.mockResolvedValue({ ctx: { ...CTX, keyId: 2, scopes: ['episodes', 'transcripts'] } })
+    await handler(req()) // key with it
+
+    const [withoutScope, withScope] = subkeys()
+    expect(withoutScope).not.toBe(withScope)
+    expect(withScope).toContain('transcripts')
+    expect(withoutScope).not.toContain('transcripts')
+  })
+
+  it('still shares one entry between keys that agree on it', async () => {
+    const handler = scopedHandler()
+
+    await handler(req())
+    mAuth.mockResolvedValue({ ctx: { ...CTX, keyId: 99 } })
+    await handler(req())
+
+    const [a, b] = subkeys()
+    expect(a).toBe(b)
+  })
+})

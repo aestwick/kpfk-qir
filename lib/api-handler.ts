@@ -33,7 +33,15 @@ interface WithApiKeyOptions {
   scope: ApiScope
   // When set, successful responses are cached in Redis under (station, resource)
   // for ttlSec, and Cache-Control max-age mirrors it.
-  cache?: { resource: string; ttlSec: number }
+  //
+  // `vary` extends the cache key with a property of the CALLING KEY. Cache
+  // entries are shared by every key of a station, so a route whose response
+  // depends on the key itself — not only on station + params — MUST declare it,
+  // or one key's body is served to another. The episode detail route embeds a
+  // transcript only for a key holding the 'transcripts' scope: without `vary`,
+  // a key that holds it warms the cache and a key that does not then receives
+  // the captions on a HIT, bypassing the scope gate entirely.
+  cache?: { resource: string; ttlSec: number; vary?: (ctx: ApiKeyContext) => string }
 }
 
 interface NormalizedResult {
@@ -53,12 +61,15 @@ function etagOf(body: string): string {
   return `"${createHash('sha1').update(body).digest('hex')}"`
 }
 
-// Stable cache subkey: path + sorted query string. The API key never enters the
-// key — responses depend only on station + params, so all keys for a station
-// share cache entries (and can't read each other's data, since station differs).
-function cacheSubkey(request: NextRequest): string {
+// Stable cache subkey: path + sorted query string, plus the route's `vary`
+// discriminator when it declares one. The key's IDENTITY never enters the
+// subkey — responses depend on station + params (+ whatever `vary` names), so
+// keys for a station still share entries where the response is genuinely the
+// same, and can't read each other's data (station differs).
+function cacheSubkey(request: NextRequest, vary: string): string {
   const params = Array.from(request.nextUrl.searchParams.entries()).sort(([a], [b]) => a.localeCompare(b))
-  return request.nextUrl.pathname + '?' + new URLSearchParams(params).toString()
+  const base = request.nextUrl.pathname + '?' + new URLSearchParams(params).toString()
+  return vary ? `${base}#${vary}` : base
 }
 
 function rateLimitHeaders(limit: number, remaining: number, resetSec: number): Record<string, string> {
@@ -113,7 +124,12 @@ export function withApiKey(handler: Handler, opts: WithApiKeyOptions) {
     try {
       if (opts.cache) {
         const c = await cached(
-          { stationId: ctx.stationId, resource: opts.cache.resource, subkey: cacheSubkey(request), ttlSec: opts.cache.ttlSec },
+          {
+            stationId: ctx.stationId,
+            resource: opts.cache.resource,
+            subkey: cacheSubkey(request, opts.cache.vary?.(ctx) ?? ''),
+            ttlSec: opts.cache.ttlSec,
+          },
           run,
         )
         entry = c.value

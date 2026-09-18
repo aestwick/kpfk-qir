@@ -5,7 +5,6 @@ import {
   parseFeedRequest,
   keysetFilter,
   buildCursorEnvelope,
-  buildLegacyEnvelope,
   type FeedFilters,
   type FeedRow,
 } from '@/lib/episode-feed'
@@ -34,9 +33,8 @@ export const runtime = 'nodejs'
 // air_date_to, status (only within the published set).
 //
 // Pagination is keyset on (updated_at, id) ascending — stable while workers are
-// writing, which offset pagination is not. The original offset/page shape is
-// still served when a request carries a legacy parameter (page/sort/order/since);
-// see lib/episode-feed.ts.
+// writing, which offset pagination is not. There is no offset mode: the retired
+// page/sort/order/since parameters are a 400. See lib/episode-feed.ts.
 // ===========================================================================
 
 /**
@@ -61,22 +59,12 @@ export const GET = withApiKey(
     if (parsed.error) return { json: parsed.error, status: 400 }
     const req = parsed.request
 
-    const base = () =>
-      applyFilters(
-        supabaseAdmin.from('episode_log').select(FEED_SELECT, req.mode === 'legacy' ? { count: 'exact' } : {}),
-        req.filters,
-      ).eq('station_id', ctx.stationId)
-
-    if (req.mode === 'legacy') {
-      const { data, error, count } = await base()
-        .order(req.sort, { ascending: req.order === 'asc' })
-        .range(req.offset, req.offset + req.limit - 1)
-      if (error) return { json: { error: error.message }, status: 500 }
-      return { json: buildLegacyEnvelope(data ?? [], count ?? 0, req.page, req.limit) }
-    }
-
-    // Cursor mode: fetch one row past the page so has_more needs no COUNT.
-    let query = base().order('updated_at', { ascending: true }).order('id', { ascending: true }).limit(req.limit + 1)
+    // Fetch one row past the page so has_more needs no COUNT.
+    let query = applyFilters(supabaseAdmin.from('episode_log').select(FEED_SELECT), req.filters)
+      .eq('station_id', ctx.stationId)
+      .order('updated_at', { ascending: true })
+      .order('id', { ascending: true })
+      .limit(req.limit + 1)
     if (req.cursor) query = query.or(keysetFilter(req.cursor))
 
     const { data, error } = await query

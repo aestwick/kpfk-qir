@@ -8,18 +8,18 @@
 // (app/api/v1/episodes/route.ts) is left as a thin Supabase query built from
 // what this returns, so the interesting parts stay unit-testable.
 //
-// Two pagination modes coexist on the one route:
+// Pagination is keyset on (updated_at, id) ascending, which is what an
+// incremental syncer wants: pull once with ?updated_since, then follow
+// next_cursor until it comes back null. It is stable under concurrent writes;
+// offset pagination is not (a row updated mid-walk shifts every later page, so
+// rows get skipped or repeated) — and these rows are rewritten continuously as
+// workers move episodes through the pipeline.
 //
-//   cursor (default) — keyset pagination on (updated_at, id) ascending, which
-//     is what an incremental syncer wants: pull once with ?updated_since, then
-//     follow next_cursor until it comes back null. Stable under concurrent
-//     writes; offset pagination is not (a row updated mid-walk shifts every
-//     later page and rows get skipped or repeated).
-//
-//   legacy — the original offset/page shape, kept verbatim for anything already
-//     polling this route. Engaged only when a request carries one of the legacy
-//     parameters (page/sort/order/since); new consumers never send those, so
-//     they get cursor mode without asking.
+// There is deliberately no offset mode. An earlier revision served the original
+// { episodes, total, page, limit } shape to any request carrying page/sort/
+// order/since; no consumer was ever on it, so rather than preserve a
+// row-losing mode nobody used, those parameters are now a 400 that points at
+// the cursor contract.
 // ===========================================================================
 
 /**
@@ -65,8 +65,12 @@ export const FEED_SELECT = [
 export const DEFAULT_LIMIT = 50
 export const MAX_LIMIT = 200
 
-/** Legacy query params. Their presence is what selects the old offset shape. */
-const LEGACY_PARAMS = ['page', 'sort', 'order', 'since'] as const
+/**
+ * Offset-pagination parameters from the retired shape. Rejected rather than
+ * ignored: silently dropping ?page would hand a caller page 1 over and over
+ * while looking like it worked.
+ */
+const RETIRED_PARAMS = ['page', 'sort', 'order', 'since'] as const
 
 export interface FeedCursor {
   /** updated_at of the last row on the previous page. */
@@ -90,23 +94,12 @@ export interface FeedFilters {
 }
 
 export interface CursorRequest {
-  mode: 'cursor'
   limit: number
   cursor: FeedCursor | null
   filters: FeedFilters
 }
 
-export interface LegacyRequest {
-  mode: 'legacy'
-  limit: number
-  page: number
-  offset: number
-  sort: string
-  order: 'asc' | 'desc'
-  filters: FeedFilters
-}
-
-export type FeedRequest = CursorRequest | LegacyRequest
+export type FeedRequest = CursorRequest
 
 export interface FeedRequestError {
   error: string
@@ -162,7 +155,22 @@ function isPublishedStatus(value: string): value is PublishedStatus {
  * refetching the whole catalog forever.
  */
 export function parseFeedRequest(sp: URLSearchParams): ParseResult {
-  // --- shared filters ---
+  // Reject the retired offset params before anything else, so the message names
+  // the real problem rather than a downstream complaint (?since is also a
+  // timestamp, and would otherwise fail as an invalid updated_since).
+  const retired = RETIRED_PARAMS.filter((p) => sp.get(p) !== null)
+  if (retired.length) {
+    return {
+      error: {
+        error:
+          `Unsupported parameter${retired.length > 1 ? 's' : ''} ${JSON.stringify(retired)}. ` +
+          `This endpoint uses cursor pagination: page through with 'cursor' (from the previous ` +
+          `response's next_cursor) and filter by 'updated_since' instead of 'since'.`,
+      },
+    }
+  }
+
+  // --- filters ---
   const statusParam = sp.get('status')
   let statuses: PublishedStatus[] = [...PUBLISHED_STATUSES]
   if (statusParam) {
@@ -180,7 +188,7 @@ export function parseFeedRequest(sp: URLSearchParams): ParseResult {
     statuses = requested.filter(isPublishedStatus)
   }
 
-  const updatedSince = sp.get('updated_since') ?? sp.get('since') ?? undefined
+  const updatedSince = sp.get('updated_since') ?? undefined
   if (updatedSince && !isIsoTimestamp(updatedSince)) {
     return { error: { error: `Invalid updated_since '${updatedSince}' — expected an ISO 8601 timestamp.` } }
   }
@@ -219,15 +227,6 @@ export function parseFeedRequest(sp: URLSearchParams): ParseResult {
   // to 1) rather than falling through to the default.
   const limit = limitParam === null ? DEFAULT_LIMIT : Math.min(Math.max(parseInt(limitParam, 10), 1), MAX_LIMIT)
 
-  // --- legacy offset mode, engaged only by a legacy parameter ---
-  if (LEGACY_PARAMS.some((p) => sp.get(p) !== null)) {
-    const page = Math.max(1, parseInt(sp.get('page') ?? '1') || 1)
-    const sort = sp.get('sort') ?? 'updated_at'
-    const order = sp.get('order') === 'asc' ? 'asc' : 'desc'
-    return { request: { mode: 'legacy', limit, page, offset: (page - 1) * limit, sort, order, filters } }
-  }
-
-  // --- cursor mode (the default) ---
   const cursorParam = sp.get('cursor')
   let cursor: FeedCursor | null = null
   if (cursorParam) {
@@ -235,7 +234,7 @@ export function parseFeedRequest(sp: URLSearchParams): ParseResult {
     if (!cursor) return { error: { error: 'Invalid cursor — pass back the next_cursor from the previous page verbatim.' } }
   }
 
-  return { request: { mode: 'cursor', limit, cursor, filters } }
+  return { request: { limit, cursor, filters } }
 }
 
 function splitList(value: string): string[] {
@@ -296,15 +295,6 @@ export function buildCursorEnvelope(rows: FeedRow[], limit: number): CursorEnvel
     count: page.length,
     limit,
   }
-}
-
-/**
- * Build the legacy offset envelope. Carries the original keys verbatim plus
- * `data` as an alias, so an existing poller keeps working while anything new
- * can read the same field name in both modes.
- */
-export function buildLegacyEnvelope(rows: unknown[], total: number, page: number, limit: number) {
-  return { data: rows, episodes: rows, total, page, limit }
 }
 
 // --- identifier resolution -------------------------------------------------
