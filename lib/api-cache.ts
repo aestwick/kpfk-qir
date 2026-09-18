@@ -13,13 +13,19 @@ import { getRedis } from './redis'
 // finalized report is visible immediately.
 // ===========================================================================
 
-// Namespace. BUMP THIS when a deploy changes what a cached body may legally
-// contain, not merely how it is computed: entries written by the previous
-// build survive a deploy and are served for up to their TTL, so a new
-// authorization rule would otherwise be bypassed by the warm cache for an
-// hour. Bumped to v2 with the published gate on the episode detail/transcript
-// routes. Orphaned entries age out on their own TTL.
-const NS = 'qir:apicache:v2'
+// Namespace. BUMP THIS whenever a deploy changes what a cached body contains —
+// its SHAPE as well as its permissions. Entries written by the previous build
+// survive the deploy and are served for up to their TTL, so without a bump:
+//   - a new authorization rule is bypassed by the warm cache (v2), or
+//   - consumers see two different payload schemas at once during rollout (v3),
+//     which is worse than either schema, because a parser that handles both is
+//     not a parser anyone wrote.
+// Changing only HOW a body is computed needs no bump. Orphaned entries age out
+// on their own TTL; the cost of a bump is a cold period, nothing more.
+//
+//   v2 — published gate on the episode detail/transcript routes
+//   v3 — duration → duration_minutes + duration_seconds in the episode payload
+const NS = 'qir:apicache:v3'
 
 export interface CacheResult<T> {
   value: T
