@@ -100,6 +100,48 @@ export function applyAi(
 }
 
 /**
+ * Refresh the HUMAN copies from a later Confessor read, and re-resolve each flat
+ * value. The counterpart to applyAi, for the re-sync path: ingest captures the
+ * pubfile once at first sight, and a producer who fills in a guest or corrects a
+ * name afterwards would otherwise never reach us.
+ *
+ * What it must not do, and does not:
+ *   - touch `ai` — the summarizer owns that copy
+ *   - touch `manual` — a hand-typed override outlives any upstream edit
+ *   - flip `active` on a PINNED field — someone chose that deliberately
+ *   - unpin anything
+ *
+ * A pinned field still has its `human` copy refreshed, so the dashboard shows
+ * the current upstream value (and the human≠AI badge stays honest) while the
+ * pinned choice continues to drive the flat column.
+ *
+ * Clearing is deliberate: if a segment is deleted upstream the human copy goes
+ * null, and an un-pinned field falls back to the AI copy rather than keeping a
+ * value that no longer exists anywhere.
+ */
+export function applyHuman(
+  existing: FieldSources | null | undefined,
+  human: Record<DualField, string | null>
+): { fieldSources: FieldSources; flat: Record<DualField, string | null>; changed: DualField[] } {
+  const fs: FieldSources = {}
+  const flat = {} as Record<DualField, string | null>
+  const changed: DualField[] = []
+
+  for (const f of DUAL_FIELDS) {
+    const prev = existing?.[f] ?? { human: null, ai: null, active: 'ai' as FieldSource }
+    const next = human[f] ?? null
+    if ((prev.human ?? null) !== next) changed.push(f)
+
+    const choice: FieldChoice = { ...prev, human: next }
+    if (!choice.pinned) choice.active = autoActive(f, choice)
+    fs[f] = choice
+    flat[f] = resolveChoice(choice)
+  }
+
+  return { fieldSources: fs, flat, changed }
+}
+
+/**
  * Toggle a field to a chosen source (the per-field UI action) or apply a manual
  * edit. Marks the field pinned so a later re-summarize won't override the human's
  * decision. Returns the updated sources and the new resolved value for the flat
