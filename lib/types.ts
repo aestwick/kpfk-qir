@@ -81,6 +81,8 @@ export interface ConfessorPubfile {
 
 export interface EpisodeLog {
   id: number
+  /** Opaque, stable public identifier — what external API consumers key on (migration 043). */
+  public_id: string
   station_id: string
   show_key: string
   show_name: string | null

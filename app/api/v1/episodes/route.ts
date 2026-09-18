@@ -1,50 +1,90 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
+import {
+  FEED_SELECT,
+  parseFeedRequest,
+  keysetFilter,
+  buildCursorEnvelope,
+  buildLegacyEnvelope,
+  type FeedFilters,
+  type FeedRow,
+} from '@/lib/episode-feed'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// Fields exposed to consumers — episode metadata useful for tag generation
-// (summary/headline/guest/category) plus airing/identity info. Transcripts are a
-// separate scope + endpoint (/episodes/{id}/transcript).
-const SELECT =
-  'id, show_key, show_name, category, issue_category, title, headline, host, guest, summary, ' +
-  'air_date, air_start, air_end, date, start_time, end_time, duration, status, mp3_url, created_at, updated_at'
+// ===========================================================================
+// GET /api/v1/episodes — the published episode feed.
+//
+// Read-only, API-key authenticated (Authorization: Bearer <key>), scoped to one
+// station, and restricted to PUBLISHED episodes only: the pipeline's internal
+// states are not reachable here. Columns are an explicit allowlist (FEED_SELECT)
+// rather than `select=*`, so adding an internal column to episode_log never
+// silently widens the contract.
+//
+// Incremental sync, the intended use:
+//     GET /api/v1/episodes?updated_since=<last updated_at you saw>
+//     → { data: [...], next_cursor: "…", has_more: true }
+//     GET /api/v1/episodes?updated_since=…&cursor=<next_cursor>   … until
+//       next_cursor is null. Re-syncs are idempotent: public_id is stable, so a
+//       consumer upserts on it rather than accumulating duplicates.
+//
+// Filters: updated_since, cursor, limit (≤200), show_key (Confessor key, or a
+// comma-separated list), category (FCC issue category), air_date_from,
+// air_date_to, status (only within the published set).
+//
+// Pagination is keyset on (updated_at, id) ascending — stable while workers are
+// writing, which offset pagination is not. The original offset/page shape is
+// still served when a request carries a legacy parameter (page/sort/order/since);
+// see lib/episode-feed.ts.
+// ===========================================================================
 
-// GET /api/v1/episodes — paginated, filterable episode list.
-// Filters: ?status, ?show_key, ?category, ?since (updated_at cursor for
-// incremental sync), ?page, ?limit (max 200). Ordered by updated_at desc by
-// default so a poller can page deltas.
+/**
+ * Apply the shared published-contract filters to a PostgREST query builder.
+ * The builder's generic type isn't exported in a shape a helper can name, so it
+ * travels as `any` here — every call below is a standard filter method.
+ */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+function applyFilters<Q extends { in: any; gte: any; lte: any; eq: any }>(query: Q, filters: FeedFilters): Q {
+  query = query.in('status', filters.statuses)
+  if (filters.updatedSince) query = query.gte('updated_at', filters.updatedSince)
+  if (filters.showKeys?.length) query = query.in('show_key', filters.showKeys)
+  if (filters.category) query = query.eq('issue_category', filters.category)
+  if (filters.airDateFrom) query = query.gte('air_date', filters.airDateFrom)
+  if (filters.airDateTo) query = query.lte('air_date', filters.airDateTo)
+  return query
+}
+
 export const GET = withApiKey(
   async (request, { ctx }) => {
-    const sp = request.nextUrl.searchParams
-    const status = sp.get('status')
-    const showKey = sp.get('show_key')
-    const category = sp.get('category')
-    const since = sp.get('since')
-    const sort = sp.get('sort') ?? 'updated_at'
-    const order = sp.get('order') ?? 'desc'
-    const page = Math.max(1, parseInt(sp.get('page') ?? '1') || 1)
-    const limit = Math.min(parseInt(sp.get('limit') ?? '50') || 50, 200)
-    const offset = (page - 1) * limit
+    const parsed = parseFeedRequest(request.nextUrl.searchParams)
+    if (parsed.error) return { json: parsed.error, status: 400 }
+    const req = parsed.request
 
-    let query = supabaseAdmin
-      .from('episode_log')
-      .select(SELECT, { count: 'exact' })
-      .eq('station_id', ctx.stationId)
-      .order(sort, { ascending: order === 'asc' })
-      .range(offset, offset + limit - 1)
+    const base = () =>
+      applyFilters(
+        supabaseAdmin.from('episode_log').select(FEED_SELECT, req.mode === 'legacy' ? { count: 'exact' } : {}),
+        req.filters,
+      ).eq('station_id', ctx.stationId)
 
-    if (status) query = query.eq('status', status)
-    if (showKey) query = query.eq('show_key', showKey)
-    if (category) query = query.eq('issue_category', category)
-    if (since) query = query.gte('updated_at', since)
+    if (req.mode === 'legacy') {
+      const { data, error, count } = await base()
+        .order(req.sort, { ascending: req.order === 'asc' })
+        .range(req.offset, req.offset + req.limit - 1)
+      if (error) return { json: { error: error.message }, status: 500 }
+      return { json: buildLegacyEnvelope(data ?? [], count ?? 0, req.page, req.limit) }
+    }
 
-    const { data, error, count } = await query
+    // Cursor mode: fetch one row past the page so has_more needs no COUNT.
+    let query = base().order('updated_at', { ascending: true }).order('id', { ascending: true }).limit(req.limit + 1)
+    if (req.cursor) query = query.or(keysetFilter(req.cursor))
+
+    const { data, error } = await query
     if (error) return { json: { error: error.message }, status: 500 }
-    return { json: { episodes: data ?? [], total: count ?? 0, page, limit } }
+    return { json: buildCursorEnvelope((data ?? []) as unknown as FeedRow[], req.limit) }
   },
-  // Short TTL: episode rows churn as workers process them. The ?since cursor is
-  // the primary load-shedder for pollers; the cache absorbs duplicate bursts.
+  // Short TTL: episode rows churn as workers process them. The cursor and
+  // ?updated_since are the real load-shedders for a poller; the cache absorbs
+  // duplicate bursts (and the strong ETag turns a repeat poll into a 304).
   { scope: 'episodes', cache: { resource: 'episodes', ttlSec: 60 } },
 )

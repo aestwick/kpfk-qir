@@ -1,11 +1,13 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
+import { resolveEpisodeRef } from '@/lib/episode-feed'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 // GET /api/v1/episodes/{id}/transcript — captions for one episode. This is the
-// primary endpoint for the podcast-app use case.
+// primary endpoint for the podcast-app use case. {id} is the opaque public_id
+// uuid from the feed (the legacy integer row id still resolves).
 //   ?format=vtt  → raw WebVTT (text/vtt), ready to drop into a <track>.
 //   (default)    → JSON { transcript, vtt, language }.
 //   ?lang=en     → English translation fields when available, else falls back.
@@ -13,20 +15,25 @@ export const runtime = 'nodejs'
 // produced, so the strong ETag makes repeat pulls a cheap 304.
 export const GET = withApiKey(
   async (request, { ctx, params }) => {
-    const id = parseInt(params.id)
-    if (isNaN(id)) return { json: { error: 'Invalid episode id' }, status: 400 }
+    const ref = resolveEpisodeRef(params.id)
+    if (!ref) return { json: { error: 'Invalid episode id' }, status: 400 }
 
     // Inner-join episode_log so the station_id filter scopes the transcript
-    // (transcripts has no station_id of its own).
+    // (transcripts has no station_id of its own) and so a public_id reference
+    // resolves in the same round trip.
     const { data, error } = await supabaseAdmin
       .from('transcripts')
-      .select('transcript, vtt, language, english_transcript, english_vtt, episode_log!inner(station_id)')
-      .eq('episode_id', id)
+      .select(
+        'transcript, vtt, language, english_transcript, english_vtt, episode_log!inner(id, public_id, station_id)',
+      )
+      .eq(ref.column === 'id' ? 'episode_id' : 'episode_log.public_id', ref.value)
       .eq('episode_log.station_id', ctx.stationId)
       .maybeSingle()
 
     if (error) return { json: { error: error.message }, status: 500 }
     if (!data) return { json: { error: 'Transcript not found' }, status: 404 }
+
+    const episode = (data as unknown as { episode_log: { id: number; public_id: string } }).episode_log
 
     const sp = request.nextUrl.searchParams
     const wantEnglish = sp.get('lang') === 'en'
@@ -40,7 +47,8 @@ export const GET = withApiKey(
 
     return {
       json: {
-        episode_id: id,
+        episode_public_id: episode?.public_id ?? null,
+        episode_id: episode?.id ?? null,
         language: data.language,
         transcript: text,
         vtt,
