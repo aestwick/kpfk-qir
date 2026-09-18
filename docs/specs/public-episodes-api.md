@@ -143,14 +143,14 @@ must not be shared by an intermediary.
 | --- | --- | --- |
 | `GET /api/v1/episodes/{public_id}` | `episodes` | One **published** episode. `?include=transcript` embeds captions when the key also holds `transcripts`. |
 | `GET /api/v1/episodes/{public_id}/transcript` | `transcripts` | Captions for a **published** episode. `?format=vtt` returns raw WebVTT for a `<track>`; `?lang=en` prefers the English translation. |
-
-The published gate applies to those two routes as well as the feed — an episode
-outside `summarized`/`compliance_checked` returns the same `404` as one that does
-not exist. Most transcripts in the system belong to episodes the feed does not
-list (transcribed but not yet summarized, failed, or the inert PRA archive
-import); none of them are reachable here.
 | `GET /api/v1/shows` | `shows` | The program list, with the same `show_key` values used by the feed. |
 | `GET /api/v1/qir` | `qir` | Finalized quarterly reports. |
+
+The published gate applies to the two episode routes above as well as to the
+feed — an episode outside `summarized`/`compliance_checked` returns the same
+`404` as one that does not exist. Most transcripts in the system belong to
+episodes the feed does not list (transcribed but not yet summarized, failed, or
+the inert PRA archive import); none of them are reachable here.
 
 ## Not built yet
 
