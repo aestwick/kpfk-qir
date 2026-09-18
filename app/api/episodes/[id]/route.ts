@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
+import { bumpCacheVersion } from '@/lib/api-cache'
 import { transcribeQueue, summarizeQueue } from '@/lib/queue'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
@@ -103,6 +104,27 @@ export async function GET(
   }
 }
 
+/**
+ * Invalidate the public read API's cached responses for this station.
+ *
+ * Every mutating branch below changes something /api/v1 serves, and two of them
+ * (re-transcribe → 'pending', re-summarize → 'transcribed', retry → 'pending')
+ * UNPUBLISH the episode. The published gate on those routes lives in the
+ * handler, and a cache hit never reaches the handler — so without this an
+ * episode that has just been unpublished keeps being served from cache for up
+ * to its TTL (300s for detail, 3600s for transcripts).
+ *
+ * Versioned invalidation, so this is two INCRs rather than a scan. Fails open
+ * inside bumpCacheVersion: a Redis problem degrades to the old TTL behaviour
+ * rather than failing the edit the operator just made.
+ */
+async function invalidatePublicApiCache(stationId: string): Promise<void> {
+  await Promise.all([
+    bumpCacheVersion(stationId, 'episodes'),
+    bumpCacheVersion(stationId, 'transcripts'),
+  ])
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -141,6 +163,7 @@ export async function PATCH(
         .eq('id', episodeId)
         .eq('station_id', stationId)
       await transcribeQueue.add('re-transcribe', { episodeId, stationId })
+      await invalidatePublicApiCache(stationId)
       return NextResponse.json({ ok: true, message: 'Re-transcription queued' })
     }
 
@@ -151,6 +174,7 @@ export async function PATCH(
         .eq('id', episodeId)
         .eq('station_id', stationId)
       await summarizeQueue.add('re-summarize', { episodeId, stationId })
+      await invalidatePublicApiCache(stationId)
       return NextResponse.json({ ok: true, message: 'Re-summarization queued' })
     }
 
@@ -176,6 +200,7 @@ export async function PATCH(
         .update(fields)
         .eq('id', episodeId)
         .eq('station_id', stationId)
+      await invalidatePublicApiCache(stationId)
       return NextResponse.json({ ok: true, message: 'Dates updated from URL', ...fields })
     }
 
@@ -185,6 +210,7 @@ export async function PATCH(
         .update({ status: 'pending', error_message: null, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
         .eq('station_id', stationId)
+      await invalidatePublicApiCache(stationId)
       return NextResponse.json({ ok: true, message: 'Episode reset to pending' })
     }
 
@@ -214,6 +240,7 @@ export async function PATCH(
         .eq('id', episodeId)
         .eq('station_id', stationId)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      await invalidatePublicApiCache(stationId)
       return NextResponse.json({ ok: true, field, source, value })
     }
 
@@ -260,6 +287,7 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    await invalidatePublicApiCache(stationId)
     return NextResponse.json({ ok: true })
   } catch (err) {
     console.error('PATCH /api/episodes/[id] failed:', err)
