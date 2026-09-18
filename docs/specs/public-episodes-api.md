@@ -67,7 +67,8 @@ widen this response.
 | `host`, `guest` | Resolved host/guest (human-entered wins over AI unless overridden). |
 | `air_date`, `air_start`, `air_end` | Broadcast date and window, station-local. |
 | `date`, `start_time`, `end_time` | Older duplicates of the `air_*` fields above; prefer `air_*`. |
-| `duration` | **Minutes**, not seconds — a one-hour show is `60`. Nullable. |
+| `duration_minutes` | Length in minutes — a one-hour show is `60`. Nullable. |
+| `duration_seconds` | Derived as `duration_minutes × 60`. Exact to the minute, no finer — the true audio length is rounded at ingest and the seconds are not kept. Nullable. |
 | `status` | One of `summarized`, `compliance_checked`. |
 | `mp3_url` | Archive audio location. |
 | `created_at`, `updated_at` | ISO 8601. `updated_at` drives incremental sync. |

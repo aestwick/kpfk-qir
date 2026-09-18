@@ -8,6 +8,7 @@ import {
   parseFeedRequest,
   keysetFilter,
   buildCursorEnvelope,
+  projectEpisode,
   resolveEpisodeRef,
   type FeedRow,
 } from './episode-feed'
@@ -215,5 +216,32 @@ describe('resolveEpisodeRef', () => {
     for (const bad of ['', 'abc', '1; drop table', '-5', '3f2504e0-4f89-41d3-9a0c']) {
       expect(resolveEpisodeRef(bad)).toBeNull()
     }
+  })
+})
+
+describe('projectEpisode', () => {
+  it('renames duration to duration_minutes and derives seconds', () => {
+    const out = projectEpisode({ public_id: 'x', duration: 60, title: 'T' })
+    expect(out.duration_minutes).toBe(60)
+    expect(out.duration_seconds).toBe(3600)
+    expect('duration' in out).toBe(false)
+  })
+
+  it('keeps null null — never 0, which would read as a zero-length episode', () => {
+    const out = projectEpisode({ public_id: 'x', duration: null })
+    expect(out.duration_minutes).toBeNull()
+    expect(out.duration_seconds).toBeNull()
+  })
+
+  it('handles a row with no duration key at all', () => {
+    const out = projectEpisode({ public_id: 'x' })
+    expect(out.duration_minutes).toBeNull()
+    expect(out.duration_seconds).toBeNull()
+  })
+
+  it('leaves every other field untouched', () => {
+    const row = { public_id: 'x', id: 1, show_key: 'k', summary: 's', duration: 30 }
+    const out = projectEpisode(row)
+    expect(out).toMatchObject({ public_id: 'x', id: 1, show_key: 'k', summary: 's' })
   })
 })
