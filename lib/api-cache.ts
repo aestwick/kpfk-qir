@@ -13,7 +13,13 @@ import { getRedis } from './redis'
 // finalized report is visible immediately.
 // ===========================================================================
 
-const NS = 'qir:apicache'
+// Namespace. BUMP THIS when a deploy changes what a cached body may legally
+// contain, not merely how it is computed: entries written by the previous
+// build survive a deploy and are served for up to their TTL, so a new
+// authorization rule would otherwise be bypassed by the warm cache for an
+// hour. Bumped to v2 with the published gate on the episode detail/transcript
+// routes. Orphaned entries age out on their own TTL.
+const NS = 'qir:apicache:v2'
 
 export interface CacheResult<T> {
   value: T
