@@ -93,7 +93,8 @@ export interface EpisodeLog {
   duration: number | null
   title: string | null
   mp3_url: string
-  status: 'pending' | 'transcribing' | 'transcribed' | 'summarizing' | 'summarized' | 'compliance_checked' | 'failed' | 'unavailable' | 'dead' | 'transcript_missing'
+  /** 'archived' is the PRA import (scripts/import-pra.ts): inert, no worker selects it, hidden from the dashboard by default. */
+  status: 'pending' | 'transcribing' | 'transcribed' | 'summarizing' | 'summarized' | 'compliance_checked' | 'failed' | 'unavailable' | 'dead' | 'transcript_missing' | 'archived'
   headline: string | null
   host: string | null
   guest: string | null

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
-import { resolveEpisodeRef } from '@/lib/episode-feed'
+import { resolveEpisodeRef, PUBLISHED_STATUSES } from '@/lib/episode-feed'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -10,9 +10,16 @@ const SELECT =
   'air_date, air_start, air_end, date, start_time, end_time, duration, status, mp3_url, ' +
   'transcript_url, compliance_status, created_at, updated_at'
 
-// GET /api/v1/episodes/{id} — full metadata for one episode. {id} is the opaque
-// public_id uuid from the feed; the legacy integer row id is still accepted so
-// links already issued keep resolving. With ?include=transcript the transcript/
+// GET /api/v1/episodes/{id} — full metadata for one PUBLISHED episode. {id} is
+// the opaque public_id uuid from the feed; the legacy integer row id is still
+// accepted so links already issued keep resolving.
+//
+// The published gate (PUBLISHED_STATUSES) is enforced here, not only on the
+// feed. Without it the contract held on the list and leaked on the item: the
+// integer id is sequential, so a caller could walk it and read metadata for
+// every pending/failed/unavailable episode the feed deliberately hides.
+// An unpublished episode returns the SAME 404 as one that does not exist —
+// distinguishing them would confirm the row exists. With ?include=transcript the transcript/
 // VTT is embedded too, but only if the key also holds the 'transcripts' scope
 // (otherwise the include is silently omitted).
 export const GET = withApiKey(
@@ -25,6 +32,7 @@ export const GET = withApiKey(
       .select(SELECT)
       .eq(ref.column, ref.value)
       .eq('station_id', ctx.stationId)
+      .in('status', [...PUBLISHED_STATUSES])
       .maybeSingle()
 
     if (error) return { json: { error: error.message }, status: 500 }

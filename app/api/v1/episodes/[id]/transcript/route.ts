@@ -1,13 +1,18 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
-import { resolveEpisodeRef } from '@/lib/episode-feed'
+import { resolveEpisodeRef, PUBLISHED_STATUSES } from '@/lib/episode-feed'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-// GET /api/v1/episodes/{id}/transcript — captions for one episode. This is the
-// primary endpoint for the podcast-app use case. {id} is the opaque public_id
-// uuid from the feed (the legacy integer row id still resolves).
+// GET /api/v1/episodes/{id}/transcript — captions for one PUBLISHED episode.
+// This is the primary endpoint for the podcast-app use case. {id} is the opaque
+// public_id uuid from the feed (the legacy integer row id still resolves).
+//
+// Published-gated like the detail route: most transcripts in the table belong to
+// episodes the feed does not list (transcribed but not yet summarized, or
+// failed), and the sequential integer id made them walkable. Unpublished →
+// the same 404 as no transcript at all.
 //   ?format=vtt  → raw WebVTT (text/vtt), ready to drop into a <track>.
 //   (default)    → JSON { transcript, vtt, language }.
 //   ?lang=en     → English translation fields when available, else falls back.
@@ -24,10 +29,11 @@ export const GET = withApiKey(
     const { data, error } = await supabaseAdmin
       .from('transcripts')
       .select(
-        'transcript, vtt, language, english_transcript, english_vtt, episode_log!inner(id, public_id, station_id)',
+        'transcript, vtt, language, english_transcript, english_vtt, episode_log!inner(id, public_id, station_id, status)',
       )
       .eq(ref.column === 'id' ? 'episode_id' : 'episode_log.public_id', ref.value)
       .eq('episode_log.station_id', ctx.stationId)
+      .in('episode_log.status', [...PUBLISHED_STATUSES])
       .maybeSingle()
 
     if (error) return { json: { error: error.message }, status: 500 }
