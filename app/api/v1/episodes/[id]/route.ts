@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
-import { resolveEpisodeRef, PUBLISHED_STATUSES } from '@/lib/episode-feed'
+import { resolveEpisodeRef, projectEpisode, PUBLISHED_STATUSES } from '@/lib/episode-feed'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -38,7 +38,7 @@ export const GET = withApiKey(
     if (error) return { json: { error: error.message }, status: 500 }
     if (!episode) return { json: { error: 'Episode not found' }, status: 404 }
 
-    const payload: Record<string, unknown> = { episode }
+    const payload: Record<string, unknown> = { episode: projectEpisode(episode as unknown as Record<string, unknown>) }
 
     const wantsTranscript = request.nextUrl.searchParams.get('include') === 'transcript'
     if (wantsTranscript && ctx.scopes.includes('transcripts')) {

@@ -62,6 +62,29 @@ export const FEED_SELECT = [
   'updated_at',
 ].join(', ')
 
+/**
+ * Rename `duration` to `duration_minutes` on the way out, and add
+ * `duration_seconds` beside it.
+ *
+ * `episode_log.duration` is MINUTES — every writer computes it as such
+ * (workers/ingest.ts, workers/transcribe.ts) — but the bare name reads as
+ * seconds to anyone who has not checked, which is exactly the kind of unit
+ * ambiguity that corrupts a consumer's data silently.
+ *
+ * `duration_seconds` is DERIVED (minutes x 60), not measured: the true audio
+ * length is rounded to whole minutes at ingest and the seconds are not kept.
+ * It is therefore exact to the minute, no finer.
+ */
+export function projectEpisode<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
+  const { duration, ...rest } = row as { duration?: number | null } & Record<string, unknown>
+  const minutes = duration ?? null
+  return {
+    ...rest,
+    duration_minutes: minutes,
+    duration_seconds: minutes == null ? null : minutes * 60,
+  }
+}
+
 export const DEFAULT_LIMIT = 50
 export const MAX_LIMIT = 200
 

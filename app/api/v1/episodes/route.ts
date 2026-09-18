@@ -5,6 +5,7 @@ import {
   parseFeedRequest,
   keysetFilter,
   buildCursorEnvelope,
+  projectEpisode,
   type FeedFilters,
   type FeedRow,
 } from '@/lib/episode-feed'
@@ -69,7 +70,8 @@ export const GET = withApiKey(
 
     const { data, error } = await query
     if (error) return { json: { error: error.message }, status: 500 }
-    return { json: buildCursorEnvelope((data ?? []) as unknown as FeedRow[], req.limit) }
+    const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map(projectEpisode) as unknown as FeedRow[]
+    return { json: buildCursorEnvelope(rows, req.limit) }
   },
   // Short TTL: episode rows churn as workers process them. The cursor and
   // ?updated_since are the real load-shedders for a poller; the cache absorbs
