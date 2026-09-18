@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
-  buildHumanFieldSources,
   applyAi,
-  setFieldChoice,
-  resolveChoice,
+  applyHuman,
+  buildHumanFieldSources,
   hasConflict,
+  resolveChoice,
+  seedMissingFromFlat,
+  setFieldChoice,
+  type DualField,
 } from './field-sources'
 
 const human = (over: Partial<Record<'host' | 'guest' | 'issue_category' | 'summary', string | null>> = {}) => ({
@@ -87,5 +90,125 @@ describe('hasConflict', () => {
     expect(hasConflict({ human: 'a', ai: 'a', active: 'human' })).toBe(false)
     expect(hasConflict({ human: 'a', ai: null, active: 'human' })).toBe(false)
     expect(hasConflict(undefined)).toBe(false)
+  })
+})
+
+// --- applyHuman: the Confessor re-sync path ------------------------------
+// Ingest captures the pubfile once. A producer who fills in a guest or fixes a
+// name afterwards must reach us without destroying anything a human decided
+// inside QIR.
+describe('applyHuman', () => {
+  const H = (h: Partial<Record<DualField, string | null>>): Record<DualField, string | null> => ({
+    host: null, guest: null, issue_category: null, summary: null, ...h,
+  })
+
+  it('fills a field the producer left blank at air time', () => {
+    const before = buildHumanFieldSources(H({ host: 'Margaret Prescod' }))
+    const { fieldSources, flat, changed } = applyHuman(before, H({ host: 'Margaret Prescod', guest: 'Jane Doe' }))
+    expect(flat.guest).toBe('Jane Doe')
+    expect(fieldSources.guest?.human).toBe('Jane Doe')
+    expect(changed).toEqual(['guest'])
+  })
+
+  it('reports nothing changed when the pubfile is untouched', () => {
+    const before = buildHumanFieldSources(H({ host: 'A', guest: 'B' }))
+    expect(applyHuman(before, H({ host: 'A', guest: 'B' })).changed).toEqual([])
+  })
+
+  it('never touches the AI copy', () => {
+    const seeded = buildHumanFieldSources(H({ summary: 'human v1' }))
+    const withAi = applyAi(seeded, H({ summary: 'ai summary', issue_category: 'Health' }))
+    const after = applyHuman(withAi.fieldSources, H({ summary: 'human v2' }))
+    expect(after.fieldSources.summary?.ai).toBe('ai summary')
+    expect(after.fieldSources.issue_category?.ai).toBe('Health')
+  })
+
+  it('never touches a manual override, and manual keeps winning', () => {
+    const seeded = buildHumanFieldSources(H({ host: 'upstream A' }))
+    const pinned = setFieldChoice(seeded, 'host', 'manual', 'hand-typed')
+    const after = applyHuman(pinned.fieldSources, H({ host: 'upstream B' }))
+    expect(after.fieldSources.host?.manual).toBe('hand-typed')
+    expect(after.flat.host).toBe('hand-typed')
+  })
+
+  it('refreshes the human copy of a PINNED field without changing what wins', () => {
+    const seeded = buildHumanFieldSources(H({ guest: 'old guest' }))
+    const withAi = applyAi(seeded, H({ guest: 'ai guest' }))
+    // Someone deliberately chose the AI value.
+    const pinned = setFieldChoice(withAi.fieldSources, 'guest', 'ai')
+    const after = applyHuman(pinned.fieldSources, H({ guest: 'corrected guest' }))
+    expect(after.fieldSources.guest?.human).toBe('corrected guest') // copy refreshed
+    expect(after.fieldSources.guest?.active).toBe('ai')             // choice respected
+    expect(after.fieldSources.guest?.pinned).toBe(true)             // still pinned
+    expect(after.flat.guest).toBe('ai guest')
+  })
+
+  it('keeps the default policy for un-pinned fields (issue_category still prefers AI)', () => {
+    const seeded = buildHumanFieldSources(H({ issue_category: 'Arts' }))
+    const withAi = applyAi(seeded, H({ issue_category: 'Immigration' }))
+    const after = applyHuman(withAi.fieldSources, H({ issue_category: 'Arts & Culture' }))
+    expect(after.fieldSources.issue_category?.human).toBe('Arts & Culture')
+    expect(after.flat.issue_category).toBe('Immigration')
+  })
+
+  it('falls back to AI when a segment is deleted upstream', () => {
+    const seeded = buildHumanFieldSources(H({ summary: 'human text' }))
+    const withAi = applyAi(seeded, H({ summary: 'ai text' }))
+    expect(withAi.flat.summary).toBe('human text')
+    const after = applyHuman(withAi.fieldSources, H({ summary: null }))
+    expect(after.flat.summary).toBe('ai text')
+    expect(after.changed).toContain('summary')
+  })
+
+  it('works on an episode that has no field_sources yet (RSS-ingested)', () => {
+    const { fieldSources, flat } = applyHuman(null, H({ host: 'New Host', guest: 'New Guest' }))
+    expect(flat.host).toBe('New Host')
+    expect(fieldSources.host?.active).toBe('human')
+  })
+
+  it('leaves a conflict visible after a refresh', () => {
+    const seeded = buildHumanFieldSources(H({ host: 'Human A' }))
+    const withAi = applyAi(seeded, H({ host: 'AI B' }))
+    const after = applyHuman(withAi.fieldSources, H({ host: 'Human C' }))
+    expect(hasConflict(after.fieldSources.host)).toBe(true)
+  })
+})
+
+// --- seedMissingFromFlat: the pre-migration-036 episodes -------------------
+// ~2,500 episodes predate the field_sources column and carry real flat values
+// with no provenance. Without seeding, a re-sync destroys them.
+describe('seedMissingFromFlat', () => {
+  const flat = { host: 'AI Host', guest: null, issue_category: 'Health', summary: 'AI summary.' }
+
+  it('seeds every missing field from the flat column, into the ai slot', () => {
+    const fs = seedMissingFromFlat(null, flat)
+    expect(fs.host).toEqual({ human: null, ai: 'AI Host', active: 'ai' })
+    expect(fs.summary).toEqual({ human: null, ai: 'AI summary.', active: 'ai' })
+    expect(fs.guest).toEqual({ human: null, ai: null, active: 'ai' })
+  })
+
+  it('leaves an existing choice untouched', () => {
+    const existing = { host: { human: 'Real Human', ai: 'AI Host', active: 'human' as const, pinned: true } }
+    const fs = seedMissingFromFlat(existing, flat)
+    expect(fs.host).toEqual(existing.host)
+  })
+
+  it('REGRESSION: a re-sync no longer destroys values on a pre-036 episode', () => {
+    // Confessor gained a guest; it supplies nothing else.
+    const human = { host: null, guest: 'New Guest', issue_category: null, summary: null }
+    const seeded = seedMissingFromFlat(null, flat)
+    const { flat: after } = applyHuman(seeded, human)
+    expect(after.guest).toBe('New Guest')      // the new human value lands
+    expect(after.host).toBe('AI Host')         // and nothing else is lost
+    expect(after.issue_category).toBe('Health')
+    expect(after.summary).toBe('AI summary.')
+  })
+
+  it('a real human value still wins over a seeded one', () => {
+    const seeded = seedMissingFromFlat(null, flat)
+    const { flat: after } = applyHuman(seeded, {
+      host: 'Human Host', guest: null, issue_category: null, summary: null,
+    })
+    expect(after.host).toBe('Human Host')
   })
 })

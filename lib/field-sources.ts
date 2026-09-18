@@ -100,6 +100,81 @@ export function applyAi(
 }
 
 /**
+ * Seed provenance for fields that have none, from the episode's current flat
+ * columns.
+ *
+ * Migration 036 added `field_sources` but did NOT backfill, so ~2,500 episodes
+ * predate the column entirely: their flat host/guest/issue_category/summary hold
+ * real values (usually the summarizer's) with no provenance record at all.
+ * Without this, applyHuman on such an episode starts from { human: null,
+ * ai: null } — so any field the new pubfile does not supply resolves to null and
+ * the existing value is destroyed on write. One newly-added guest was enough to
+ * wipe host, issue_category and summary.
+ *
+ * The existing value is seeded into the `ai` slot rather than `human`: that is
+ * the slot that survives a null human copy, so the column falls back to what was
+ * already there. For a pre-036 Confessor episode the value may in truth have
+ * been human-authored and is now labelled ai — a provenance inaccuracy, and the
+ * right trade against silently deleting it. The re-sync supplies the
+ * authoritative human copy in the same pass anyway.
+ *
+ * Fields that already carry a choice are returned untouched.
+ */
+export function seedMissingFromFlat(
+  existing: FieldSources | null | undefined,
+  flat: Record<DualField, string | null>
+): FieldSources {
+  const fs: FieldSources = { ...(existing ?? {}) }
+  for (const f of DUAL_FIELDS) {
+    if (fs[f]) continue
+    fs[f] = { human: null, ai: flat[f] ?? null, active: 'ai' }
+  }
+  return fs
+}
+
+/**
+ * Refresh the HUMAN copies from a later Confessor read, and re-resolve each flat
+ * value. The counterpart to applyAi, for the re-sync path: ingest captures the
+ * pubfile once at first sight, and a producer who fills in a guest or corrects a
+ * name afterwards would otherwise never reach us.
+ *
+ * What it must not do, and does not:
+ *   - touch `ai` — the summarizer owns that copy
+ *   - touch `manual` — a hand-typed override outlives any upstream edit
+ *   - flip `active` on a PINNED field — someone chose that deliberately
+ *   - unpin anything
+ *
+ * A pinned field still has its `human` copy refreshed, so the dashboard shows
+ * the current upstream value (and the human≠AI badge stays honest) while the
+ * pinned choice continues to drive the flat column.
+ *
+ * Clearing is deliberate: if a segment is deleted upstream the human copy goes
+ * null, and an un-pinned field falls back to the AI copy rather than keeping a
+ * value that no longer exists anywhere.
+ */
+export function applyHuman(
+  existing: FieldSources | null | undefined,
+  human: Record<DualField, string | null>
+): { fieldSources: FieldSources; flat: Record<DualField, string | null>; changed: DualField[] } {
+  const fs: FieldSources = {}
+  const flat = {} as Record<DualField, string | null>
+  const changed: DualField[] = []
+
+  for (const f of DUAL_FIELDS) {
+    const prev = existing?.[f] ?? { human: null, ai: null, active: 'ai' as FieldSource }
+    const next = human[f] ?? null
+    if ((prev.human ?? null) !== next) changed.push(f)
+
+    const choice: FieldChoice = { ...prev, human: next }
+    if (!choice.pinned) choice.active = autoActive(f, choice)
+    fs[f] = choice
+    flat[f] = resolveChoice(choice)
+  }
+
+  return { fieldSources: fs, flat, changed }
+}
+
+/**
  * Toggle a field to a chosen source (the per-field UI action) or apply a manual
  * edit. Marks the field pinned so a later re-summarize won't override the human's
  * decision. Returns the updated sources and the new resolved value for the flat

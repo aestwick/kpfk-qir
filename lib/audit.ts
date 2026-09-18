@@ -72,6 +72,8 @@ export const AUDIT_ACTIONS = {
   // System events from workers (the "which job / which counts" detail the generic
   // trigger can't express). Recorded with actorId: null => actor_type 'system'.
   INGEST_COMPLETE: 'ingest.complete',
+  /** scripts/resync-confessor.ts — refreshed human pubfile copies on existing episodes. */
+  CONFESSOR_RESYNC: 'confessor.resync',
   DISCOVERY_SYNC_COMPLETE: 'discovery.sync.complete',
   TRANSCRIBE_COMPLETE: 'transcribe.complete',
   SUMMARIZE_COMPLETE: 'summarize.complete',
