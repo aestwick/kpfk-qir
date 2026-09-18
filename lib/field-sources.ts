@@ -100,6 +100,39 @@ export function applyAi(
 }
 
 /**
+ * Seed provenance for fields that have none, from the episode's current flat
+ * columns.
+ *
+ * Migration 036 added `field_sources` but did NOT backfill, so ~2,500 episodes
+ * predate the column entirely: their flat host/guest/issue_category/summary hold
+ * real values (usually the summarizer's) with no provenance record at all.
+ * Without this, applyHuman on such an episode starts from { human: null,
+ * ai: null } — so any field the new pubfile does not supply resolves to null and
+ * the existing value is destroyed on write. One newly-added guest was enough to
+ * wipe host, issue_category and summary.
+ *
+ * The existing value is seeded into the `ai` slot rather than `human`: that is
+ * the slot that survives a null human copy, so the column falls back to what was
+ * already there. For a pre-036 Confessor episode the value may in truth have
+ * been human-authored and is now labelled ai — a provenance inaccuracy, and the
+ * right trade against silently deleting it. The re-sync supplies the
+ * authoritative human copy in the same pass anyway.
+ *
+ * Fields that already carry a choice are returned untouched.
+ */
+export function seedMissingFromFlat(
+  existing: FieldSources | null | undefined,
+  flat: Record<DualField, string | null>
+): FieldSources {
+  const fs: FieldSources = { ...(existing ?? {}) }
+  for (const f of DUAL_FIELDS) {
+    if (fs[f]) continue
+    fs[f] = { human: null, ai: flat[f] ?? null, active: 'ai' }
+  }
+  return fs
+}
+
+/**
  * Refresh the HUMAN copies from a later Confessor read, and re-resolve each flat
  * value. The counterpart to applyAi, for the re-sync path: ingest captures the
  * pubfile once at first sight, and a producer who fills in a guest or corrects a

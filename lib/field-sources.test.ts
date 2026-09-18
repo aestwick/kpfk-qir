@@ -5,6 +5,7 @@ import {
   buildHumanFieldSources,
   hasConflict,
   resolveChoice,
+  seedMissingFromFlat,
   setFieldChoice,
   type DualField,
 } from './field-sources'
@@ -170,5 +171,44 @@ describe('applyHuman', () => {
     const withAi = applyAi(seeded, H({ host: 'AI B' }))
     const after = applyHuman(withAi.fieldSources, H({ host: 'Human C' }))
     expect(hasConflict(after.fieldSources.host)).toBe(true)
+  })
+})
+
+// --- seedMissingFromFlat: the pre-migration-036 episodes -------------------
+// ~2,500 episodes predate the field_sources column and carry real flat values
+// with no provenance. Without seeding, a re-sync destroys them.
+describe('seedMissingFromFlat', () => {
+  const flat = { host: 'AI Host', guest: null, issue_category: 'Health', summary: 'AI summary.' }
+
+  it('seeds every missing field from the flat column, into the ai slot', () => {
+    const fs = seedMissingFromFlat(null, flat)
+    expect(fs.host).toEqual({ human: null, ai: 'AI Host', active: 'ai' })
+    expect(fs.summary).toEqual({ human: null, ai: 'AI summary.', active: 'ai' })
+    expect(fs.guest).toEqual({ human: null, ai: null, active: 'ai' })
+  })
+
+  it('leaves an existing choice untouched', () => {
+    const existing = { host: { human: 'Real Human', ai: 'AI Host', active: 'human' as const, pinned: true } }
+    const fs = seedMissingFromFlat(existing, flat)
+    expect(fs.host).toEqual(existing.host)
+  })
+
+  it('REGRESSION: a re-sync no longer destroys values on a pre-036 episode', () => {
+    // Confessor gained a guest; it supplies nothing else.
+    const human = { host: null, guest: 'New Guest', issue_category: null, summary: null }
+    const seeded = seedMissingFromFlat(null, flat)
+    const { flat: after } = applyHuman(seeded, human)
+    expect(after.guest).toBe('New Guest')      // the new human value lands
+    expect(after.host).toBe('AI Host')         // and nothing else is lost
+    expect(after.issue_category).toBe('Health')
+    expect(after.summary).toBe('AI summary.')
+  })
+
+  it('a real human value still wins over a seeded one', () => {
+    const seeded = seedMissingFromFlat(null, flat)
+    const { flat: after } = applyHuman(seeded, {
+      host: 'Human Host', guest: null, issue_category: null, summary: null,
+    })
+    expect(after.host).toBe('Human Host')
   })
 })

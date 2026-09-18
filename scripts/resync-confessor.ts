@@ -33,12 +33,16 @@
  * That is correct — the data did change — but a first large run will look like a
  * burst to a consumer.
  *
+ * Exit status is non-zero if any episode write failed or any show could not be
+ * read — "nothing changed upstream" and "we could not ask" must not look alike
+ * to a cron.
+ *
  * Requirements: worker env (SUPABASE service role). Writes episode_log and one
  * audit_log row; reads Confessor over the network.
  */
 import { supabaseAdmin } from '../lib/supabase'
 import { fetchConfessorEpisodes, normalizeConfessorMp3Url, projectPubfile } from '../lib/confessor'
-import { applyHuman, type DualField, type FieldSources } from '../lib/field-sources'
+import { applyHuman, seedMissingFromFlat, type DualField, type FieldSources } from '../lib/field-sources'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import type { ConfessorPubfile } from '../lib/types'
 
@@ -98,6 +102,80 @@ interface Change {
 const trunc = (v: string | null, n = 60): string =>
   v == null ? '(none)' : v.length > n ? v.slice(0, n - 1) + '…' : v
 
+type WriteResult = 'written' | 'conflict' | 'failed'
+
+/**
+ * Write one episode's refreshed human metadata, re-reading its current state
+ * first and writing only if nothing else has touched the row since.
+ *
+ * Every episode is loaded up front, before the per-show network fetches, so the
+ * snapshot in memory can be minutes old by the time we write. A curator who
+ * pins a field or an edit that lands in that window would be silently
+ * overwritten by the stale field_sources. So: re-read, recompute against what
+ * is actually there now, and make the UPDATE conditional on updated_at being
+ * unchanged. A row that moved under us is reported as a conflict and left
+ * alone — re-running the script picks it up cleanly.
+ */
+async function writeEpisode(
+  episode: EpisodeRow,
+  pubfile: ConfessorPubfile[] | null,
+  humanSummary: string | null,
+  human: Record<DualField, string | null>,
+): Promise<WriteResult> {
+  const { data: fresh, error: readErr } = await supabaseAdmin
+    .from('episode_log')
+    .select('field_sources, host, guest, issue_category, summary, updated_at')
+    .eq('id', episode.id)
+    .maybeSingle()
+
+  if (readErr || !fresh) {
+    console.warn(`  ! re-read failed for ${episode.public_id}: ${readErr?.message ?? 'row vanished'}`)
+    return 'failed'
+  }
+
+  const f = fresh as unknown as {
+    field_sources: FieldSources | null
+    host: string | null
+    guest: string | null
+    issue_category: string | null
+    summary: string | null
+    updated_at: string
+  }
+
+  const seeded = seedMissingFromFlat(f.field_sources, {
+    host: f.host, guest: f.guest, issue_category: f.issue_category, summary: f.summary,
+  })
+  const { fieldSources, flat, changed } = applyHuman(seeded, human)
+  if (changed.length === 0) return 'conflict' // someone already applied it
+
+  const { data: updated, error: upErr } = await supabaseAdmin
+    .from('episode_log')
+    .update({
+      confessor_meta: pubfile && pubfile.length ? pubfile : null,
+      field_sources: fieldSources,
+      human_summary: humanSummary,
+      // Flat columns carry the RESOLVED active value, never the raw human copy —
+      // a pinned or AI-winning field must keep what it had.
+      host: flat.host,
+      guest: flat.guest,
+      issue_category: flat.issue_category,
+      summary: flat.summary,
+    })
+    .eq('id', episode.id)
+    .eq('updated_at', f.updated_at) // optimistic: bail if the row moved
+    .select('id')
+
+  if (upErr) {
+    console.warn(`  ! update failed for ${episode.public_id}: ${upErr.message}`)
+    return 'failed'
+  }
+  if (!updated || updated.length === 0) {
+    console.warn(`  ! ${episode.public_id} changed mid-run — skipped, re-run to pick it up`)
+    return 'conflict'
+  }
+  return 'written'
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
 
@@ -146,7 +224,10 @@ async function main() {
   const changes: Change[] = []
   let fetched = 0
   let matched = 0
+  let written = 0
   const failedShows: string[] = []
+  const failures: string[] = []
+  const conflicts: string[] = []
 
   for (const key of showKeys) {
     let rows
@@ -175,7 +256,17 @@ async function main() {
         issue_category: proj.issueCategory,
         summary: proj.humanSummary,
       }
-      const { fieldSources, flat, changed } = applyHuman(episode.field_sources, human)
+      // Seed provenance for fields that have none. ~2,500 episodes predate
+      // migration 036 and carry real flat values with no field_sources entry;
+      // without this, any field the pubfile does not supply resolves to null and
+      // the existing value is destroyed on write.
+      const seeded = seedMissingFromFlat(episode.field_sources, {
+        host: episode.host,
+        guest: episode.guest,
+        issue_category: episode.issue_category,
+        summary: episode.summary,
+      })
+      const { fieldSources, flat, changed } = applyHuman(seeded, human)
       if (changed.length === 0) continue
 
       changes.push({
@@ -194,21 +285,10 @@ async function main() {
       })
 
       if (args.apply) {
-        const { error: upErr } = await supabaseAdmin
-          .from('episode_log')
-          .update({
-            confessor_meta: row.pubfile && row.pubfile.length ? row.pubfile : null,
-            field_sources: fieldSources,
-            human_summary: proj.humanSummary,
-            // Flat columns carry the RESOLVED active value, never the raw human
-            // copy — a pinned or AI-winning field must keep what it had.
-            host: flat.host,
-            guest: flat.guest,
-            issue_category: flat.issue_category,
-            summary: flat.summary,
-          })
-          .eq('id', episode.id)
-        if (upErr) console.warn(`  ! update failed for episode ${episode.public_id}: ${upErr.message}`)
+        const ok = await writeEpisode(episode, row.pubfile ?? null, proj.humanSummary, human)
+        if (ok === 'written') written++
+        else if (ok === 'conflict') conflicts.push(episode.public_id)
+        else failures.push(episode.public_id)
       }
     }
   }
@@ -244,6 +324,13 @@ async function main() {
   }
 
   if (args.apply) {
+    // Counts report what actually landed. A write that failed or was skipped as
+    // a conflict is NOT an episode changed — an overstated success is worse than
+    // a loud failure, because nobody re-runs a run that claimed to work.
+    console.log(`\napplied: ${written} written, ${conflicts.length} skipped (changed mid-run), ${failures.length} failed`)
+    if (conflicts.length) console.log(`  skipped: ${conflicts.join(', ')}`)
+    if (failures.length) console.log(`  failed:  ${failures.join(', ')}`)
+
     await logAuditEvent({
       action: AUDIT_ACTIONS.CONFESSOR_RESYNC,
       operation: 'update',
@@ -256,11 +343,20 @@ async function main() {
         shows_failed: failedShows,
         rows_fetched: fetched,
         episodes_matched: matched,
-        episodes_changed: changes.length,
+        episodes_with_changes: changes.length,
+        episodes_written: written,
+        episodes_skipped_conflict: conflicts,
+        episodes_failed: failures,
         by_field: Object.fromEntries(byField),
       },
     })
   }
+
+  // Non-zero when anything did not land, so a cron or an operator's shell sees
+  // a failed run rather than a silent partial one. A show whose fetch failed
+  // counts too: "nothing changed upstream" and "we could not ask" are different
+  // answers and must not look alike.
+  if (failures.length || failedShows.length) process.exit(1)
 }
 
 main().catch((err) => {
