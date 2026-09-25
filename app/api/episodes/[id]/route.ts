@@ -6,6 +6,8 @@ import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
 import { DUAL_FIELDS, DualField, FieldSource, FieldSources, setFieldChoice } from '@/lib/field-sources'
 
+export const dynamic = 'force-dynamic'
+
 const isDualField = (k: string): k is DualField => (DUAL_FIELDS as string[]).includes(k)
 
 export async function GET(

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { invalidateSetting } from '@/lib/settings'
+import { bumpCacheVersion } from '@/lib/api-cache'
 import { providerConfigStatus } from '@/lib/transcription'
 
 export const dynamic = 'force-dynamic'
@@ -202,6 +203,10 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error
 
+    // New/updated shows: orphan the public API's cached /v1/shows bodies so
+    // consumers see them now, not after the route's TTL.
+    await bumpCacheVersion(stationId, 'shows')
+
     return NextResponse.json({ ok: true, count: data?.length ?? rows.length, shows: data ?? [], skipped })
   } catch (err) {
     console.error('POST /api/settings failed:', err)
@@ -255,6 +260,10 @@ export async function PATCH(request: NextRequest) {
         .eq('station_id', stationId)
 
       if (error) throw error
+
+      // Renames/activations reach the public /v1/shows immediately.
+      await bumpCacheVersion(stationId, 'shows')
+
       return NextResponse.json({ ok: true })
     }
 

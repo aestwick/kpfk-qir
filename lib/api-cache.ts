@@ -25,7 +25,10 @@ import { getRedis } from './redis'
 //
 //   v2 — published gate on the episode detail/transcript routes
 //   v3 — duration → duration_minutes + duration_seconds in the episode payload
-const NS = 'qir:apicache:v3'
+//   v4 — show names normalized at serialization (station prefix stripped,
+//        whitespace collapsed); also flushes bodies written while the Next.js
+//        Data Cache was feeding handlers stale Supabase reads (see lib/supabase.ts)
+const NS = 'qir:apicache:v4'
 
 export interface CacheResult<T> {
   value: T
