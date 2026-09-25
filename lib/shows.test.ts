@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   cleanFeedName,
+  normalizeShowName,
   resolveShowDisplayName,
   resolveShowGroup,
   resolveGroupDisplayName,
@@ -42,6 +43,23 @@ describe('cleanFeedName', () => {
 
   it('tries prefixes in order, first match wins', () => {
     expect(cleanFeedName('WBAI - The News', ['KPFK -', 'WBAI -'])).toBe('News')
+  })
+})
+
+describe('normalizeShowName', () => {
+  it('collapses runs of whitespace before matching the prefix', () => {
+    // The double space would defeat a plain startsWith('KPFK -') match; the
+    // collapse runs first so these variants strip too.
+    expect(normalizeShowName('KPFK  -  Background Briefing', KPFK)).toBe('Background Briefing')
+    expect(normalizeShowName('KPFK -  Background  Briefing', KPFK)).toBe('Background Briefing')
+  })
+
+  it('collapses whitespace even when no prefixes are configured', () => {
+    expect(normalizeShowName('Global  Village - Mon', null)).toBe('Global Village - Mon')
+  })
+
+  it('strips the prefix like cleanFeedName', () => {
+    expect(normalizeShowName('KPFK - The Car Show', KPFK)).toBe('Car Show')
   })
 })
 

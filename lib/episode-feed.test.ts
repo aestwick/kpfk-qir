@@ -244,4 +244,22 @@ describe('projectEpisode', () => {
     const out = projectEpisode(row)
     expect(out).toMatchObject({ public_id: 'x', id: 1, show_key: 'k', summary: 's' })
   })
+
+  it('normalizes show_name: strips the station prefix and collapses whitespace', () => {
+    const out = projectEpisode(
+      { public_id: 'x', show_name: 'KPFK -  Background  Briefing', duration: 30 },
+      ['KPFK -'],
+    )
+    expect(out.show_name).toBe('Background Briefing')
+  })
+
+  it('collapses whitespace in show_name even with no prefixes configured', () => {
+    const out = projectEpisode({ public_id: 'x', show_name: 'Global  Village - Mon' }, null)
+    expect(out.show_name).toBe('Global Village - Mon')
+  })
+
+  it('leaves a null show_name alone', () => {
+    const out = projectEpisode({ public_id: 'x', show_name: null }, ['KPFK -'])
+    expect(out.show_name).toBeNull()
+  })
 })

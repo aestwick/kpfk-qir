@@ -60,8 +60,8 @@ widen this response.
 | --- | --- |
 | `public_id` | **The stable identifier.** Opaque UUID, assigned once, never changes. Key your records on this. |
 | `id` | Legacy integer row id. Still returned and still accepted in paths; prefer `public_id`. |
-| `show_key` | The Confessor show key — the same key the archive uses. |
-| `show_name`, `category` | Program name and program category (e.g. `Music`, `Español`). |
+| `show_key` | The Confessor show key — the same key the archive uses. **Join episodes to shows on this**, never on a name. |
+| `show_name`, `category` | Program name and program category (e.g. `Music`, `Español`). `show_name` is normalized at serialization: the station prefix (`KPFK - `) is stripped and whitespace collapsed, so it arrives render-ready. It is a per-episode snapshot, though — for the canonical program label, use `display_name` from `/api/v1/shows`, looked up by `show_key`. |
 | `issue_category` | The FCC issue this airing was filed under. |
 | `title`, `headline`, `summary` | Episode title, one-line headline, and the summary. |
 | `host`, `guest` | Resolved host/guest (human-entered wins over AI unless overridden). |
@@ -115,6 +115,9 @@ GET /api/v1/episodes?limit=200&cursor=<next_cursor>
 …until next_cursor is null
 ```
 
+There is no server-side cap on how many pages a walk may take — follow
+`next_cursor` until it is `null`, however many episodes that is.
+
 **Incremental** — from then on, ask only for changes. Keep the highest
 `updated_at` you have seen (or the last cursor you held) and resume from it:
 
@@ -138,13 +141,20 @@ a `304` with no body, which costs the consumer almost nothing and costs us a
 Redis lookup. `Cache-Control` is `private` — these responses are key-scoped and
 must not be shared by an intermediary.
 
+Server-side, a response body is cached for at most the `max-age` the response
+declares (60s for this feed; 5min for the episode detail and `/shows`; 1h for
+captions) and is invalidated early when the underlying data changes (a
+transcript rewritten, a show renamed, a QIR finalized). Repeating an identical
+URL is safe: past the TTL you get fresh rows, so a syncer does not need to
+perturb its query string to defeat the cache.
+
 ## Related endpoints
 
 | Endpoint | Scope | Purpose |
 | --- | --- | --- |
 | `GET /api/v1/episodes/{public_id}` | `episodes` | One **published** episode. `?include=transcript` embeds captions when the key also holds `transcripts`. |
 | `GET /api/v1/episodes/{public_id}/transcript` | `transcripts` | Captions for a **published** episode. `?format=vtt` returns raw WebVTT for a `<track>`; `?lang=en` prefers the English translation. |
-| `GET /api/v1/shows` | `shows` | The program list, with the same `show_key` values used by the feed. |
+| `GET /api/v1/shows` | `shows` | The program list, with the same `show_key` values used by the feed. `display_name` is the official label to render (normalized, override-aware); `feed_name`/`show_name` are raw source provenance. |
 | `GET /api/v1/qir` | `qir` | Finalized quarterly reports. |
 
 The published gate applies to the two episode routes above as well as to the

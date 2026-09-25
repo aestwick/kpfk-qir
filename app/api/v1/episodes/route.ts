@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
+import { getStripPrefixes } from '@/lib/stations'
 import {
   FEED_SELECT,
   parseFeedRequest,
@@ -68,9 +69,11 @@ export const GET = withApiKey(
       .limit(req.limit + 1)
     if (req.cursor) query = query.or(keysetFilter(req.cursor))
 
-    const { data, error } = await query
+    const [{ data, error }, stripPrefixes] = await Promise.all([query, getStripPrefixes(ctx.stationId)])
     if (error) return { json: { error: error.message }, status: 500 }
-    const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map(projectEpisode) as unknown as FeedRow[]
+    const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) =>
+      projectEpisode(r, stripPrefixes),
+    ) as unknown as FeedRow[]
     return { json: buildCursorEnvelope(rows, req.limit) }
   },
   // Short TTL: episode rows churn as workers process them. The cursor and

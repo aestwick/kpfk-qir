@@ -52,6 +52,19 @@ export function cleanFeedName(name: string, stripPrefixes?: string[] | null): st
 }
 
 /**
+ * Serialization-time cleanup for a show name leaving the public API. Collapses
+ * runs of whitespace (Confessor data carries stray double spaces), then strips
+ * the station's configured prefixes via {@link cleanFeedName} ("KPFK - Show" →
+ * "Show"). Applied to feed-derived names only — the callers keep a manual
+ * display_name override verbatim, same as the dashboard — so every consumer
+ * gets a clean name without re-implementing the cleanup, whether or not the
+ * upstream source data is ever fixed.
+ */
+export function normalizeShowName(name: string, stripPrefixes?: string[] | null): string {
+  return cleanFeedName(name.replace(/\s+/g, ' ').trim(), stripPrefixes)
+}
+
+/**
  * Resolved display name: manual override → RSS-derived feed name → legacy
  * show_name → the key itself as a last resort. The RSS-derived names are tidied
  * via {@link cleanFeedName} using the station's strip prefixes; the manual
