@@ -38,6 +38,17 @@ describe('api-cache', () => {
     expect(fetcher).toHaveBeenCalledTimes(1) // second served from cache
   })
 
+  it('does not store a value cacheIf rejects — the next call re-fetches', async () => {
+    const fetcher = vi.fn().mockResolvedValue({ status: 404 })
+
+    const first = await cached({ ...opts(), cacheIf: (v: { status: number }) => v.status < 400 }, fetcher)
+    expect(first).toEqual({ value: { status: 404 }, hit: false })
+
+    const second = await cached({ ...opts(), cacheIf: (v: { status: number }) => v.status < 400 }, fetcher)
+    expect(second.hit).toBe(false)
+    expect(fetcher).toHaveBeenCalledTimes(2) // nothing was pinned
+  })
+
   it('keys are isolated by subkey', async () => {
     const f1 = vi.fn().mockResolvedValue('one')
     const f2 = vi.fn().mockResolvedValue('two')

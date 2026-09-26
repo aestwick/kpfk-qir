@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
 import { resolveEpisodeRef, projectEpisode, PUBLISHED_STATUSES } from '@/lib/episode-feed'
+import { getStripPrefixes } from '@/lib/stations'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -27,18 +28,23 @@ export const GET = withApiKey(
     const ref = resolveEpisodeRef(params.id)
     if (!ref) return { json: { error: 'Invalid episode id' }, status: 400 }
 
-    const { data: episode, error } = await supabaseAdmin
-      .from('episode_log')
-      .select(SELECT)
-      .eq(ref.column, ref.value)
-      .eq('station_id', ctx.stationId)
-      .in('status', [...PUBLISHED_STATUSES])
-      .maybeSingle()
+    const [{ data: episode, error }, stripPrefixes] = await Promise.all([
+      supabaseAdmin
+        .from('episode_log')
+        .select(SELECT)
+        .eq(ref.column, ref.value)
+        .eq('station_id', ctx.stationId)
+        .in('status', [...PUBLISHED_STATUSES])
+        .maybeSingle(),
+      getStripPrefixes(ctx.stationId),
+    ])
 
     if (error) return { json: { error: error.message }, status: 500 }
     if (!episode) return { json: { error: 'Episode not found' }, status: 404 }
 
-    const payload: Record<string, unknown> = { episode: projectEpisode(episode as unknown as Record<string, unknown>) }
+    const payload: Record<string, unknown> = {
+      episode: projectEpisode(episode as unknown as Record<string, unknown>, stripPrefixes),
+    }
 
     const wantsTranscript = request.nextUrl.searchParams.get('include') === 'transcript'
     if (wantsTranscript && ctx.scopes.includes('transcripts')) {

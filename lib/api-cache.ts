@@ -25,7 +25,10 @@ import { getRedis } from './redis'
 //
 //   v2 — published gate on the episode detail/transcript routes
 //   v3 — duration → duration_minutes + duration_seconds in the episode payload
-const NS = 'qir:apicache:v3'
+//   v4 — show names normalized at serialization (station prefix stripped,
+//        whitespace collapsed); also flushes bodies written while the Next.js
+//        Data Cache was feeding handlers stale Supabase reads (see lib/supabase.ts)
+const NS = 'qir:apicache:v4'
 
 export interface CacheResult<T> {
   value: T
@@ -55,9 +58,14 @@ export async function bumpCacheVersion(stationId: string, resource: string): Pro
  * or run `fetcher`, cache its result for `ttlSec`, and return it. Fails OPEN: on
  * any Redis error the fetcher runs and the result is returned uncached, so a
  * Redis outage degrades to direct DB reads rather than 500s.
+ *
+ * `cacheIf` (optional) decides whether a freshly fetched value is stored at
+ * all; when it returns false the value is returned uncached. This is how the
+ * API layer keeps error bodies out of the cache — a 404 for an episode that is
+ * mid-pipeline must not be pinned for the TTL after the episode publishes.
  */
 export async function cached<T>(
-  opts: { stationId: string; resource: string; subkey: string; ttlSec: number },
+  opts: { stationId: string; resource: string; subkey: string; ttlSec: number; cacheIf?: (value: T) => boolean },
   fetcher: () => Promise<T>,
 ): Promise<CacheResult<T>> {
   const { stationId, resource, subkey, ttlSec } = opts
@@ -76,6 +84,10 @@ export async function cached<T>(
   }
 
   const value = await fetcher()
+
+  if (key && opts.cacheIf && !opts.cacheIf(value)) {
+    return { value, hit: false }
+  }
 
   if (key) {
     try {

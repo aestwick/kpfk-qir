@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { bumpCacheVersion } from '@/lib/api-cache'
 
 const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
@@ -127,6 +128,11 @@ export async function POST(
         english_vtt: englishVtt,
       })
       .eq('episode_id', episodeId)
+
+    // The public API serves these translations (?lang=en) — orphan its cached
+    // caption bodies so the fresh translation is visible immediately.
+    void bumpCacheVersion(stationId, 'transcripts')
+    void bumpCacheVersion(stationId, 'episodes')
 
     // Log usage
     const transcriptUsage = transcriptResponse.usage

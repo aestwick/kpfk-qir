@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   cleanFeedName,
+  normalizeShowName,
   resolveShowDisplayName,
   resolveShowGroup,
   resolveGroupDisplayName,
@@ -45,6 +46,23 @@ describe('cleanFeedName', () => {
   })
 })
 
+describe('normalizeShowName', () => {
+  it('collapses runs of whitespace before matching the prefix', () => {
+    // The double space would defeat a plain startsWith('KPFK -') match; the
+    // collapse runs first so these variants strip too.
+    expect(normalizeShowName('KPFK  -  Background Briefing', KPFK)).toBe('Background Briefing')
+    expect(normalizeShowName('KPFK -  Background  Briefing', KPFK)).toBe('Background Briefing')
+  })
+
+  it('collapses whitespace even when no prefixes are configured', () => {
+    expect(normalizeShowName('Global  Village - Mon', null)).toBe('Global Village - Mon')
+  })
+
+  it('strips the prefix like cleanFeedName', () => {
+    expect(normalizeShowName('KPFK - The Car Show', KPFK)).toBe('Car Show')
+  })
+})
+
 describe('resolveShowDisplayName', () => {
   it('uses the manual override verbatim (no prefix stripping)', () => {
     expect(
@@ -57,6 +75,12 @@ describe('resolveShowDisplayName', () => {
 
   it('cleans the feed_name when no override', () => {
     expect(resolveShowDisplayName({ key: 'carshow', feed_name: 'KPFK - The Car Show' }, KPFK)).toBe('Car Show')
+  })
+
+  it('collapses whitespace before the prefix match, so doubled spaces still strip', () => {
+    expect(
+      resolveShowDisplayName({ key: 'bb', feed_name: 'KPFK  -  Background  Briefing' }, KPFK)
+    ).toBe('Background Briefing')
   })
 
   it('falls back to show_name then key', () => {

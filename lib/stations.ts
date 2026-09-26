@@ -15,6 +15,24 @@ export async function listStationIds(): Promise<string[]> {
   return (data ?? []).map((s) => s.id)
 }
 
+/**
+ * A station's show_name_strip_prefixes, for name cleanup at serialization
+ * (lib/shows.ts#normalizeShowName). Null when unset or on lookup failure —
+ * a name is better served un-stripped than the request failed.
+ */
+export async function getStripPrefixes(stationId: string): Promise<string[] | null> {
+  const { data, error } = await supabaseAdmin
+    .from('stations')
+    .select('show_name_strip_prefixes')
+    .eq('id', stationId)
+    .maybeSingle()
+  if (error) {
+    console.error(`getStripPrefixes(${stationId}) failed:`, error.message)
+    return null
+  }
+  return data?.show_name_strip_prefixes ?? null
+}
+
 /** Load a single station's config (rss_base_url, mp3_filename_prefix, etc.). */
 export async function getStation(stationId: string): Promise<Station | null> {
   const { data, error } = await supabaseAdmin

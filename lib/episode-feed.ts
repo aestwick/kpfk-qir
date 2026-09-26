@@ -22,6 +22,8 @@
 // the cursor contract.
 // ===========================================================================
 
+import { normalizeShowName } from './shows'
+
 /**
  * The published contract. An episode is "published" once the pipeline has
  * produced its summary — before that the row exists but its summary, guest and
@@ -63,6 +65,8 @@ export const FEED_SELECT = [
 ].join(', ')
 
 /**
+ * Project a raw episode_log row into the published payload shape:
+ *
  * Rename `duration` to `duration_minutes` on the way out, and add
  * `duration_seconds` beside it.
  *
@@ -74,15 +78,26 @@ export const FEED_SELECT = [
  * `duration_seconds` is DERIVED (minutes x 60), not measured: the true audio
  * length is rounded to whole minutes at ingest and the seconds are not kept.
  * It is therefore exact to the minute, no finer.
+ *
+ * `show_name` is normalized on the way out (lib/shows.ts#normalizeShowName):
+ * station prefix stripped per the station's strip config, whitespace collapsed.
+ * The stored value is feed-derived and inconsistent across feeds ("KPFK - X"
+ * next to "X", double spaces); the contract serves the clean form so consumers
+ * don't each write their own cleanup.
  */
-export function projectEpisode<T extends Record<string, unknown>>(row: T): Record<string, unknown> {
+export function projectEpisode<T extends Record<string, unknown>>(
+  row: T,
+  stripPrefixes?: string[] | null,
+): Record<string, unknown> {
   const { duration, ...rest } = row as { duration?: number | null } & Record<string, unknown>
   const minutes = duration ?? null
-  return {
+  const out: Record<string, unknown> = {
     ...rest,
     duration_minutes: minutes,
     duration_seconds: minutes == null ? null : minutes * 60,
   }
+  if (typeof out.show_name === 'string') out.show_name = normalizeShowName(out.show_name, stripPrefixes)
+  return out
 }
 
 export const DEFAULT_LIMIT = 50

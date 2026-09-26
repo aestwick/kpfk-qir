@@ -14,6 +14,7 @@ import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
 import { resolveProviderPlan, runTranscription, AudioUnavailableError } from '../lib/transcription'
 import { applyCorrections, buildVtt, correctionsForEpisode } from '../lib/transcription/vtt'
+import { bumpCacheVersion } from '../lib/api-cache'
 
 // Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
 // to the transcript itself: a failure here must never fail the episode (search
@@ -282,6 +283,14 @@ async function runTranscribeBatch(job: Job, stationId: string) {
       if (!transcriptCount || transcriptCount === 0) {
         throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
       }
+
+      // A transcript was (re)written: orphan the public API's cached caption
+      // bodies so a re-transcription (e.g. after a corrections change) reaches
+      // consumers now, not after the transcripts route's 1h TTL. 'episodes'
+      // too — the episode detail route can embed the transcript. Fire-and-
+      // forget best-effort like the rest of the cache layer (fails open).
+      void bumpCacheVersion(stationId, 'transcripts')
+      void bumpCacheVersion(stationId, 'episodes')
 
       // Update episode status. Fill duration when it's missing (a backfill, or any
       // RSS feed that omitted itunes:duration, ships a null duration) — transcription

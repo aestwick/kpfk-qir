@@ -111,7 +111,10 @@ export function withApiKey(handler: Handler, opts: WithApiKeyOptions) {
     const params = routeCtx?.params ?? {}
 
     // 4. Run the handler, through the response cache when configured. 5xx results
-    //    throw out of run() so they are surfaced as 500 and never cached.
+    //    throw out of run() so they are surfaced as 500 and never cached. 4xx
+    //    results are returned but not cached either (cacheIf): a 404 for an
+    //    episode that is mid-pipeline (e.g. reset by a re-summarize) must not
+    //    be pinned for the TTL after the episode publishes.
     const run = async (): Promise<NormalizedResult> => {
       const result = await handler(request, { ctx, params })
       const norm = normalize(result)
@@ -129,6 +132,7 @@ export function withApiKey(handler: Handler, opts: WithApiKeyOptions) {
             resource: opts.cache.resource,
             subkey: cacheSubkey(request, opts.cache.vary?.(ctx) ?? ''),
             ttlSec: opts.cache.ttlSec,
+            cacheIf: (v) => v.status < 400,
           },
           run,
         )
