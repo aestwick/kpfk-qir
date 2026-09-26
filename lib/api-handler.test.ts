@@ -113,6 +113,19 @@ describe('withApiKey', () => {
     expect(res.status).toBe(500)
   })
 
+  it('tells the cache not to store error bodies (a 404 must not be pinned for the TTL)', async () => {
+    const handler = withApiKey(async () => ({ json: { error: 'nope' }, status: 404 }), {
+      scope: 'episodes',
+      cache: { resource: 'episodes', ttlSec: 300 },
+    })
+    const res = await handler(req())
+    expect(res.status).toBe(404)
+
+    const cacheOpts = mCached.mock.calls[0][0]
+    expect(cacheOpts.cacheIf({ status: 404 })).toBe(false)
+    expect(cacheOpts.cacheIf({ status: 200 })).toBe(true)
+  })
+
   it('passes route params through to the handler', async () => {
     const handler = withApiKey(
       async (_r, { params }) => ({ json: { year: params.year } }),

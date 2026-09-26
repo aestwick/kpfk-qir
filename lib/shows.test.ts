@@ -77,6 +77,12 @@ describe('resolveShowDisplayName', () => {
     expect(resolveShowDisplayName({ key: 'carshow', feed_name: 'KPFK - The Car Show' }, KPFK)).toBe('Car Show')
   })
 
+  it('collapses whitespace before the prefix match, so doubled spaces still strip', () => {
+    expect(
+      resolveShowDisplayName({ key: 'bb', feed_name: 'KPFK  -  Background  Briefing' }, KPFK)
+    ).toBe('Background Briefing')
+  })
+
   it('falls back to show_name then key', () => {
     expect(resolveShowDisplayName({ key: 'k', show_name: 'KPFK - Legacy' }, KPFK)).toBe('Legacy')
     expect(resolveShowDisplayName({ key: 'k' }, KPFK)).toBe('k')

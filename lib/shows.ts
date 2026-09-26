@@ -74,7 +74,9 @@ export function resolveShowDisplayName(row: ShowNameFields, stripPrefixes?: stri
   const override = row.display_name?.trim()
   if (override) return override
   const auto = firstNonBlank(row.feed_name, row.show_name)
-  if (auto) return cleanFeedName(auto, stripPrefixes)
+  // normalizeShowName rather than bare cleanFeedName: the whitespace collapse
+  // must run FIRST or a doubled space ("KPFK  -  X") defeats the prefix match.
+  if (auto) return normalizeShowName(auto, stripPrefixes)
   return row.key
 }
 
