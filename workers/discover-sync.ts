@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { listStationIds, getStation } from '../lib/stations'
 import { discoverShows, selectNewShows } from '../lib/archive-discover'
 import { resolveShowKeys } from '../lib/shows-resolve'
-import { getDiscoverySyncEnabled } from '../lib/settings'
+import { getDiscoverySyncEnabled, getDiscoveryAutoActivate } from '../lib/settings'
 import { discoverSyncQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
@@ -15,6 +15,8 @@ import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
  * Opt-out model: every program is imported automatically — but INACTIVE, so it
  * sits for review and never pulls/processes until an operator activates it (the
  * active gate is what keeps Música/Español and duplicates out of the pipeline).
+ * A station with `discovery_auto_activate` on imports new programs ACTIVE
+ * instead, so "process everything" stays true as the archive grows.
  * Existing/curated rows are never modified; only genuinely new keys are inserted.
  *
  * Not gated on the global pause flag: importing inactive metadata costs nothing
@@ -140,9 +142,11 @@ export async function processDiscoverSync(job: Job) {
   const resolved = await resolveShowKeys(station.rss_base_url, newShows.map((s) => s.key))
   const byKey = new Map(resolved.map((r) => [r.key, r]))
 
-  // New programs arrive INACTIVE. ignoreDuplicates makes a concurrent insert a
-  // no-op rather than clobbering a curated row. A feed that didn't resolve keeps
-  // the home-page name and a null category (visible for review).
+  // New programs arrive INACTIVE unless the station opted into auto-activation.
+  // ignoreDuplicates makes a concurrent insert a no-op rather than clobbering a
+  // curated row. A feed that didn't resolve keeps the home-page name and a null
+  // category (visible for review).
+  const autoActivate = await getDiscoveryAutoActivate(stationId)
   const rows = newShows.map((s) => {
     const r = byKey.get(s.key)
     return {
@@ -150,7 +154,7 @@ export async function processDiscoverSync(job: Job) {
       key: s.key,
       show_name: r?.feed_name ?? s.name,
       category: r?.category ?? null,
-      active: false,
+      active: autoActivate,
     }
   })
   const { error: insertErr } = await supabaseAdmin
@@ -158,14 +162,14 @@ export async function processDiscoverSync(job: Job) {
     .upsert(rows, { onConflict: 'station_id,key', ignoreDuplicates: true })
   if (insertErr) throw new Error(`[discover-sync] insert failed: ${insertErr.message}`)
 
-  console.log(`[discover-sync] ${station.slug}: +${newShows.length} new show(s) imported inactive`)
+  console.log(`[discover-sync] ${station.slug}: +${newShows.length} new show(s) imported ${autoActivate ? 'active' : 'inactive'}`)
   // System audit event, mirroring ingest (only when work happened).
   void logAuditEvent({
     action: AUDIT_ACTIONS.DISCOVERY_SYNC_COMPLETE,
     operation: 'insert',
     stationId,
     resourceType: 'show_key',
-    metadata: { discovered: discovered.length, added: newShows.length },
+    metadata: { discovered: discovered.length, added: newShows.length, auto_activated: autoActivate },
   })
   return { discovered: discovered.length, added: newShows.length }
 }

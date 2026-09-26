@@ -66,6 +66,27 @@ describe('parseProgramOptions', () => {
     expect(parseProgramOptions('<option value="dn"></option>')).toEqual([{ key: 'dn', name: 'dn' }])
   })
 
+  // Trimmed from the live archive.kpfk.org home page: the program <select> is
+  // followed by the category filter <select>, whose numeric options are not shows.
+  const withCategories =
+    '<select name="sh_altid" id="sh_altid" onchange="set_shows(this);"> <option value="">All Shows</option>' +
+    '<option value="afrodicia" style="x" >Afro-Dicia</option>\n' +
+    '<option value="allabove" style="x" >All Of The  Above\n' +
+    '</select><select id="ca_id" name="ca_id" onchange="show_cats(this);"> <option value="0">All Categories</option>' +
+    ' <option value="4" style="x" >Music</option> <option value="10" style="x" >Espa&ntilde;ol</option></select>'
+
+  it('ignores the category filter dropdown', () => {
+    expect(parseProgramOptions(withCategories)).toEqual([
+      { key: 'afrodicia', name: 'Afro-Dicia' },
+      { key: 'allabove', name: 'All Of The Above' },
+    ])
+  })
+
+  it('drops the category dropdown even without the program select id', () => {
+    const html = withCategories.replace('id="sh_altid"', 'id="other"')
+    expect(parseProgramOptions(html).map((s) => s.key)).toEqual(['afrodicia', 'allabove'])
+  })
+
   it('returns an empty list when there are no option tags', () => {
     expect(parseProgramOptions('<html><body>no programs here</body></html>')).toEqual([])
   })

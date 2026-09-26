@@ -107,6 +107,14 @@ export async function getDiscoverySyncEnabled(stationId: string): Promise<boolea
   return (await getSetting<boolean>('discovery_sync_enabled', stationId)) ?? true
 }
 
+// Whether the discovery sync imports NEW programs as active (processed from the
+// next ingest tick) instead of inactive-for-review. Default false (opt-out
+// onboarding). A station that wants every program — e.g. KPFK, which runs the
+// profanity check across music shows too — sets its override true.
+export async function getDiscoveryAutoActivate(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('discovery_auto_activate', stationId)) === true
+}
+
 // Show keys to skip at ingest, matched exactly against show_keys.key. Keyed by
 // the per-feed key (not the program name) so one airing of a show can be dropped
 // while sibling airings under the same name keep running (e.g. drop KPFA's 9am
