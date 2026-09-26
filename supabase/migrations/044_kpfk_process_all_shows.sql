@@ -17,13 +17,27 @@
 --    values "0".."14" named "Music", "News", "All Categories", ...) as if it were
 --    programs (fixed in lib/archive-discover.ts). They aren't feeds; at KPFA and
 --    WPFW several were even active. Archived (tombstone, migration 034) rather
---    than deleted so discovery never re-imports them. Guarded on having no
---    episodes — at the time of writing none of them had ever ingested one.
+--    than deleted so discovery never re-imports them. A numeric key alone isn't
+--    proof (nothing forbids a real all-digit show key), so the match also
+--    requires the archive's category-filter label as the name, no resolved feed
+--    (category/feed_name null — a category id has no feed), and no episodes.
+--    Labels are the full set seen across KPFK/KPFA/WPFW/KPFT at time of writing.
 update public.show_keys k
 set active = false,
     archived_at = now()
 where k.key ~ '^[0-9]+$'
   and k.archived_at is null
+  and k.category is null
+  and k.feed_name is null
+  and k.show_name in (
+    'All Categories', 'Arts & Entertainment', 'Comedy & Satire', 'Community Access',
+    'Culture', 'Español', 'Health & Fitness', 'Health & Spirituality', 'Local Music',
+    'Local Public Affairs', 'Local Public Affairs (En Espanol)',
+    'Local Public Affairs carried Nationally', 'Music', 'Music Mix', 'News',
+    'News Program', 'News Special', 'Political Talk', 'Public Access',
+    'Public Affairs - Local', 'Public Affairs- National+Syndicated',
+    'Special Program', 'Spoken Word', 'Syndicated Music', 'Syndicated Program'
+  )
   and not exists (
     select 1 from public.episode_log e
     where e.station_id = k.station_id and e.show_key = k.key
