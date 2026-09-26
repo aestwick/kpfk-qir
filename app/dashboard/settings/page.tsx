@@ -156,6 +156,7 @@ export default function SettingsPage() {
   const [providers, setProviders] = useState<ProviderRow[]>([])
   const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({})
   const [diarizationEnabled, setDiarizationEnabled] = useState(true)
+  const [discoveryAutoActivate, setDiscoveryAutoActivate] = useState(false)
   const [savingProviders, setSavingProviders] = useState(false)
   const [corrections, setCorrections] = useState<Correction[]>([])
   const [wordlist, setWordlist] = useState<ComplianceWord[]>([])
@@ -289,6 +290,7 @@ export default function SettingsPage() {
       setProviders(parsedProviders)
       setProviderStatus((data.providerStatus as Record<string, boolean>) ?? {})
       setDiarizationEnabled(data.settings?.diarization_enabled !== false)
+      setDiscoveryAutoActivate(data.settings?.discovery_auto_activate === true)
       if (data.settings?.compliance_checks_enabled) {
         setComplianceChecks(data.settings.compliance_checks_enabled as Record<string, boolean>)
       }
@@ -595,6 +597,22 @@ export default function SettingsPage() {
     } catch {
       setDiarizationEnabled(!next)
       toast('error', 'Failed to save diarization setting')
+    }
+  }
+
+  async function toggleDiscoveryAutoActivate() {
+    const next = !discoveryAutoActivate
+    setDiscoveryAutoActivate(next)
+    try {
+      const res = await authedFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'discovery_auto_activate', value: next }),
+      })
+      if (!res.ok) throw new Error('save failed')
+    } catch {
+      setDiscoveryAutoActivate(!next)
+      toast('error', 'Failed to save auto-activate setting')
     }
   }
 
@@ -1551,6 +1569,12 @@ export default function SettingsPage() {
               />
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input type="checkbox" checked={discoveryAutoActivate} onChange={toggleDiscoveryAutoActivate} className="rounded" />
+            <span className="text-gray-700 dark:text-warm-300">Auto-activate new shows</span>
+            <span className="text-xs text-gray-400 dark:text-warm-500">— programs the daily archive sync discovers are processed right away instead of waiting here inactive for review (music included)</span>
+          </label>
 
           {/* Lifecycle filter: live working set, just active/inactive, or the
               archived (soft-deleted) shows. */}
