@@ -52,11 +52,20 @@ export interface DiscoveredShow {
  * name falls back to the key.
  */
 export function parseProgramOptions(html: string): DiscoveredShow[] {
+  // The home page has TWO dropdowns: the program list (<select id="sh_altid">)
+  // and a category filter (<select id="ca_id">, numeric values "0".."14" named
+  // "Music", "News", ...). Scanning every <option> imported the categories as
+  // bogus show keys, so scope to the program <select> when it's present. Falls
+  // back to the whole page (minus the category select) if the markup changes.
+  const program = /<select\b[^>]*\bid="sh_altid"[^>]*>([\s\S]*?)<\/select>/i.exec(html)
+  const scope = program
+    ? program[1]
+    : html.replace(/<select\b[^>]*\bid="ca_id"[^>]*>[\s\S]*?<\/select>/gi, '')
   const re = /<option\b[^>]*\bvalue="([^"]*)"[^>]*>([^<]*)/gi
   const seen = new Set<string>()
   const out: DiscoveredShow[] = []
   let m: RegExpExecArray | null
-  while ((m = re.exec(html)) !== null) {
+  while ((m = re.exec(scope)) !== null) {
     const key = m[1].trim()
     if (!/^[a-z0-9_]+$/i.test(key) || seen.has(key)) continue
     seen.add(key)
