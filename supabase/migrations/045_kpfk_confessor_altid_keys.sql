@@ -57,3 +57,25 @@ where s.id = e.station_id
   and s.slug = 'kpfk'
   and e.mp3_url = 'https://archive.kpfk.org/mp3/kpfk_260926_020000potira.mp3'
   and e.status in ('dead', 'failed');
+
+-- 4. Special Music Programming (Tuesdays 11 PM) is music, but Confessor files
+--    it under "Special Program", and with no curated category ingest copied
+--    that onto every episode, so it sat with the talk specials in the genre
+--    filter and the public API. Set the show's category and correct the
+--    episodes already ingested (a snapshot column; ingest won't revisit them).
+update public.show_keys k
+set category = 'Music'
+from public.stations s
+where s.id = k.station_id
+  and s.slug = 'kpfk'
+  and k.key = 'specialmusicprogramm'
+  and k.category is distinct from 'Music';
+
+update public.episode_log e
+set category = 'Music',
+    updated_at = now()
+from public.stations s
+where s.id = e.station_id
+  and s.slug = 'kpfk'
+  and e.show_key = 'specialmusicprogramm'
+  and e.category is distinct from 'Music';
