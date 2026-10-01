@@ -8,7 +8,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
 import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused, isDiarizationEnabled } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
-import { getCurrentQuarterBounds } from '../lib/quarters'
+import { getProcessingWindowBounds } from '../lib/quarters'
 import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
@@ -52,7 +52,7 @@ const CHUNK_DURATION_SECONDS = 900 // 15 minutes
 function resolveWindow(job: Job): { start: string; end: string } {
   const w = job.data?.window as { start?: string; end?: string } | undefined
   if (w?.start && w?.end) return { start: w.start, end: w.end }
-  return getCurrentQuarterBounds()
+  return getProcessingWindowBounds()
 }
 
 async function loadCorrections(stationId: string): Promise<

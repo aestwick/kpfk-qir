@@ -1,7 +1,7 @@
 import { Job } from 'bullmq'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '../lib/supabase'
-import { getCurrentQuarterBounds } from '../lib/quarters'
+import { getProcessingWindowBounds } from '../lib/quarters'
 import { logSummarizationUsage, logEmbeddingUsage } from '../lib/usage'
 import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, getSummarizationModel, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
@@ -26,7 +26,7 @@ interface SummaryResponse {
 function resolveWindow(job: Job): { start: string; end: string } {
   const w = job.data?.window as { start?: string; end?: string } | undefined
   if (w?.start && w?.end) return { start: w.start, end: w.end }
-  return getCurrentQuarterBounds()
+  return getProcessingWindowBounds()
 }
 
 export async function processSummarize(job: Job) {
