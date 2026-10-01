@@ -401,6 +401,11 @@ export async function processIngest(job: Job) {
   // How many recent episodes to request per show from Confessor (matches the
   // RSS feed depth roughly; archive only returns non-expired rows anyway).
   const CONFESSOR_NUM = 10
+  // A show with no Confessor episodes yet (newly activated, or a key
+  // corrected to its Confessor altid) asks for its whole archive window
+  // instead, so its first ingest backfills everything still downloadable — a daily show has ~40
+  // airings in Confessor's 60-day `fil` window, far past CONFESSOR_NUM.
+  const CONFESSOR_BACKFILL_NUM = 100
   console.log(`[ingest] starting ${useConfessor ? 'Confessor' : 'RSS'} fetch for ${station.slug}...`)
 
   const excludedCategories = await getExcludedCategories(stationId)
@@ -430,7 +435,18 @@ export async function processIngest(job: Job) {
   // fallback so one show's Confessor outage doesn't starve the rest.
   const ingestOneShow = async (show: typeof activeShows[number]): Promise<number> => {
     if (useConfessor) {
-      const res = await processShowConfessor(show, confessorCtx, CONFESSOR_NUM)
+      // Only a Confessor-sourced row proves the backfill ran: an RSS-fallback
+      // insert (Confessor down on the first tick) carries just the feed's
+      // newest items, so it must not end backfill mode.
+      const { data: confessorEpisode } = await supabaseAdmin
+        .from('episode_log')
+        .select('id')
+        .eq('station_id', stationId)
+        .eq('show_key', show.key)
+        .eq('ingest_source', 'confessor')
+        .limit(1)
+      const num = confessorEpisode?.length ? CONFESSOR_NUM : CONFESSOR_BACKFILL_NUM
+      const res = await processShowConfessor(show, confessorCtx, num)
       if (res.ok) return res.count
       console.warn(`[ingest] confessor unavailable for ${show.key} — falling back to RSS`)
     }
