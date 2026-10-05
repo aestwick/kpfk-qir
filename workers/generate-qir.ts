@@ -10,8 +10,11 @@ import {
   formatFullReport,
   formatCuratedReport,
   getQuarterDateRange,
+  spreadCandidates,
+  summarizeDateSpread,
   type QirEntry,
 } from '../lib/qir-format'
+import type { EpisodeLog } from '../lib/types'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 export interface GenerateQirOptions {
@@ -57,17 +60,29 @@ export async function processGenerateQir(job: Job) {
     ]
 
   // Get all completed episodes in this quarter (summarized or compliance_checked),
-  // including those with null air_date created during this quarter
-  const { data: episodes, error } = await supabaseAdmin
-    .from('episode_log')
-    .select('*')
-    .eq('station_id', stationId)
-    .in('status', ['summarized', 'compliance_checked'])
-    .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-    .order('air_date', { ascending: true })
+  // including those with null air_date created during this quarter. Paged:
+  // PostgREST caps a response at 1000 rows, and a full quarter runs ~2000 — a
+  // single select silently returned only the first ~7 weeks (KPFK Q3 2026's
+  // draft never saw September).
+  const PAGE = 1000
+  const episodes: EpisodeLog[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error } = await supabaseAdmin
+      .from('episode_log')
+      .select('*')
+      .eq('station_id', stationId)
+      .in('status', ['summarized', 'compliance_checked'])
+      .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+      .order('air_date', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
+    episodes.push(...((page ?? []) as EpisodeLog[]))
+    if (!page || page.length < PAGE) break
+  }
+  console.log(`[generate-qir] ${episodes.length} completed episodes in Q${quarter} ${year}`)
 
-  if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-  if (!episodes?.length) {
+  if (!episodes.length) {
     console.log('[generate-qir] no completed episodes for this quarter')
     return { drafted: false, reason: 'no episodes' }
   }
@@ -78,13 +93,19 @@ export async function processGenerateQir(job: Job) {
   let blockedCount = 0
   let gatedEpisodes = episodes
   if (await isComplianceBlocking()) {
-    const { data: criticalFlags } = await supabaseAdmin
-      .from('compliance_flags')
-      .select('episode_id')
-      .in('episode_id', episodes.map((e) => e.id))
-      .eq('severity', 'critical')
-      .neq('review_status', 'dismissed')
-    const blocked = new Set((criticalFlags ?? []).map((f) => f.episode_id))
+    // Chunked: ~2000 ids in one `in.(…)` overflows the request URL.
+    const blocked = new Set<number>()
+    const ids = episodes.map((e) => e.id)
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data: criticalFlags, error: flagErr } = await supabaseAdmin
+        .from('compliance_flags')
+        .select('episode_id')
+        .in('episode_id', ids.slice(i, i + 200))
+        .eq('severity', 'critical')
+        .neq('review_status', 'dismissed')
+      if (flagErr) throw new Error(`Failed to fetch compliance flags: ${flagErr.message}`)
+      for (const f of criticalFlags ?? []) blocked.add(f.episode_id)
+    }
     if (blocked.size) {
       blockedCount = blocked.size
       gatedEpisodes = episodes.filter((e) => !blocked.has(e.id))
@@ -148,9 +169,24 @@ export async function processGenerateQir(job: Job) {
   // Build the full report text
   const fullText = formatFullReport(allEntries, year, quarter, station.name)
 
-  // Build prompt for AI curation
+  // Build prompt for AI curation. A full quarter is far too many episodes to
+  // send whole, and the model favours whatever comes first — so each category
+  // gets a capped, week-spread candidate list (substantive episodes first
+  // within each week), interleaved across the quarter.
+  const candidateCap = Math.max(60, maxPerCategory * 5)
+  const isoDateById = new Map(filteredEpisodes.map((ep) => [ep.id, ep.air_date]))
+  const candidateScore = (e: QirEntry) =>
+    (e.guest && e.guest.trim() && e.guest.toLowerCase() !== 'none' ? 2 : 0) +
+    (e.summary && e.summary.length > 100 ? 1 : 0) +
+    (e.headline ? 1 : 0)
   const categorySummaries: string[] = []
-  for (const [category, entries] of Object.entries(grouped)) {
+  for (const [category, allInCategory] of Object.entries(grouped)) {
+    const entries = spreadCandidates(
+      allInCategory,
+      candidateCap,
+      (e) => isoDateById.get(e.episode_id) ?? e.air_date,
+      candidateScore
+    )
     const entrySummaries = entries.map(
       (e) =>
         `  ID:${e.episode_id} | ${e.show_name} | ${e.air_date} | "${e.headline}" | Guest: ${e.guest || 'none'} | ${e.summary.slice(0, 200)}`
@@ -160,12 +196,17 @@ export async function processGenerateQir(job: Job) {
     )
   }
 
+  const quarterMonths = [0, 1, 2].map((i) =>
+    new Date(Date.UTC(year, (quarter - 1) * 3 + i, 1)).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })
+  )
+
   const guidanceSection = guidance
     ? `\n\nADDITIONAL GUIDANCE FROM THE EDITOR:\n${guidance}\n`
     : ''
 
   const userMessage = `Select up to ${maxPerCategory} entries per category for the FCC Quarterly Issues Report.
 Available categories: ${issueCategories.join(', ')}
+The report must show service across the WHOLE quarter: within each category, spread selections across ${quarterMonths.join(', ')} rather than clustering in one stretch.
 ${guidanceSection}
 ${categorySummaries.join('\n')}`
 
@@ -232,6 +273,8 @@ ${categorySummaries.join('\n')}`
         summary: rw.description?.trim() || e.summary,
       }
     })
+  const spread = summarizeDateSpread(curatedEntries.map((e) => isoDateById.get(e.episode_id) ?? e.air_date))
+  if (spread) console.log(`[generate-qir] curated ${curatedEntries.length} entries spanning ${spread.spanDays} days across ${spread.months} month(s)`)
   const curatedText = formatCuratedReport(curatedEntries, year, quarter, station.name)
 
   // Get the next version number for this quarter

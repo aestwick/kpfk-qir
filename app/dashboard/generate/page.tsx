@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { getQuarterOptions } from '@/lib/quarters'
+import { summarizeDateSpread } from '@/lib/qir-format'
 import dynamic from 'next/dynamic'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 
@@ -126,11 +127,9 @@ function runValidation(draft: QirDraft, complianceSummary: Record<string, { coun
   }
 
   // 4. Date spread
-  const dates = entries.map(e => e.air_date).filter(Boolean).sort()
-  if (dates.length >= 2) {
-    const first = new Date(dates[0])
-    const last = new Date(dates[dates.length - 1])
-    const spanDays = Math.round((last.getTime() - first.getTime()) / (1000 * 60 * 60 * 24))
+  const spread = summarizeDateSpread(entries.map(e => e.air_date))
+  if (spread) {
+    const { spanDays } = spread
     if (spanDays >= 60) {
       checks.push({ label: 'Date distribution', status: 'pass', detail: `Spans ${spanDays} days across the quarter` })
     } else if (spanDays >= 30) {
@@ -218,22 +217,20 @@ function computeServiceRating(entries: QirEntry[], allCategories: string[]): { r
   })
 
   // 4. Temporal coverage (0-25): spread across the full quarter
-  const dates = entries.map(e => e.air_date).filter(Boolean).sort()
+  // Parsed, not string-sorted: air_date is usually the long display form
+  // ("Friday, July 17, 2026"), which sorts by weekday name.
+  const spread = summarizeDateSpread(entries.map(e => e.air_date))
   let timeScore = 0
-  if (dates.length >= 2) {
-    const first = new Date(dates[0])
-    const last = new Date(dates[dates.length - 1])
-    const spanDays = Math.round((last.getTime() - first.getTime()) / (1000 * 60 * 60 * 24))
+  if (spread) {
+    const { spanDays, months } = spread
     // Full quarter is ~90 days
     timeScore = Math.min(25, Math.round((spanDays / 80) * 25))
-    // Check for monthly distribution (3 months in a quarter)
-    const months = new Set(dates.map(d => d.slice(0, 7)))
     ratings.push({
       label: 'Temporal Coverage',
       score: timeScore,
       maxScore: 25,
-      detail: `Coverage spans ${spanDays} days across ${months.size} month(s)`,
-      suggestion: months.size < 3
+      detail: `Coverage spans ${spanDays} days across ${months} month(s)`,
+      suggestion: months < 3
         ? 'Ensure entries from all 3 months of the quarter for consistent coverage'
         : spanDays < 60
           ? 'Entries are clustered - spread selections across the full quarter'
