@@ -106,7 +106,7 @@ export async function PATCH(request: NextRequest) {
 
   const meta = requestMeta(request)
   void logAuditEvent({
-    action: AUDIT_ACTIONS.API_KEY_REVOKE,
+    action: body.active ? AUDIT_ACTIONS.API_KEY_ACTIVATE : AUDIT_ACTIONS.API_KEY_REVOKE,
     operation: 'update',
     actorId: userId,
     stationId,
@@ -141,7 +141,7 @@ export async function DELETE(request: NextRequest) {
 
   const meta = requestMeta(request)
   void logAuditEvent({
-    action: AUDIT_ACTIONS.API_KEY_REVOKE,
+    action: AUDIT_ACTIONS.API_KEY_DELETE,
     operation: 'delete',
     actorId: userId,
     stationId,

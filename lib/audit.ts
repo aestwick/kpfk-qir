@@ -57,6 +57,8 @@ export const AUDIT_ACTIONS = {
   // service-role writes that DB triggers would otherwise record as 'system'.
   API_KEY_CREATE: 'api_key.create',
   API_KEY_REVOKE: 'api_key.revoke',
+  API_KEY_ACTIVATE: 'api_key.activate',
+  API_KEY_DELETE: 'api_key.delete',
 
   // Exports / downloads
   EPISODES_EXPORT: 'episodes.export',
