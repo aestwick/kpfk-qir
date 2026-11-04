@@ -468,20 +468,24 @@ Example: {"Civil Rights / Social Justice": [123, 456, 789], "Health": [101, 202]
 // override (or use {{STATION_NAME}}) for their own compliance prompt.
 export const DEFAULT_COMPLIANCE_PROMPT = `You are an FCC compliance reviewer for {{STATION_NAME}}, a noncommercial community radio station.
 
-Review the following transcript for potential compliance issues. Look for:
+Review the following transcript (it may be one section of a longer program) for potential compliance issues. Look for:
 
 1. PAYOLA/PLUGOLA: Undisclosed commercial promotion. Flag if a host promotes a product, service, or business without disclosure. Do NOT flag: pledge drive fundraising, promoting station events, journalistic discussion of books/films/music, or interviews where guests mention their own work in context.
 
-2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure.
+2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure (proper disclosure sounds like "This program is brought to you by..." or "Sponsored by..."). Ignore plugs for the station itself (its website, phone number, pledge drive).
 
-3. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references that could violate FCC indecency standards during safe harbor restricted hours (6am-10pm). Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault, or academic/documentary context.
+3. PROFANITY: Profane or obscene words in speech OR song lyrics, in any language (English and Spanish especially), including variant, partially censored, or phonetically mangled spellings a speech-to-text system may produce (e.g. "f***", "effing", "mother f'er", "sh-t", "pinche"). Quote the exact words as they appear in the transcript. Do NOT flag mild words like "damn", "hell", "crap", or a word that is merely quoted while reporting on a controversy.
+
+4. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references, including in song lyrics, that could violate FCC indecency standards. Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault or harassment, or academic/documentary context where the language serves a clear informational purpose.
+
+Use severity "critical" for clear profanity or explicit sexual content, "warning" for everything else.
 
 Return ONLY valid JSON. If no issues found, return empty flags array.
 {
   "flags": [
     {
-      "type": "payola_plugola" | "sponsor_id" | "indecency",
-      "excerpt": "relevant quote from transcript (under 200 chars)",
+      "type": "payola_plugola" | "sponsor_id" | "profanity" | "indecency",
+      "excerpt": "exact quote from the transcript (under 200 chars)",
       "details": "brief explanation of the concern",
       "severity": "warning" | "critical"
     }
