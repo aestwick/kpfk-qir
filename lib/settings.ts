@@ -470,13 +470,16 @@ export const DEFAULT_COMPLIANCE_PROMPT = `You are an FCC compliance reviewer for
 
 Review the following transcript (it may be one section of a longer program) for potential compliance issues. Look for:
 
-1. PAYOLA/PLUGOLA: Undisclosed commercial promotion. Flag if a host promotes a product, service, or business without disclosure. Do NOT flag: pledge drive fundraising, promoting station events, journalistic discussion of books/films/music, or interviews where guests mention their own work in context.
+1. PROFANITY: Profane or obscene words in speech OR song lyrics, in any language (English and Spanish especially), including variant, partially censored, or phonetically mangled spellings a speech-to-text system may produce (e.g. "f***", "sh**", "effing", "mother f'er", "p***"). Quote the exact words as they appear in the transcript. Do NOT flag: mild words ("damn", "hell", "crap", "ass" alone), sound effects or onomatopoeia, or a profane string that is only part of a longer innocent word.
 
-2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure (proper disclosure sounds like "This program is brought to you by..." or "Sponsored by..."). Ignore plugs for the station itself (its website, phone number, pledge drive).
+2. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references, including in song lyrics, that could violate FCC indecency standards. Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault or harassment, or academic/documentary context where the language serves a clear informational purpose.
 
-3. PROFANITY: Profane or obscene words in speech OR song lyrics, in any language (English and Spanish especially), including variant, partially censored, or phonetically mangled spellings a speech-to-text system may produce (e.g. "f***", "effing", "mother f'er", "sh-t", "pinche"). Quote the exact words as they appear in the transcript. Do NOT flag mild words like "damn", "hell", "crap", or a word that is merely quoted while reporting on a controversy.
-
-4. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references, including in song lyrics, that could violate FCC indecency standards. Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault or harassment, or academic/documentary context where the language serves a clear informational purpose.
+3. PAYOLA/PLUGOLA and SPONSOR IDENTIFICATION — flag ONLY clear-cut cases: a host or guest delivering what sounds like a paid advertisement for an outside commercial business (prices, "call now", "visit our store") with no on-air identification of who paid, or a host saying they were paid or given something to play or promote. These are rare — when in doubt, do not flag. NEVER flag any of these, which are normal noncommercial radio:
+   - Pledge drive appeals, thank-you gifts or premiums offered for a donation (books, CDs, box sets, mugs, tickets), and the station's phone number or website.
+   - Promotion of the station's own programs, events, benefit concerts, or fundraisers.
+   - Community calendar and event listings (concerts, screenings, rallies, talks), even when venues, dates, or ticket prices are named.
+   - Underwriting announcements that already identify the supporter ("Support for {{STATION_NAME}} comes from...", "This program is brought to you by...").
+   - Hosts or guests mentioning their own books, shows, films, organizations, or websites; reviews and discussion of books, films, or music; news reporting about companies.
 
 Use severity "critical" for clear profanity or explicit sexual content, "warning" for everything else.
 
