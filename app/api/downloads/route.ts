@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { getQuarterDateRange } from '@/lib/qir-format'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { toCsv } from '@/lib/csv'
+import { fetchAllRows } from '@/lib/fetch-all'
+import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
+
+// transcripts carry up to ~225KB of VTT each, so fetch them in small id batches
+// (also keeps the .in() list well under URL-length limits).
+const TRANSCRIPT_BATCH = 50
 
 export const dynamic = 'force-dynamic'
 
@@ -26,19 +33,24 @@ export async function GET(request: NextRequest) {
     const { start, end } = getQuarterDateRange(year, quarter)
 
     if (type === 'episodes') {
-      const { data: episodes, error } = await supabase
-        .from('episode_log')
-        .select('*')
-        .eq('station_id', stationId)
-        .gte('air_date', start)
-        .lte('air_date', end)
-        .order('air_date', { ascending: true })
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
+      // Paged: a quarter is ~2,000 episodes and PostgREST caps a response at
+      // 1000, so the CSV used to stop silently around mid-August.
+      let rows: Record<string, unknown>[]
+      try {
+        rows = await fetchAllRows('episodes', (from, to) =>
+          supabase
+            .from('episode_log')
+            .select('*')
+            .eq('station_id', stationId)
+            .gte('air_date', start)
+            .lte('air_date', end)
+            .order('air_date', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to)
+        )
+      } catch (err) {
+        return NextResponse.json({ error: (err as Error).message }, { status: 500 })
       }
-
-      const rows = episodes ?? []
       const meta = requestMeta(request)
       void logAuditEvent({
         action: AUDIT_ACTIONS.DOWNLOADS_EXPORT,
@@ -55,23 +67,11 @@ export async function GET(request: NextRequest) {
         'end_time', 'duration', 'headline', 'host', 'guest',
         'issue_category', 'summary', 'mp3_url',
       ]
-      const csvLines = [
-        headers.join(','),
-        ...rows.map((r: Record<string, unknown>) =>
-          headers
-            .map((h) => {
-              const val = String(r[h] ?? '')
-              return val.includes(',') || val.includes('"') || val.includes('\n')
-                ? `"${val.replace(/"/g, '""')}"`
-                : val
-            })
-            .join(',')
-        ),
-      ]
+      const csv = toCsv(headers, rows.map((r) => headers.map((h) => r[h])))
 
-      return new Response(csvLines.join('\n'), {
+      return new Response(csv, {
         headers: {
-          'Content-Type': 'text/csv',
+          'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="episodes_Q${quarter}_${year}.csv"`,
         },
       })
@@ -79,35 +79,50 @@ export async function GET(request: NextRequest) {
 
     if (type === 'transcripts' || type === 'vtts') {
       // Get episodes with transcripts for this quarter
-      const { data: episodes, error } = await supabase
-        .from('episode_log')
-        .select('id, show_name, air_date, show_key')
-        .eq('station_id', stationId)
-        .gte('air_date', start)
-        .lte('air_date', end)
-        .in('status', ['transcribed', 'summarized'])
-        .order('air_date', { ascending: true })
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 })
+      // Every status that has a transcript — including compliance_checked, the
+      // terminal state. The old ['transcribed','summarized'] filter matched
+      // nothing once compliance ran, so every recent quarter returned 404.
+      type Ep = { id: number; show_name: string | null; air_date: string | null; show_key: string | null }
+      type Tr = { episode_id: number; transcript: string | null; vtt: string | null }
+      let episodes: Ep[]
+      let transcripts: Tr[] = []
+      try {
+        episodes = await fetchAllRows<Ep>('episodes', (from, to) =>
+          supabase
+            .from('episode_log')
+            .select('id, show_name, air_date, show_key')
+            .eq('station_id', stationId)
+            .gte('air_date', start)
+            .lte('air_date', end)
+            .in('status', [...TRANSCRIBED_STATUSES])
+            .order('air_date', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to)
+        )
+        const epIds = episodes.map((e) => e.id)
+        const field = type === 'transcripts' ? 'transcript' : 'vtt'
+        for (let i = 0; i < epIds.length; i += TRANSCRIPT_BATCH) {
+          // transcripts has no station_id; scope via the episode_log join.
+          const { data, error: tErr } = await supabase
+            .from('transcripts')
+            .select(`episode_id, ${field}, episode_log!inner(station_id)`)
+            .in('episode_id', epIds.slice(i, i + TRANSCRIPT_BATCH))
+            .eq('episode_log.station_id', stationId)
+          if (tErr) throw new Error(`Failed to load transcripts: ${tErr.message}`)
+          transcripts.push(...((data ?? []) as unknown as Tr[]))
+        }
+      } catch (err) {
+        return NextResponse.json({ error: (err as Error).message }, { status: 500 })
       }
 
-      if (!episodes?.length) {
+      if (!episodes.length) {
         return NextResponse.json(
           { error: 'No transcripts found for this quarter' },
           { status: 404 }
         )
       }
 
-      const epIds = episodes.map((e) => e.id)
-      // transcripts has no station_id; scope via the episode_log join.
-      const { data: transcripts } = await supabase
-        .from('transcripts')
-        .select('episode_id, transcript, vtt, episode_log!inner(station_id)')
-        .in('episode_id', epIds)
-        .eq('episode_log.station_id', stationId)
-
-      if (!transcripts?.length) {
+      if (!transcripts.length) {
         return NextResponse.json(
           { error: 'No transcript data found' },
           { status: 404 }

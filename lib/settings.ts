@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabase'
 import { getStation } from './stations'
+import { fetchAllRows } from './fetch-all'
 import { resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from './openai-models'
 import { resolveGroqModel } from './groq-models'
 
@@ -336,15 +337,19 @@ export async function getUniversalSpendLimits(): Promise<{ monthly: number | nul
 // (one quarter-spanning read; month ⊆ quarter).
 async function sumSpend(stationId?: string): Promise<{ month: number; quarter: number }> {
   const { monthStart, quarterStart } = monthAndQuarterStart()
-  let query = supabaseAdmin
-    .from('usage_log')
-    .select('estimated_cost, created_at')
-    .gte('created_at', quarterStart)
-  if (stationId) query = query.eq('station_id', stationId)
-  const { data } = await query
+  // Paged: a quarter is ~9k rows and PostgREST caps a response at 1000, so a
+  // single select summed an arbitrary 1000 rows and caps tripped late (or never).
+  const data = await fetchAllRows<{ estimated_cost: number | null; created_at: string }>('spend', (from, to) => {
+    let query = supabaseAdmin
+      .from('usage_log')
+      .select('estimated_cost, created_at')
+      .gte('created_at', quarterStart)
+    if (stationId) query = query.eq('station_id', stationId)
+    return query.order('id').range(from, to)
+  })
   let month = 0
   let quarter = 0
-  for (const r of data ?? []) {
+  for (const r of data) {
     const amt = Number(r.estimated_cost) || 0
     quarter += amt
     if (typeof r.created_at === 'string' && r.created_at.slice(0, 10) >= monthStart) month += amt

@@ -3,8 +3,20 @@ import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@
 import { getIssueCategories, getSetting, isPipelinePaused } from '@/lib/settings'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
+import { fetchAllRows } from '@/lib/fetch-all'
+import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
 
 export const dynamic = 'force-dynamic'
+
+// Page past PostgREST's 1000-row cap, shaped like a single query result so it
+// slots into the Promise.all below. A quarter of KPFK usage is ~9k rows; the
+// capped single select under-reported spend by ~60%.
+function pagedRows<T>(
+  context: string,
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<{ data: T[] }> {
+  return fetchAllRows(context, page).then((data) => ({ data }))
+}
 
 function getQuarterBounds() {
   const now = new Date()
@@ -131,36 +143,43 @@ async function buildDashboard(
       .eq('station_id', stationId)
       .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()),
 
-    // 5. Usage/cost for this quarter
-    supabase
+    // 5. Usage/cost for this quarter (paged — a quarter is ~9k rows)
+    pagedRows('quarter usage', (from, to) => supabase
       .from('usage_log')
-      .select('*')
+      .select('episode_id, service, estimated_cost')
       .eq('station_id', stationId)
       .gte('created_at', qtr.start)
-      .lte('created_at', qtr.end + 'T23:59:59'),
+      .lte('created_at', qtr.end + 'T23:59:59')
+      .order('id')
+      .range(from, to)),
 
     // 6. Daily costs for last 30 days
-    supabase
+    pagedRows('daily usage', (from, to) => supabase
       .from('usage_log')
       .select('created_at, estimated_cost, service, operation')
       .eq('station_id', stationId)
       .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-      .order('created_at', { ascending: true }),
+      .order('id')
+      .range(from, to)),
 
     // 7. Issue category distribution (completed episodes this quarter)
-    supabase
+    pagedRows('category breakdown', (from, to) => supabase
       .from('episode_log')
       .select('issue_category')
       .eq('station_id', stationId)
       .in('status', ['summarized', 'compliance_checked'])
-      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
+      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`)
+      .order('id')
+      .range(from, to)),
 
     // 8. Show distribution (this quarter)
-    supabase
+    pagedRows('show breakdown', (from, to) => supabase
       .from('episode_log')
       .select('show_name, show_key, status')
       .eq('station_id', stationId)
-      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
+      .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`)
+      .order('id')
+      .range(from, to)),
 
     // 9-12. Queue status
     getQueueCounts(ingestQueue),
@@ -204,18 +223,20 @@ async function buildDashboard(
       .limit(1),
 
     // 17. Current month usage
-    supabase
+    pagedRows('month usage', (from, to) => supabase
       .from('usage_log')
       .select('estimated_cost, service')
       .eq('station_id', stationId)
-      .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+      .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString())
+      .order('id')
+      .range(from, to)),
 
     // 18. Quality flags: episodes with very short transcripts but long duration
     supabase
       .from('episode_log')
       .select('id, show_name, headline, air_date, duration, status')
       .eq('station_id', stationId)
-      .in('status', ['transcribed', 'summarized', 'compliance_checked'])
+      .in('status', [...TRANSCRIBED_STATUSES])
       .gt('duration', 1800)
       .or(`and(air_date.gte.${qtr.start},air_date.lte.${qtr.end}),and(air_date.is.null,created_at.gte.${qtr.start}T00:00:00Z,created_at.lte.${qtr.end}T23:59:59Z)`),
 

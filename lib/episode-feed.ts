@@ -38,6 +38,9 @@ import { normalizeShowName } from './shows'
 export const PUBLISHED_STATUSES = ['summarized', 'compliance_checked'] as const
 export type PublishedStatus = (typeof PUBLISHED_STATUSES)[number]
 
+/** Every status at which an episode has a stored transcript (transcribed or later). */
+export const TRANSCRIBED_STATUSES = ['transcribed', ...PUBLISHED_STATUSES] as const
+
 /** Columns exposed by the published contract. Anything not listed is internal. */
 export const FEED_SELECT = [
   'public_id',

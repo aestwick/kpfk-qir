@@ -126,7 +126,10 @@ export interface AuditEventInput {
 export async function logAuditEvent(e: AuditEventInput): Promise<void> {
   try {
     const actorType = e.anonymous ? 'anonymous' : e.actorId ? 'user' : 'system'
-    await supabaseAdmin.from('audit_log').insert({
+    // supabase-js reports DB failures (CHECK violation, bad inet, …) in
+    // `error` rather than throwing, so check it — otherwise a broken audit
+    // write vanishes without a trace (lib/usage.ts learned the same lesson).
+    const { error } = await supabaseAdmin.from('audit_log').insert({
       station_id: e.stationId ?? null,
       actor_id: e.actorId ?? null,
       actor_type: actorType,
@@ -138,6 +141,7 @@ export async function logAuditEvent(e: AuditEventInput): Promise<void> {
       ip_address: e.ip ?? null,
       user_agent: e.userAgent ?? null,
     })
+    if (error) console.error(`logAuditEvent failed (${e.action}):`, error.message)
   } catch (err) {
     console.error('logAuditEvent failed:', err)
   }
