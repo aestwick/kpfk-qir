@@ -495,6 +495,7 @@ Return ONLY valid JSON. If no issues found, return empty flags array.
     {
       "type": "payola_plugola" | "sponsor_id" | "profanity" | "indecency",
       "excerpt": "exact quote from the transcript (under 200 chars)",
+      "term": "for profanity: the single offending word exactly as written in the transcript, else omit",
       "details": "brief explanation of the concern",
       "severity": "warning" | "critical"
     }
