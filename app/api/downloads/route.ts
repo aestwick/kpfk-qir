@@ -125,38 +125,50 @@ export async function GET(request: NextRequest) {
       // ~225KB, too much to hold (and join) in memory at once. A plain
       // concatenated text file (zip would require a library).
       const encoder = new TextEncoder()
+      // One batch per pull(): the runtime only asks for more once the client
+      // has drained what it has, so a slow download holds ~one batch in
+      // memory instead of the whole quarter. cancel() stops on disconnect.
+      let next = 0
+      let cancelled = false
       const stream = new ReadableStream<Uint8Array>({
-        async start(controller) {
+        async pull(controller) {
           try {
-            for (let i = 0; i < episodes.length; i += TRANSCRIPT_BATCH) {
-              const batch = episodes.slice(i, i + TRANSCRIPT_BATCH)
-              // transcripts has no station_id; scope via the episode_log join.
-              const { data, error: tErr } = await supabase
-                .from('transcripts')
-                .select(`episode_id, ${field}, episode_log!inner(station_id)`)
-                .in('episode_id', batch.map((e) => e.id))
-                .eq('episode_log.station_id', stationId)
-              if (tErr) throw new Error(`Failed to load transcripts: ${tErr.message}`)
-              const byId = new Map(
-                ((data ?? []) as unknown as Array<Record<string, unknown>>).map((t) => [t.episode_id as number, t[field] as string | null])
-              )
-              for (const ep of batch) {
-                const content = byId.get(ep.id)
-                if (!content) continue
-                const safeName = (ep.show_name ?? ep.show_key ?? `ep${ep.id}`).replace(/[^a-zA-Z0-9_-]/g, '_')
-                controller.enqueue(encoder.encode(
-                  `${'='.repeat(60)}\n` +
-                  `FILE: ${safeName}_${ep.air_date}_${ep.id}.${ext}\n` +
-                  `${'='.repeat(60)}\n\n` +
-                  content + '\n\n'
-                ))
-              }
+            if (cancelled || next >= episodes.length) {
+              controller.close()
+              return
             }
-            controller.close()
+            const batch = episodes.slice(next, next + TRANSCRIPT_BATCH)
+            next += TRANSCRIPT_BATCH
+            // transcripts has no station_id; scope via the episode_log join.
+            const { data, error: tErr } = await supabase
+              .from('transcripts')
+              .select(`episode_id, ${field}, episode_log!inner(station_id)`)
+              .in('episode_id', batch.map((e) => e.id))
+              .eq('episode_log.station_id', stationId)
+            if (tErr) throw new Error(`Failed to load transcripts: ${tErr.message}`)
+            const byId = new Map(
+              ((data ?? []) as unknown as Array<Record<string, unknown>>).map((t) => [t.episode_id as number, t[field] as string | null])
+            )
+            let chunk = ''
+            for (const ep of batch) {
+              const content = byId.get(ep.id)
+              if (!content) continue
+              const safeName = (ep.show_name ?? ep.show_key ?? `ep${ep.id}`).replace(/[^a-zA-Z0-9_-]/g, '_')
+              chunk +=
+                `${'='.repeat(60)}\n` +
+                `FILE: ${safeName}_${ep.air_date}_${ep.id}.${ext}\n` +
+                `${'='.repeat(60)}\n\n` +
+                content + '\n\n'
+            }
+            // Enqueue even an empty batch's (empty) chunk so pull() is re-invoked.
+            controller.enqueue(encoder.encode(chunk))
           } catch (err) {
             console.error('GET /api/downloads transcript stream failed:', err)
             controller.error(err)
           }
+        },
+        cancel() {
+          cancelled = true
         },
       })
 
