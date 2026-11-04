@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +24,8 @@ export async function POST(request: NextRequest) {
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
     const { supabase, stationId } = result.context
 
     const body = await request.json()
