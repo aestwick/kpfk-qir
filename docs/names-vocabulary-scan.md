@@ -202,7 +202,7 @@ Ordered by value per effort. Every piece is in my lane (`workers/transcribe.ts`,
   1. Once now, for the **existing active rules** (pre-approved): 32 transcripts.
   2. Automatically for just the affected episodes whenever a rule is **added, approved or edited**, so a new rule fixes history too, not just future shows.
   - Dry-run first; every changed transcript gets an audit-log row.
-- **Search side-effect:** the full-text index updates itself. The semantic-search chunks (another session's lane) would still hold the old spelling until re-embedded. I'll call their existing `storeTranscriptEmbeddings` helper without editing it, at ≈$0.0002 per episode, or leave that to them; your call.
+- **Search side-effect:** the full-text index updates itself. The semantic-search chunks (another session's lane) would still hold the old spelling until re-embedded. I'll call their existing `storeEpisodeChunks` helper (`lib/transcript-embeddings.ts`) without editing it, at ≈$0.0002 per episode, or leave that to them; your call.
 
 ### (a) Per-episode vocabulary hint for Groq (1 day, $0 extra per episode)
 - **What:** Before each Groq chunk, build `KPFK, Pacifica, <show hosts>, <show regulars>, <this episode's Confessor host/guests>`.
