@@ -1,4 +1,4 @@
-// Groq Whisper provider (whisper-large-v3).
+// Groq Whisper provider (model per station: lib/groq-models.ts, default turbo).
 //
 // Groq has a 25MB / short-context limit, so audio is chunked into 15-min M4A
 // segments by the worker (ffmpeg) and each chunk is sent separately. Groq does
@@ -12,9 +12,9 @@ import type {
   TranscriptionResult,
   NormalizedSegment,
 } from './types'
+import { resolveGroqModel } from '../groq-models'
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/audio/transcriptions'
-const MODEL = 'whisper-large-v3'
 const INTER_CHUNK_DELAY_MS = 1500
 
 interface WhisperSegment {
@@ -29,14 +29,14 @@ interface WhisperResponse {
   language?: string
 }
 
-async function transcribeChunk(chunkPath: string): Promise<WhisperResponse> {
+async function transcribeChunk(chunkPath: string, model: string): Promise<WhisperResponse> {
   const groqKey = process.env.GROQ_API_KEY
   if (!groqKey) throw new Error('GROQ_API_KEY not set')
 
   const fileData = await fs.readFile(chunkPath)
   const formData = new FormData()
   formData.append('file', new Blob([fileData]), path.basename(chunkPath))
-  formData.append('model', MODEL)
+  formData.append('model', model)
   formData.append('response_format', 'verbose_json')
 
   let lastError: Error | null = null
@@ -72,6 +72,7 @@ export const groqProvider: TranscriptionProvider = {
   isConfigured: () => !!process.env.GROQ_API_KEY,
 
   async transcribe(ctx: TranscribeContext): Promise<TranscriptionResult> {
+    const model = resolveGroqModel(ctx.model)
     const chunkPaths = await ctx.getLocalChunks()
     if (!chunkPaths.length) throw new Error('Groq: no audio chunks to transcribe')
 
@@ -82,7 +83,7 @@ export const groqProvider: TranscriptionProvider = {
 
     for (let i = 0; i < chunkPaths.length; i++) {
       console.log(`[transcribe:groq] ep ${ctx.episodeId} chunk ${i + 1}/${chunkPaths.length}`)
-      const result = await transcribeChunk(chunkPaths[i])
+      const result = await transcribeChunk(chunkPaths[i], model)
       texts.push(result.text)
       const offset = i * ctx.chunkDurationSec
       for (const seg of result.segments ?? []) {
@@ -101,7 +102,7 @@ export const groqProvider: TranscriptionProvider = {
       durationSec,
       language,
       providerId: 'groq',
-      model: MODEL,
+      model,
       diarized: false,
     }
   },

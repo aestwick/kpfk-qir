@@ -1,6 +1,7 @@
 import { supabaseAdmin } from './supabase'
 import { getStation } from './stations'
 import { resolveChatModel } from './openai-models'
+import { resolveGroqModel } from './groq-models'
 
 const settingsCache = new Map<string, { value: unknown; fetchedAt: number }>()
 const CACHE_TTL_MS = 60_000 // 1 minute
@@ -156,6 +157,13 @@ export async function getTranscriptionProviders(stationId: string): Promise<Tran
     .filter((e): e is TranscriptionProviderConfig => !!e && typeof e.provider === 'string')
     .map((e) => ({ provider: e.provider, enabled: e.enabled !== false }))
   return cleaned.length ? cleaned : DEFAULT_TRANSCRIPTION_PROVIDERS
+}
+
+// Which Groq Whisper model transcribes (Settings → Pipeline → Transcription
+// Providers). Per-station overridable; unknown/unset resolves to the default
+// (turbo) so a stale stored id can never reach the API.
+export async function getGroqModel(stationId: string): Promise<string> {
+  return resolveGroqModel(await getSetting<string>('transcription_model', stationId))
 }
 
 // Whether diarization (speaker labels) is requested from providers that support

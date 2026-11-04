@@ -6,7 +6,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
-import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused, isDiarizationEnabled } from '../lib/settings'
+import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused, isDiarizationEnabled, getGroqModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { getProcessingWindowBounds } from '../lib/quarters'
 import { parseVtt } from '../lib/vtt'
@@ -166,6 +166,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
     return { transcribed: 0, skipped: 'no-provider' as const }
   }
   const diarize = await isDiarizationEnabled(stationId)
+  const groqModel = await getGroqModel(stationId)
   console.log(`[transcribe] provider order: ${providerPlan.map((p) => p.id).join(' → ')} (diarize=${diarize})`)
 
   // Get candidate pending episodes from the window (including those with null
@@ -243,6 +244,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
           diarize,
           chunkDurationSec: CHUNK_DURATION_SECONDS,
           getLocalChunks: makeChunkLoader(episode.mp3_url, tmpDir),
+          model: groqModel,
         },
         providerPlan,
       )

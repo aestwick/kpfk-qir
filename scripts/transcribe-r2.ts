@@ -351,7 +351,7 @@ async function transcribeOne(key: string, args: Args, s3: S3Client | null): Prom
     dests.push(`local:${localBase}.{vtt,txt,json}`)
   }
 
-  const cost = estimateTranscriptionCost(result.providerId, result.durationSec)
+  const cost = estimateTranscriptionCost(result.providerId, result.durationSec, result.model)
   const mins = (result.durationSec / 60).toFixed(1)
   console.log(
     `[transcribe-r2] ✓ ${key} — ${mins} min, ${result.segments.length} segs, ` +

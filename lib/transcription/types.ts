@@ -44,6 +44,9 @@ export interface TranscribeContext {
   diarize: boolean
   chunkDurationSec: number
   getLocalChunks: () => Promise<string[]>
+  // Model choice for providers that offer one (today: Groq — resolved from the
+  // station's `transcription_model` setting). Providers without a choice ignore it.
+  model?: string
 }
 
 export interface TranscriptionProvider {
