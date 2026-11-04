@@ -8,6 +8,7 @@ import { processAutoRetry } from './auto-retry'
 import { processDiscoverSync } from './discover-sync'
 import { isPipelinePaused } from '../lib/settings'
 import { jobPriority } from '../lib/tier'
+import { continuationData, ZERO_PROGRESS_BACKOFF_MS } from '../lib/job-chain'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -121,9 +122,9 @@ transcribeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
+      await transcribeQueue.add('transcribe-backoff', continuationData(job.data), { delay: ZERO_PROGRESS_BACKOFF_MS, priority })
     } else {
-      await transcribeQueue.add('transcribe-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
+      await transcribeQueue.add('transcribe-continue', continuationData(job.data), { priority })
     }
   }
   // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
@@ -157,9 +158,9 @@ summarizeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
+      await summarizeQueue.add('summarize-backoff', continuationData(job.data), { delay: ZERO_PROGRESS_BACKOFF_MS, priority })
     } else {
-      await summarizeQueue.add('summarize-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
+      await summarizeQueue.add('summarize-continue', continuationData(job.data), { priority })
     }
   }
   // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).
@@ -187,8 +188,16 @@ complianceWorker.on('completed', async (job) => {
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
-    const window = job.data?.window ? { window: job.data.window } : {}
-    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId, ...window }, { priority: await jobPriority(job.data?.stationId) })
+    const priority = await jobPriority(job.data?.stationId)
+    if (count === 0) {
+      // A batch where every episode failed (they stay `summarized` and are
+      // re-selected first) used to re-run immediately, forever, re-paying the
+      // AI pass each time. Back off like transcribe/summarize do.
+      console.warn('[compliance] zero progress with remaining episodes — backing off 5 minutes')
+      await complianceQueue.add('compliance-backoff', continuationData(job.data), { delay: ZERO_PROGRESS_BACKOFF_MS, priority })
+    } else {
+      await complianceQueue.add('compliance-continue', continuationData(job.data), { priority })
+    }
   }
 })
 complianceWorker.on('failed', (job, err) => {

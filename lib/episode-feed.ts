@@ -175,8 +175,13 @@ export function decodeCursor(token: string): FeedCursor | null {
 
 // --- validation helpers ----------------------------------------------------
 
-function isIsoTimestamp(value: string): boolean {
-  return !isNaN(Date.parse(value))
+// Strict ISO-8601 (date, optional time, optional zone). Date.parse alone
+// accepted text like "2020-01-01 (,status.eq.pending)", which then went verbatim
+// into the PostgREST or= filter — a malformed cursor became a 500, not a 400.
+const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?$/
+
+export function isIsoTimestamp(value: string): boolean {
+  return ISO_TIMESTAMP_RE.test(value) && !isNaN(Date.parse(value))
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/

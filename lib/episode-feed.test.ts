@@ -263,3 +263,18 @@ describe('projectEpisode', () => {
     expect(out.show_name).toBeNull()
   })
 })
+
+describe('isIsoTimestamp (cursor / updated_since validation)', () => {
+  it('accepts the timestamps Postgres and clients actually send', async () => {
+    const { isIsoTimestamp } = await import('./episode-feed')
+    for (const v of ['2026-11-04', '2026-11-04T10:05:12Z', '2026-11-04T10:05:12.345678+00:00', '2026-11-04 10:05:12+00']) {
+      expect(isIsoTimestamp(v)).toBe(true)
+    }
+  })
+  it('rejects text Date.parse tolerates but PostgREST filter syntax would choke on', async () => {
+    const { isIsoTimestamp } = await import('./episode-feed')
+    for (const v of ['2020', '1,2', '2020-01-01 (,status.eq.pending)', 'Jan 1 2026', 'last-tuesday', '2026-13-45']) {
+      expect(isIsoTimestamp(v)).toBe(false)
+    }
+  })
+})
