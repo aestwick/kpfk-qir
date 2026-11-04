@@ -41,6 +41,8 @@ interface QirDraft {
     issue_categories?: string[]
     included_shows?: string[] | null
     guidance?: string | null
+    /** Episodes the compliance gate held out of this version at generation time. */
+    blocked_episode_ids?: number[]
   } | null
   full_text: string | null
   curated_text: string | null
@@ -60,6 +62,25 @@ interface AvailableShow {
   /** Episode count per issue category ('Uncategorized' for episodes without one). */
   categories?: Record<string, number>
 }
+
+/** GET /api/qir/blocked — live, same predicate as the generator (lib/compliance-blocking.ts). */
+interface HeldOutEpisode {
+  episode_id: number
+  show_name: string | null
+  air_date: string | null
+  headline: string | null
+  flag_count: number
+  unreviewed_count: number
+  flag_types: string[]
+}
+interface BlockingReport {
+  enabled: boolean
+  episodes: HeldOutEpisode[]
+  flag_count: number
+  unreviewed_count: number
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 interface ValidationCheck {
   label: string
@@ -91,7 +112,12 @@ function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
   return grouped
 }
 
-function runValidation(draft: QirDraft, complianceSummary: Record<string, { count: number; critical: number }>, allCategories: string[]): ValidationCheck[] {
+function runValidation(
+  draft: QirDraft,
+  complianceSummary: Record<string, { count: number; critical: number }>,
+  allCategories: string[],
+  blocking: BlockingReport | null,
+): ValidationCheck[] {
   const checks: ValidationCheck[] = []
   const entries = draft.curated_entries ?? []
   const grouped = groupByCategory(entries)
@@ -147,15 +173,47 @@ function runValidation(draft: QirDraft, complianceSummary: Record<string, { coun
     checks.push({ label: 'Complete entries', status: 'warn', detail: `${missingFields.length} entries missing summary, host, or headline` })
   }
 
-  // 6. Compliance flags
+  // 6. Compliance. When blocking is on, count exactly what the generator gates
+  // on (critical + not dismissed — including untriaged 'suggested' flags), not
+  // the investigating/violation "active" totals, which can read zero while
+  // episodes are being held out.
   const totalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.count, 0)
   const criticalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.critical, 0)
-  if (totalFlags === 0) {
-    checks.push({ label: 'Compliance', status: 'pass', detail: 'No active compliance flags' })
-  } else if (criticalFlags > 0) {
-    checks.push({ label: 'Compliance', status: 'fail', detail: `${criticalFlags} critical compliance flags active` })
+  const activeWarnings = totalFlags - criticalFlags
+  const draftIds = new Set(entries.map(e => e.episode_id))
+  const flaggedInDraft = (blocking?.episodes ?? []).filter(e => draftIds.has(e.episode_id))
+  if (blocking?.enabled) {
+    const heldOut = blocking.episodes.length - flaggedInDraft.length
+    if (flaggedInDraft.length > 0) {
+      checks.push({
+        label: 'Compliance',
+        status: 'fail',
+        detail: `Blocking on — ${plural(flaggedInDraft.length, 'episode')} in this draft now ${flaggedInDraft.length === 1 ? 'carries' : 'carry'} unresolved critical flags (raised after generation). Dismiss the flags or regenerate.`,
+      })
+    } else if (heldOut > 0) {
+      const unreviewed = blocking.unreviewed_count
+      checks.push({
+        label: 'Compliance',
+        status: 'warn',
+        detail: `Blocking on — ${plural(heldOut, 'episode')} held out of this draft by ${plural(blocking.flag_count, 'unresolved critical flag')}${unreviewed ? ` (${unreviewed} not yet reviewed)` : ''}`,
+      })
+    } else if (activeWarnings > 0) {
+      checks.push({ label: 'Compliance', status: 'warn', detail: `Blocking on — no unresolved critical flags this quarter; ${plural(activeWarnings, 'active compliance warning')} station-wide` })
+    } else {
+      checks.push({ label: 'Compliance', status: 'pass', detail: 'Blocking on — no unresolved critical flags this quarter' })
+    }
   } else {
-    checks.push({ label: 'Compliance', status: 'warn', detail: `${totalFlags} active compliance warnings` })
+    const prefix = blocking ? 'Blocking off' : 'Blocking status unavailable'
+    const inDraftNote = flaggedInDraft.length
+      ? `; ${plural(flaggedInDraft.length, 'draft episode')} ${flaggedInDraft.length === 1 ? 'carries' : 'carry'} unresolved critical flags`
+      : ''
+    if (criticalFlags > 0) {
+      checks.push({ label: 'Compliance', status: 'fail', detail: `${prefix} — ${criticalFlags} critical compliance flags active${inDraftNote}` })
+    } else if (totalFlags > 0 || flaggedInDraft.length > 0) {
+      checks.push({ label: 'Compliance', status: 'warn', detail: `${prefix} — ${plural(totalFlags, 'active compliance warning')}${inDraftNote}` })
+    } else {
+      checks.push({ label: 'Compliance', status: 'pass', detail: `${prefix} — no active compliance flags` })
+    }
   }
 
   return checks
@@ -294,6 +352,8 @@ export default function GenerateQirPage() {
   const [confirmFinalize, setConfirmFinalize] = useState<number | null>(null)
   const [complianceSummary, setComplianceSummary] = useState<Record<string, { count: number; critical: number }>>({})
   const [issueCategories, setIssueCategories] = useState<string[]>(DEFAULT_CATEGORIES)
+  const [blocking, setBlocking] = useState<BlockingReport | null>(null)
+  const [heldOutExpanded, setHeldOutExpanded] = useState(false)
 
   // Show selection state
   const [availableShows, setAvailableShows] = useState<AvailableShow[]>([])
@@ -327,11 +387,13 @@ export default function GenerateQirPage() {
   const fetchDrafts = useCallback(async () => {
     setLoading(true)
     try {
-      const [draftsRes, dashRes, settingsRes] = await Promise.all([
+      const [draftsRes, dashRes, settingsRes, blockedRes] = await Promise.all([
         authedFetch(`/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
         authedFetch('/api/dashboard'),
         authedFetch('/api/settings'),
+        authedFetch(`/api/qir/blocked?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
       ])
+      setBlocking(blockedRes.ok ? await blockedRes.json() : null)
       if (draftsRes.ok) {
         const data = await draftsRes.json()
         setDrafts(data.drafts ?? [])
@@ -570,7 +632,20 @@ export default function GenerateQirPage() {
   const totalCurated = activeDraft?.curated_entries?.length ?? 0
 
   // Run validation checks if we have a draft
-  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary, issueCategories) : []
+  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary, issueCategories, blocking) : []
+
+  // Held out = what the gate removes right now, minus anything already in the
+  // active draft (those are flagged-after-generation and fail validation instead).
+  const activeDraftIds = new Set((activeDraft?.curated_entries ?? []).map(e => e.episode_id))
+  const heldOut = blocking?.enabled
+    ? blocking.episodes.filter(e => !activeDraftIds.has(e.episode_id))
+    : []
+  const heldOutAtGeneration = activeDraft?.settings_snapshot?.blocked_episode_ids
+  const heldOutComplianceHref = `/dashboard/compliance?${new URLSearchParams({
+    episodes: heldOut.slice(0, 200).map(e => e.episode_id).join(','),
+    severity: 'critical',
+    status: 'unresolved',
+  })}`
   const hasBlockers = validationChecks.some(c => c.status === 'fail')
 
   // Community service rating
@@ -831,6 +906,56 @@ export default function GenerateQirPage() {
         </div>
       )}
 
+      {/* ═══ Held out by compliance blocking ═══ */}
+      {heldOut.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-amber-200 dark:bg-surface-raised dark:border-amber-800/40 dark:shadow-card-dark">
+          <div className="px-5 py-3 border-b border-amber-100 dark:border-warm-700 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                {plural(heldOut.length, 'episode')} held out by compliance blocking
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
+                Blocking is on: any episode with a critical flag that hasn&apos;t been dismissed — including flags nobody has reviewed yet — is left out of the draft.
+                {blocking && blocking.unreviewed_count > 0 && ` ${blocking.unreviewed_count} of these flags are still unreviewed.`}
+                {heldOutAtGeneration && activeDraft && ` Version ${activeDraft.version} held out ${heldOutAtGeneration.length} at generation.`}
+              </p>
+            </div>
+            <a
+              href={heldOutComplianceHref}
+              className="text-xs px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-900/20 font-medium whitespace-nowrap"
+            >
+              Review these flags →
+            </a>
+          </div>
+          <ul className="divide-y dark:divide-warm-700">
+            {(heldOutExpanded ? heldOut : heldOut.slice(0, 8)).map((ep) => (
+              <li key={ep.episode_id} className="px-5 py-2 flex items-center gap-3 text-sm">
+                <a
+                  href={`/dashboard/episodes/${ep.episode_id}?from=/dashboard/generate`}
+                  className="flex-1 min-w-0 truncate text-gray-900 hover:underline dark:text-warm-100"
+                >
+                  <span className="font-medium">{ep.show_name ?? `Episode ${ep.episode_id}`}</span>
+                  {ep.air_date && <span className="text-gray-500 dark:text-warm-400 ml-2">{ep.air_date}</span>}
+                  {ep.headline && <span className="text-gray-500 dark:text-warm-400 ml-2">— {ep.headline}</span>}
+                </a>
+                <span className="text-xs text-red-700 dark:text-red-300 whitespace-nowrap tabular-nums">
+                  {plural(ep.flag_count, 'critical flag')}
+                  {ep.unreviewed_count > 0 && <span className="text-gray-500 dark:text-warm-400"> · {ep.unreviewed_count} unreviewed</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {heldOut.length > 8 && (
+            <button
+              onClick={() => setHeldOutExpanded(!heldOutExpanded)}
+              className="w-full px-5 py-2 text-xs text-blue-600 hover:bg-gray-50 dark:text-blue-400 dark:hover:bg-warm-700/50 border-t dark:border-warm-700"
+            >
+              {heldOutExpanded ? 'Show fewer' : `Show all ${heldOut.length}`}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ═══ Pre-finalization Validation Checklist ═══ */}
       {activeDraft && activeDraft.status === 'draft' && validationChecks.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark">
@@ -896,6 +1021,11 @@ export default function GenerateQirPage() {
                   {draft.settings_snapshot?.included_shows && (
                     <span className="text-xs text-purple-500 dark:text-purple-400 ml-1" title={`${draft.settings_snapshot.included_shows.length} shows selected`}>
                       (filtered)
+                    </span>
+                  )}
+                  {!!draft.settings_snapshot?.blocked_episode_ids?.length && (
+                    <span className="text-xs text-amber-600 dark:text-amber-400 ml-1" title="Episodes held out by compliance blocking when this version was generated">
+                      ({draft.settings_snapshot.blocked_episode_ids.length} held out)
                     </span>
                   )}
                 </div>

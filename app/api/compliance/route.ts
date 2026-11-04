@@ -131,6 +131,11 @@ export async function GET(request: NextRequest) {
     }
 
     const episodeId = searchParams.get('episode_id')
+    // episode_ids=1,2,3 — an explicit list (Generate page "held out" link).
+    // Capped so the PostgREST `in.(…)` stays well under URL limits.
+    const episodeIds = (searchParams.get('episode_ids') ?? '')
+      .split(',').map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n) && n > 0)
+      .slice(0, 200)
     const flagType = searchParams.get('flag_type')
     const severity = searchParams.get('severity')
     // status=suggested,investigating,... (comma-separated review statuses).
@@ -166,6 +171,7 @@ export async function GET(request: NextRequest) {
       .range(offset, offset + limit - 1)
 
     if (episodeId) query = query.eq('episode_id', parseInt(episodeId))
+    if (episodeIds.length) query = query.in('episode_id', episodeIds)
     if (flagType) query = query.eq('flag_type', flagType)
     if (severity) query = query.eq('severity', severity)
     if (statusFilter.length) query = query.in('review_status', Array.from(new Set(statusFilter)))

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, getSetting, isPipelinePaused } from '@/lib/settings'
+import { getIssueCategories, getSetting, isPipelinePaused, isComplianceBlocking } from '@/lib/settings'
+import { getQuarterBlockingReport } from '@/lib/compliance-blocking'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 
@@ -469,10 +470,38 @@ async function buildDashboard(
     },
     coverageGaps,
     complianceSummary: complianceFlagCounts,
+    complianceBlocking: await buildBlockingSummary(supabase, stationId, qtr.start, qtr.end),
     qirStatus,
     qualityFlags,
     lastFiledQir: lastFiled,
     lastCompletedJobs: lastJobTimestamps,
     pipelinePaused: await isPipelinePaused(),
   })
+}
+
+// What compliance blocking holds out of the current quarter's draft — the same
+// set workers/generate-qir.ts gates on (critical + not dismissed, which includes
+// untriaged 'suggested' flags), NOT the investigating/violation "active" counts
+// above. Only computed when the gate is on; a failure degrades to null rather
+// than taking the dashboard down.
+async function buildBlockingSummary(
+  supabase: StationContext['supabase'],
+  stationId: string,
+  start: string,
+  end: string,
+) {
+  try {
+    const enabled = await isComplianceBlocking()
+    if (!enabled) return { enabled, heldOutEpisodes: 0, flagCount: 0, unreviewedCount: 0 }
+    const report = await getQuarterBlockingReport(supabase, stationId, start, end, enabled)
+    return {
+      enabled,
+      heldOutEpisodes: report.episodes.length,
+      flagCount: report.flag_count,
+      unreviewedCount: report.unreviewed_count,
+    }
+  } catch (err) {
+    console.error('[dashboard] compliance blocking summary failed:', err)
+    return null
+  }
 }

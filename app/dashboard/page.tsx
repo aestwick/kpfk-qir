@@ -42,6 +42,9 @@ interface DashData {
   }
   coverageGaps: string[]
   complianceSummary: Record<string, { count: number; critical: number }>
+  /** What compliance blocking holds out of this quarter's draft (critical + not
+   *  dismissed — same set as workers/generate-qir.ts). null = couldn't compute. */
+  complianceBlocking?: { enabled: boolean; heldOutEpisodes: number; flagCount: number; unreviewedCount: number } | null
   qirStatus: { status: string; version: number; entryCount: number } | null
   qualityFlags: QualityFlag[]
   lastFiledQir: { id: number; year: number; quarter: number; version: number; updated_at: string } | null
@@ -311,6 +314,8 @@ export default function DashboardOverview() {
 
   const totalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.count, 0)
   const totalCritical = Object.values(complianceSummary).reduce((a, b) => a + b.critical, 0)
+  const blocking = data.complianceBlocking ?? null
+  const heldOut = blocking?.enabled ? blocking.heldOutEpisodes : 0
 
   const failedEpisodes = data.recentEpisodes.filter((ep) => ep.status === 'failed')
   const attentionCount = failedEpisodes.length + (qualityFlags?.length ?? 0)
@@ -638,15 +643,39 @@ export default function DashboardOverview() {
             </div>
           )}
 
-          {totalFlags > 0 && (
+          {(totalFlags > 0 || blocking?.enabled) && (
             <div className="card overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
+              <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between gap-2">
                 <h3 className="section-header">Compliance</h3>
-                <span className={`badge tabular-nums ${totalCritical > 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
-                  {totalFlags} active
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {heldOut > 0 && (
+                    <span className="badge tabular-nums bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                      {heldOut} held out
+                    </span>
+                  )}
+                  {totalFlags > 0 && (
+                    <span className={`badge tabular-nums ${totalCritical > 0 ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>
+                      {totalFlags} active
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="px-5 py-4">
+              <div className="px-5 pt-3 text-xs text-warm-500 dark:text-warm-400">
+                {blocking == null ? (
+                  'Blocking status unavailable'
+                ) : !blocking.enabled ? (
+                  'Blocking off — flags do not hold episodes out of the QIR draft'
+                ) : heldOut > 0 ? (
+                  <a href="/dashboard/generate" className="text-red-700 hover:underline dark:text-red-300">
+                    Blocking on — {heldOut} episode{heldOut === 1 ? '' : 's'} held out of the {data.quarter.label} draft
+                    {' '}by {blocking.flagCount} unresolved critical flag{blocking.flagCount === 1 ? '' : 's'}
+                    {blocking.unreviewedCount > 0 && ` (${blocking.unreviewedCount} not yet reviewed)`} →
+                  </a>
+                ) : (
+                  `Blocking on — nothing held out of the ${data.quarter.label} draft`
+                )}
+              </div>
+              <div className={totalFlags > 0 ? 'px-5 py-4' : 'pb-3'}>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(complianceSummary).map(([type, { count, critical }]) => (
                     <a

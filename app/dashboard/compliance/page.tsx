@@ -67,6 +67,9 @@ const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
   { value: '', label: 'All statuses' },
   { value: 'suggested', label: 'Suggested (to review)' },
   { value: 'active', label: 'Active (Investigating + Violation)' },
+  // Everything but Dismissed — the set compliance blocking holds out on
+  // (critical + not dismissed; see lib/compliance-blocking.ts).
+  { value: 'unresolved', label: 'Unresolved (not Dismissed)' },
   { value: 'investigating', label: 'Investigating' },
   { value: 'violation', label: 'Violation' },
   { value: 'dismissed', label: 'Dismissed' },
@@ -147,6 +150,13 @@ export default function CompliancePage() {
     const winEnd = searchParams.get('win_end')
     return dow && airStart && winStart && winEnd ? { dow, airStart, winStart, winEnd } : null
   })
+  // Explicit episode list (e.g. "held out by compliance blocking" from the
+  // Generate page). Shown as a removable chip, like the grid drill-through.
+  const [episodeFilter, setEpisodeFilter] = useState<number[] | null>(() => {
+    const ids = (searchParams.get('episodes') ?? '')
+      .split(',').map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n) && n > 0)
+    return ids.length ? ids : null
+  })
   const [page, setPage] = useState(parseInt(searchParams.get('page') ?? '1'))
 
   // Data
@@ -216,7 +226,9 @@ export default function CompliancePage() {
     if (filterType) params.set('flag_type', filterType)
     if (filterSeverity) params.set('severity', filterSeverity)
     if (filterStatus === 'active') params.set('status', 'investigating,violation')
+    else if (filterStatus === 'unresolved') params.set('status', 'suggested,investigating,violation')
     else if (filterStatus) params.set('status', filterStatus)
+    if (episodeFilter) params.set('episode_ids', episodeFilter.join(','))
     if (filterQuarter) {
       const [y, q] = filterQuarter.split('-')
       params.set('year', y)
@@ -233,7 +245,7 @@ export default function CompliancePage() {
     params.set('sort', 'created_at')
     params.set('dir', 'desc')
     return params
-  }, [filterType, filterSeverity, filterStatus, filterQuarter, filterShow, slotFilter, page])
+  }, [filterType, filterSeverity, filterStatus, filterQuarter, filterShow, slotFilter, episodeFilter, page])
 
   // Fetch flags list
   const fetchFlags = useCallback(async () => {
@@ -304,10 +316,11 @@ export default function CompliancePage() {
       params.set('win_start', slotFilter.winStart)
       params.set('win_end', slotFilter.winEnd)
     }
+    if (episodeFilter) params.set('episodes', episodeFilter.join(','))
     if (page > 1) params.set('page', String(page))
     const qs = params.toString()
     router.replace(`/dashboard/compliance${qs ? `?${qs}` : ''}`, { scroll: false })
-  }, [filterType, filterSeverity, filterStatus, filterQuarter, filterShow, slotFilter, page, router])
+  }, [filterType, filterSeverity, filterStatus, filterQuarter, filterShow, slotFilter, episodeFilter, page, router])
 
   // Refetch flags when filters/page change (skip initial render)
   const filterChangeCount = useRef(0)
@@ -869,9 +882,23 @@ export default function CompliancePage() {
               </span>
             </div>
           )}
-          {(filterType || filterSeverity || filterStatus || filterQuarter || filterShow || slotFilter) && (
+          {episodeFilter && (
+            <div className="flex items-end">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg bg-kpfk-red/10 text-kpfk-red-dark border border-kpfk-red/30 dark:text-kpfk-red-light">
+                {episodeFilter.length} selected episode{episodeFilter.length === 1 ? '' : 's'}
+                <button
+                  onClick={() => { setEpisodeFilter(null); setPage(1) }}
+                  className="hover:text-kpfk-red"
+                  aria-label="Clear episode filter"
+                >
+                  ✕
+                </button>
+              </span>
+            </div>
+          )}
+          {(filterType || filterSeverity || filterStatus || filterQuarter || filterShow || slotFilter || episodeFilter) && (
             <button
-              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterStatus(''); setFilterQuarter(''); setFilterShow(''); setSlotFilter(null); setPage(1) }}
+              onClick={() => { setFilterType(''); setFilterSeverity(''); setFilterStatus(''); setFilterQuarter(''); setFilterShow(''); setSlotFilter(null); setEpisodeFilter(null); setPage(1) }}
               className="text-xs text-gray-500 hover:text-gray-700 underline dark:text-warm-400 dark:hover:text-warm-200"
             >
               Clear filters

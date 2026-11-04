@@ -15,6 +15,7 @@ import {
   type QirEntry,
 } from '../lib/qir-format'
 import type { EpisodeLog } from '../lib/types'
+import { fetchBlockingFlags, fetchQuarterCandidates } from '../lib/compliance-blocking'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 
 export interface GenerateQirOptions {
@@ -60,26 +61,11 @@ export async function processGenerateQir(job: Job) {
     ]
 
   // Get all completed episodes in this quarter (summarized or compliance_checked),
-  // including those with null air_date created during this quarter. Paged:
-  // PostgREST caps a response at 1000 rows, and a full quarter runs ~2000 — a
-  // single select silently returned only the first ~7 weeks (KPFK Q3 2026's
-  // draft never saw September).
-  const PAGE = 1000
-  const episodes: EpisodeLog[] = []
-  for (let from = 0; ; from += PAGE) {
-    const { data: page, error } = await supabaseAdmin
-      .from('episode_log')
-      .select('*')
-      .eq('station_id', stationId)
-      .in('status', ['summarized', 'compliance_checked'])
-      .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
-      .order('air_date', { ascending: true })
-      .order('id', { ascending: true })
-      .range(from, from + PAGE - 1)
-    if (error) throw new Error(`Failed to fetch episodes: ${error.message}`)
-    episodes.push(...((page ?? []) as EpisodeLog[]))
-    if (!page || page.length < PAGE) break
-  }
+  // including those with null air_date created during this quarter. Paged inside
+  // fetchQuarterCandidates: a single select silently capped at 1000 rows (KPFK Q3
+  // 2026's draft never saw September). Shared with the blocking report so the UI
+  // counts exactly what this gate holds out.
+  const episodes = await fetchQuarterCandidates<EpisodeLog>(supabaseAdmin, stationId, start, end)
   console.log(`[generate-qir] ${episodes.length} completed episodes in Q${quarter} ${year}`)
 
   if (!episodes.length) {
@@ -90,28 +76,19 @@ export async function processGenerateQir(job: Job) {
   // Compliance blocking gate (centralized, FCC safety). When on, hold back any
   // episode that has an unresolved CRITICAL flag — only a 'dismissed' (cleared)
   // critical flag lets it into the report. Warnings never block.
-  let blockedCount = 0
+  // Predicate + query live in lib/compliance-blocking.ts (shared with the UI).
+  let blockedIds: number[] = []
   let gatedEpisodes = episodes
   if (await isComplianceBlocking()) {
-    // Chunked: ~2000 ids in one `in.(…)` overflows the request URL.
-    const blocked = new Set<number>()
-    const ids = episodes.map((e) => e.id)
-    for (let i = 0; i < ids.length; i += 200) {
-      const { data: criticalFlags, error: flagErr } = await supabaseAdmin
-        .from('compliance_flags')
-        .select('episode_id')
-        .in('episode_id', ids.slice(i, i + 200))
-        .eq('severity', 'critical')
-        .neq('review_status', 'dismissed')
-      if (flagErr) throw new Error(`Failed to fetch compliance flags: ${flagErr.message}`)
-      for (const f of criticalFlags ?? []) blocked.add(f.episode_id)
-    }
+    const flags = await fetchBlockingFlags(supabaseAdmin, episodes.map((e) => e.id))
+    const blocked = new Set(flags.map((f) => f.episode_id))
     if (blocked.size) {
-      blockedCount = blocked.size
+      blockedIds = Array.from(blocked).sort((x, y) => x - y)
       gatedEpisodes = episodes.filter((e) => !blocked.has(e.id))
-      console.log(`[generate-qir] blocking on — held back ${blockedCount} episode(s) with unresolved critical flags`)
+      console.log(`[generate-qir] blocking on — held back ${blockedIds.length} episode(s) with unresolved critical flags`)
     }
   }
+  const blockedCount = blockedIds.length
   if (!gatedEpisodes.length) {
     console.log('[generate-qir] all candidate episodes blocked by unresolved critical flags')
     return { drafted: false, reason: 'all episodes blocked by compliance', blocked: blockedCount }
@@ -316,6 +293,9 @@ ${categorySummaries.join('\n')}`
         issue_categories: issueCategories,
         included_shows: includedShows ?? null,
         guidance: guidance ?? null,
+        // What the compliance gate held out of THIS version (live state can
+        // drift as flags are reviewed — the Generate page shows both).
+        blocked_episode_ids: blockedIds,
       },
       full_text: fullText,
       curated_text: curatedText,
