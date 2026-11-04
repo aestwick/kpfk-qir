@@ -1,6 +1,6 @@
 import { supabaseAdmin } from './supabase'
 import { getStation } from './stations'
-import { resolveChatModel } from './openai-models'
+import { resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from './openai-models'
 import { resolveGroqModel } from './groq-models'
 
 const settingsCache = new Map<string, { value: unknown; fetchedAt: number }>()
@@ -198,6 +198,12 @@ export async function getComplianceChecksEnabled(stationId: string): Promise<Rec
     sponsor_id: true,
     indecency: true,
   }
+}
+
+// Which OpenAI model runs the AI compliance pass. Global-only like the
+// compliance prompt (FCC rules are uniform). Default + rationale: lib/openai-models.
+export async function getComplianceModel(): Promise<string> {
+  return resolveChatModel((await getSetting<string>('compliance_model')) ?? DEFAULT_COMPLIANCE_MODEL)
 }
 
 export async function getCompliancePrompt(stationId: string): Promise<string> {

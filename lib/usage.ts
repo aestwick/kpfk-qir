@@ -78,17 +78,16 @@ export async function logComplianceUsage(
   episodeId: number,
   inputTokens: number,
   outputTokens: number,
+  model: string = DEFAULT_CHAT_MODEL,
   metadata?: Record<string, unknown>
 ) {
-  const estimatedCost =
-    inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
-    outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
+  const estimatedCost = chatModelCost(model, inputTokens, outputTokens)
 
   await insertUsage({
     station_id: stationId,
     episode_id: episodeId,
     service: 'openai',
-    model: 'gpt-4o-mini',
+    model,
     operation: 'compliance',
     input_tokens: inputTokens,
     output_tokens: outputTokens,

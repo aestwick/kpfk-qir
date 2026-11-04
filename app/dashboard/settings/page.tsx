@@ -7,7 +7,7 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
-import { OPENAI_CHAT_MODELS, resolveChatModel } from '@/lib/openai-models'
+import { OPENAI_CHAT_MODELS, resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from '@/lib/openai-models'
 import { GROQ_WHISPER_MODELS, resolveGroqModel } from '@/lib/groq-models'
 import { resolveGroupDisplayName, showGroupKey, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import { generatePassphrase } from '@/lib/passphrase'
@@ -172,6 +172,7 @@ export default function SettingsPage() {
   const [summarizationModel, setSummarizationModel] = useState(resolveChatModel(undefined))
   const [groqModel, setGroqModel] = useState(resolveGroqModel(undefined))
   const [curationModel, setCurationModel] = useState(resolveChatModel(undefined))
+  const [complianceModel, setComplianceModel] = useState(DEFAULT_COMPLIANCE_MODEL)
   const [curationPrompt, setCurationPrompt] = useState('')
   const [savedCurationPrompt, setSavedCurationPrompt] = useState('')
   const [loading, setLoading] = useState(true)
@@ -310,6 +311,7 @@ export default function SettingsPage() {
       setSummarizationModel(resolveChatModel(data.settings?.summarization_model))
       setCurationModel(resolveChatModel(data.settings?.curation_model))
       setGroqModel(resolveGroqModel(data.settings?.transcription_model))
+      setComplianceModel(resolveChatModel(data.settings?.compliance_model ?? DEFAULT_COMPLIANCE_MODEL))
     }
     if (correctionsRes.ok) {
       const data = await correctionsRes.json()
@@ -1525,9 +1527,14 @@ export default function SettingsPage() {
               <div>
                 <h3 className="font-semibold text-gray-900 dark:text-warm-100">Compliance Prompt</h3>
                 <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
-                  System prompt for AI-powered compliance checks (payola/plugola, sponsor ID, indecency). Also editable from the Compliance tab.
+                  System prompt for AI-powered compliance checks (profanity, indecency, payola/plugola, sponsor ID). Applies to every station. Also editable from the Compliance tab.
                 </p>
               </div>
+              <ModelSelect
+                value={complianceModel}
+                disabled={saving === 'compliance_model'}
+                onChange={(v) => saveModel('compliance_model', v, 'Compliance model', setComplianceModel, complianceModel)}
+              />
             </div>
             <div className={compliancePrompt !== savedCompliancePrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
               <textarea
