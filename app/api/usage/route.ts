@@ -32,11 +32,11 @@ export async function GET(request: NextRequest) {
           .eq('station_id', stationId)
         if (from) query = query.gte('created_at', from)
         if (to) query = query.lte('created_at', to)
-        return query
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: false })
-          .range(lo, hi)
+        // Ascending id so rows workers insert mid-read land on the last page
+        // instead of shifting earlier offsets (duplicates/over-count).
+        return query.order('id', { ascending: true }).range(lo, hi)
       })
+      data.reverse() // entries are returned newest-first, as before
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 500 })
     }

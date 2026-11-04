@@ -339,14 +339,22 @@ async function sumSpend(stationId?: string): Promise<{ month: number; quarter: n
   const { monthStart, quarterStart } = monthAndQuarterStart()
   // Paged: a quarter is ~9k rows and PostgREST caps a response at 1000, so a
   // single select summed an arbitrary 1000 rows and caps tripped late (or never).
-  const data = await fetchAllRows<{ estimated_cost: number | null; created_at: string }>('spend', (from, to) => {
-    let query = supabaseAdmin
-      .from('usage_log')
-      .select('estimated_cost, created_at')
-      .gte('created_at', quarterStart)
-    if (stationId) query = query.eq('station_id', stationId)
-    return query.order('id').range(from, to)
-  })
+  // Never throws: this runs inside workers' async completion handlers, where a
+  // rejection is unhandled and would take the worker process down. A failed
+  // read sums to zero (fail-open, the prior behaviour) and is logged.
+  let data: { estimated_cost: number | null; created_at: string }[] = []
+  try {
+    data = await fetchAllRows('spend', (from, to) => {
+      let query = supabaseAdmin
+        .from('usage_log')
+        .select('estimated_cost, created_at')
+        .gte('created_at', quarterStart)
+      if (stationId) query = query.eq('station_id', stationId)
+      return query.order('id').range(from, to)
+    })
+  } catch (err) {
+    console.error('[settings] spend sum failed; treating as $0:', (err as Error).message)
+  }
   let month = 0
   let quarter = 0
   for (const r of data) {

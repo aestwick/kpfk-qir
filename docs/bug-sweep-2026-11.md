@@ -205,7 +205,9 @@ Because Q3 is past the grace window, resetting them alone won't process them; th
 
 ## 11. MEDIUM: a Deepgram billing error was classed as "audio missing" (names/vocab lane)
 
-`lib/transcription/deepgram.ts:64-70` tests the error body against `/…|404/i`. The `404` matched inside the request id (`"request_id":"019fbda7-404e-…"`), so a **402 payment-required** error marked episode 7418 (potira, 8/01) permanently `unavailable`. **Fix:** test `response.status`, never a bare digit substring. **Effort:** XS. (This PR separately stops billing errors from counting as strikes; see "Fixed".)
+`lib/transcription/deepgram.ts:64-70` tests the error body against `/…|404/i`. The `404` matched inside the request id (`"request_id":"019fbda7-404e-…"`), so a **402 payment-required** error marked episode 7418 (potira, 8/01) permanently `unavailable`. **Fix:** test `response.status`, never a bare digit substring. **Effort:** XS.
+
+**Related, in our lane but not fixed here:** `lib/retry-policy.ts#isSpendLimitError` doesn't recognise provider billing lapses (`ASR_PAYMENT_REQUIRED`, "not enough credits"). Each one counts as a strike, which is how dead ids 6995, 6998 and 6999 died within 10 hours on 7/21. I tried a substring fix, but review caught a problem: the error message combines every provider's error, so a real per-episode error from Groq plus a Deepgram 402 would then retry forever. The correct fix checks that *every* provider attempt (`AllProvidersFailedError.attempts`, in `lib/transcription/`) was a billing error, so it needs the names/vocab session.
 
 ## 12. MEDIUM: split recordings show up as duplicate episodes
 
@@ -233,7 +235,9 @@ Because Q3 is past the grace window, resetting them alone won't process them; th
 - **CLAUDE.md is stale in two places:**
   - The station-aware `get_episode_counts_by_show` is already fixed (only the legacy overload remains; see 1).
   - "Every updated row's `updated_at` moves" was not true until this PR. It is true now for the edit paths fixed here, but there is still no DB trigger.
-- **Search lane:** `app/api/episodes/route.ts` bulk fix-dates shares the parser limits in 3. `lib/transcript-search.ts` uses `getQuarterDateRange`, which is now timezone-safe.
+- **Compliance:** a show-scoped compliance run ("Run compliance" on one show) continues as a station-wide sweep, because the continuation can't stay show-scoped: show-scoped selection re-picks already-checked rows and would loop. That behaviour predates this PR. A proper fix excludes rows checked in this run.
+- **Load:** the dashboard (polled every 15s) and Master Control (every 10s) now page their usage sums correctly, but that means several round-trips per poll. A SQL `sum()` RPC would be cheaper; it needs a migration.
+- **Search lane:** `app/api/episodes/route.ts` bulk fix-dates shares the parser limits in 3, and its episode CSV still uses the old unguarded encoder. It should switch to `lib/csv.ts`. `lib/transcript-search.ts` uses `getQuarterDateRange`, which is now timezone-safe.
 
 ---
 
@@ -250,7 +254,6 @@ Because Q3 is past the grace window, resetting them alone won't process them; th
 | Quarter date range independent of server time zone | FCC file | On a server east of UTC, Q3 would have become Jun 30 – Sep 29. |
 | Backfill backoffs keep their chain flags; compliance backs off instead of hot-looping | GM | One batch of 404s silently ended a backfill's transcribe → summarize → compliance chain. |
 | Summarize checks DB errors | GM | A failed transcript fetch marked a whole batch `transcript_missing` (never recovered); a failed save counted as success. |
-| Provider billing errors (402, out of credits) don't count as strikes | GM | Three of them in a row killed healthy episodes on 7/21. |
 | `updated_at` bumped on dashboard edits, fix-dates and the Confessor re-sync; re-sync pages past 1000 | podcast app | `?updated_since=` consumers never saw curator or Confessor corrections. |
 | Public API: strict timestamp validation; DB error is 503 not 401; API key revoke/delete returns 404 for an unknown id | API consumers | A malformed cursor gave a 500; a DB blip looked like a revoked key; unknown ids returned "ok" and wrote a fake audit row. |
 | Audit: DB errors logged; login events sent with `keepalive`; search escapes PostgREST syntax; client events use own-property lookup and bounded metadata | GM (audit trail) | Login events were cancelled by the page navigation (1 ever recorded); a comma in the search box gave a 500. |

@@ -8,13 +8,15 @@
 // - source/chain: the "auto-chain to the next stage" flags. The zero-progress
 //              backoff used to drop these, so one batch of 404s silently ended
 //              a backfill's transcribe→summarize→compliance cascade.
-// - show_key:  a show-scoped compliance run stays show-scoped.
+//
+// Deliberately NOT carried: show_key. A show-scoped compliance run re-selects
+// already-checked rows, so continuing it show-scoped would re-check the same
+// first batch forever; the continuation falls back to a station-wide sweep.
 export interface StageJobData {
   stationId?: string
   window?: { start?: string; end?: string }
   source?: string
   chain?: boolean
-  show_key?: string
   [key: string]: unknown
 }
 
@@ -23,7 +25,6 @@ export function continuationData(data: StageJobData | undefined | null): StageJo
     stationId: data?.stationId,
     ...(data?.window ? { window: data.window } : {}),
     ...(data?.chain ? { source: data.source, chain: true } : {}),
-    ...(data?.show_key ? { show_key: data.show_key } : {}),
   }
 }
 

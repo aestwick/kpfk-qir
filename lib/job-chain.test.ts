@@ -14,8 +14,8 @@ describe('continuationData', () => {
   it('does not invent chain/window for a plain cron job', () => {
     expect(continuationData({ stationId: 'kpfk', source: 'cron' })).toEqual({ stationId: 'kpfk' })
   })
-  it('keeps a show-scoped compliance run scoped', () => {
-    expect(continuationData({ stationId: 'kpfk', show_key: 'dn' })).toEqual({ stationId: 'kpfk', show_key: 'dn' })
+  it('drops show_key (a show-scoped compliance continuation would re-check the same batch forever)', () => {
+    expect(continuationData({ stationId: 'kpfk', show_key: 'dn' })).toEqual({ stationId: 'kpfk' })
   })
   it('tolerates missing job data', () => {
     expect(continuationData(undefined)).toEqual({ stationId: undefined })

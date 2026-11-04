@@ -78,14 +78,11 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === 'transcripts' || type === 'vtts') {
-      // Get episodes with transcripts for this quarter
       // Every status that has a transcript — including compliance_checked, the
       // terminal state. The old ['transcribed','summarized'] filter matched
       // nothing once compliance ran, so every recent quarter returned 404.
       type Ep = { id: number; show_name: string | null; air_date: string | null; show_key: string | null }
-      type Tr = { episode_id: number; transcript: string | null; vtt: string | null }
       let episodes: Ep[]
-      let transcripts: Tr[] = []
       try {
         episodes = await fetchAllRows<Ep>('episodes', (from, to) =>
           supabase
@@ -99,18 +96,6 @@ export async function GET(request: NextRequest) {
             .order('id', { ascending: true })
             .range(from, to)
         )
-        const epIds = episodes.map((e) => e.id)
-        const field = type === 'transcripts' ? 'transcript' : 'vtt'
-        for (let i = 0; i < epIds.length; i += TRANSCRIPT_BATCH) {
-          // transcripts has no station_id; scope via the episode_log join.
-          const { data, error: tErr } = await supabase
-            .from('transcripts')
-            .select(`episode_id, ${field}, episode_log!inner(station_id)`)
-            .in('episode_id', epIds.slice(i, i + TRANSCRIPT_BATCH))
-            .eq('episode_log.station_id', stationId)
-          if (tErr) throw new Error(`Failed to load transcripts: ${tErr.message}`)
-          transcripts.push(...((data ?? []) as unknown as Tr[]))
-        }
       } catch (err) {
         return NextResponse.json({ error: (err as Error).message }, { status: 500 })
       }
@@ -122,36 +107,8 @@ export async function GET(request: NextRequest) {
         )
       }
 
-      if (!transcripts.length) {
-        return NextResponse.json(
-          { error: 'No transcript data found' },
-          { status: 404 }
-        )
-      }
-
-      const transcriptMap = new Map(transcripts.map((t) => [t.episode_id, t]))
-
-      // Build a simple concatenated text file (zip would require a library)
       const field = type === 'transcripts' ? 'transcript' : 'vtt'
       const ext = type === 'transcripts' ? 'txt' : 'vtt'
-      const parts: string[] = []
-
-      for (const ep of episodes) {
-        const t = transcriptMap.get(ep.id)
-        const content = t?.[field]
-        if (content) {
-          const safeName = (ep.show_name ?? ep.show_key ?? `ep${ep.id}`)
-            .replace(/[^a-zA-Z0-9_-]/g, '_')
-          parts.push(
-            `${'='.repeat(60)}\n` +
-            `FILE: ${safeName}_${ep.air_date}_${ep.id}.${ext}\n` +
-            `${'='.repeat(60)}\n\n` +
-            content + '\n\n'
-          )
-        }
-      }
-
-      const combined = parts.join('')
       const meta = requestMeta(request)
       void logAuditEvent({
         action: AUDIT_ACTIONS.DOWNLOADS_EXPORT,
@@ -163,9 +120,49 @@ export async function GET(request: NextRequest) {
         ip: meta.ip,
         userAgent: meta.userAgent,
       })
-      return new Response(combined, {
+
+      // Streamed batch by batch: a full quarter of VTTs is ~2,000 × up to
+      // ~225KB, too much to hold (and join) in memory at once. A plain
+      // concatenated text file (zip would require a library).
+      const encoder = new TextEncoder()
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          try {
+            for (let i = 0; i < episodes.length; i += TRANSCRIPT_BATCH) {
+              const batch = episodes.slice(i, i + TRANSCRIPT_BATCH)
+              // transcripts has no station_id; scope via the episode_log join.
+              const { data, error: tErr } = await supabase
+                .from('transcripts')
+                .select(`episode_id, ${field}, episode_log!inner(station_id)`)
+                .in('episode_id', batch.map((e) => e.id))
+                .eq('episode_log.station_id', stationId)
+              if (tErr) throw new Error(`Failed to load transcripts: ${tErr.message}`)
+              const byId = new Map(
+                ((data ?? []) as unknown as Array<Record<string, unknown>>).map((t) => [t.episode_id as number, t[field] as string | null])
+              )
+              for (const ep of batch) {
+                const content = byId.get(ep.id)
+                if (!content) continue
+                const safeName = (ep.show_name ?? ep.show_key ?? `ep${ep.id}`).replace(/[^a-zA-Z0-9_-]/g, '_')
+                controller.enqueue(encoder.encode(
+                  `${'='.repeat(60)}\n` +
+                  `FILE: ${safeName}_${ep.air_date}_${ep.id}.${ext}\n` +
+                  `${'='.repeat(60)}\n\n` +
+                  content + '\n\n'
+                ))
+              }
+            }
+            controller.close()
+          } catch (err) {
+            console.error('GET /api/downloads transcript stream failed:', err)
+            controller.error(err)
+          }
+        },
+      })
+
+      return new Response(stream, {
         headers: {
-          'Content-Type': 'text/plain',
+          'Content-Type': 'text/plain; charset=utf-8',
           'Content-Disposition': `attachment; filename="${type}_Q${quarter}_${year}.txt"`,
         },
       })

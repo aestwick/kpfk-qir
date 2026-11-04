@@ -12,12 +12,6 @@ export function isSpendLimitError(message: string | null | undefined): boolean {
   return (
     m.includes('spend_limit_reached') ||
     m.includes('spend alert threshold') ||
-    m.includes('blocked api access because') ||
-    // Provider billing lapses (Deepgram 402 ASR_PAYMENT_REQUIRED / out of
-    // credits): three of these in a row killed healthy episodes on 7/21.
-    m.includes('asr_payment_required') ||
-    m.includes('payment required') ||
-    m.includes('insufficient credits') ||
-    m.includes('not have enough credits')
+    m.includes('blocked api access because')
   )
 }
