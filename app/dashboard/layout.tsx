@@ -6,110 +6,8 @@ import { usePathname } from 'next/navigation'
 import { ErrorBoundary } from '@/app/components/error-boundary'
 import { ToastProvider } from '@/app/components/toast'
 import { StationSwitcher } from '@/app/components/station-switcher'
-
-/* ─── Nav Icons (inline SVGs, 20x20) ─── */
-const icons = {
-  overview: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
-    </svg>
-  ),
-  episodes: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-    </svg>
-  ),
-  compliance: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-    </svg>
-  ),
-  search: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-    </svg>
-  ),
-  jobs: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-    </svg>
-  ),
-  activity: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
-    </svg>
-  ),
-  usage: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
-      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd" />
-    </svg>
-  ),
-  audit: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-    </svg>
-  ),
-  // Show Audit is a per-show QA/review workflow — distinct from the Audit Log
-  // (system trail). Clipboard-check keeps it visually separate in the sidebar.
-  showAudit: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" />
-      <path fillRule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-    </svg>
-  ),
-  master: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clipRule="evenodd" />
-    </svg>
-  ),
-  users: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-    </svg>
-  ),
-  generate: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd" />
-    </svg>
-  ),
-  downloads: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-    </svg>
-  ),
-  settings: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-    </svg>
-  ),
-  apiKeys: (
-    <svg viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M18 8a6 6 0 01-7.743 5.743L10 14l-1 1-1 1H6v2H2v-4l4.257-4.257A6 6 0 1118 8zm-6-4a1 1 0 100 2 2 2 0 012 2 1 1 0 102 0 4 4 0 00-4-4z" clipRule="evenodd" />
-    </svg>
-  ),
-}
-
-// `superAdminOnly` items are hidden unless the signed-in user is a super-admin
-// (the page/API itself also hard-gates — e.g. /api/audit and /api/usage return
-// 403 to non-admins — so nav hiding alone is never the only guard).
-const navItems = [
-  { href: '/dashboard', label: 'Overview', icon: icons.overview },
-  { href: '/dashboard/episodes', label: 'Episodes', icon: icons.episodes },
-  { href: '/dashboard/search', label: 'Search', icon: icons.search },
-  { href: '/dashboard/compliance', label: 'Compliance', icon: icons.compliance },
-  { href: '/dashboard/jobs', label: 'Jobs', icon: icons.jobs },
-  { href: '/dashboard/master', label: 'Master Control', icon: icons.master, superAdminOnly: true },
-  { href: '/dashboard/users', label: 'Users', icon: icons.users, superAdminOnly: true },
-  { href: '/dashboard/activity', label: 'Activity', icon: icons.activity },
-  { href: '/dashboard/usage', label: 'Usage', icon: icons.usage, superAdminOnly: true },
-  { href: '/dashboard/shows/audit', label: 'Show Audit', icon: icons.showAudit },
-  { href: '/dashboard/audit', label: 'Audit Log', icon: icons.audit, superAdminOnly: true },
-  { href: '/dashboard/generate', label: 'Generate QIR', icon: icons.generate },
-  { href: '/dashboard/downloads', label: 'Downloads', icon: icons.downloads },
-  { href: '/dashboard/api-keys', label: 'API Keys', icon: icons.apiKeys },
-  { href: '/dashboard/settings', label: 'Settings', icon: icons.settings },
-]
+import { NavAccessProvider, useNavAccess } from '@/app/components/nav-access'
+import { SidebarNav, useActiveNavItem } from '@/app/components/sidebar-nav'
 
 export default function DashboardLayout({
   children,
@@ -118,13 +16,7 @@ export default function DashboardLayout({
 }) {
   const [authed, setAuthed] = useState<boolean | null>(null)
   const [userEmail, setUserEmail] = useState('')
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const pathname = usePathname()
-
-  useEffect(() => {
-    setSidebarOpen(false)
-  }, [pathname])
+  const [userId, setUserId] = useState('')
 
   useEffect(() => {
     const supabase = createBrowserClient()
@@ -135,15 +27,7 @@ export default function DashboardLayout({
       }
       setAuthed(true)
       setUserEmail(session.user.email ?? '')
-      // Resolve super-admin status to gate the Audit Log nav entry. Reads the
-      // user's own super_admins row (allowed by RLS, same as the station
-      // switcher). The audit page itself still hard-gates on the API 403.
-      supabase
-        .from('super_admins')
-        .select('user_id')
-        .eq('user_id', session.user.id)
-        .maybeSingle()
-        .then(({ data }) => setIsSuperAdmin(!!data))
+      setUserId(session.user.id)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -154,6 +38,48 @@ export default function DashboardLayout({
 
     return () => subscription.unsubscribe()
   }, [])
+
+  if (authed === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-warm-50 dark:bg-surface">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 border-2 border-kpfk-red border-t-transparent rounded-full animate-spin" />
+          <span className="text-sm text-warm-400 dark:text-warm-500">Loading...</span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <NavAccessProvider userId={userId}>
+      <DashboardShell userEmail={userEmail}>{children}</DashboardShell>
+    </NavAccessProvider>
+  )
+}
+
+/** Sidebar + phone header + page frame. Menu contents come from lib/nav.ts. */
+function DashboardShell({ userEmail, children }: { userEmail: string; children: React.ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const pathname = usePathname()
+  const current = useActiveNavItem()
+  const { active } = useNavAccess()
+
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [pathname])
+
+  // Phone drawer: Escape closes it, and the page behind doesn't scroll.
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false) }
+    document.addEventListener('keydown', onKey)
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [sidebarOpen])
 
   async function handleLogout() {
     const supabase = createBrowserClient()
@@ -170,31 +96,25 @@ export default function DashboardLayout({
     window.location.href = '/login'
   }
 
-  if (authed === null) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-warm-50 dark:bg-surface">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 border-2 border-kpfk-red border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm text-warm-400 dark:text-warm-500">Loading...</span>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen flex bg-warm-50 dark:bg-surface">
       {/* Mobile header */}
       <div className="md:hidden fixed top-0 left-0 right-0 z-30 bg-sidebar-bg text-white flex items-center justify-between px-4 py-3 border-b border-sidebar-border">
-        <div className="flex items-center gap-2.5">
-          <div className="h-7 w-7 rounded-lg bg-kpfk-red flex items-center justify-center">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="h-7 w-7 shrink-0 rounded-lg bg-kpfk-red flex items-center justify-center">
             <span className="text-white text-xs font-bold">Q</span>
           </div>
-          <span className="text-sm font-semibold tracking-tight">QIR</span>
+          <span className="min-w-0 leading-tight">
+            <span className="block text-sm font-semibold tracking-tight truncate">{current?.label ?? 'QIR'}</span>
+            {active && <span className="block text-2xs text-warm-400 truncate">{active.name}</span>}
+          </span>
         </div>
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="p-1.5 rounded-lg hover:bg-sidebar-hover transition-colors"
           aria-label="Toggle menu"
+          aria-expanded={sidebarOpen}
+          aria-controls="dashboard-sidebar"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             {sidebarOpen ? (
@@ -215,14 +135,15 @@ export default function DashboardLayout({
       )}
 
       {/* Sidebar */}
-      <nav className={`
+      <nav id="dashboard-sidebar" aria-label="Main menu" className={`
         fixed md:sticky z-40 top-0 left-0 h-full md:h-screen w-60 bg-sidebar-bg text-warm-300 flex flex-col shrink-0
         transition-transform duration-250 ease-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
         {/* Brand */}
-        <div className="px-5 pt-6 pb-5">
-          <div className="flex items-center gap-3">
+        {/* Brand (the phone header already shows it, so the drawer skips it) */}
+        <div className="hidden md:block px-5 pt-6 pb-5">
+          <a href="/dashboard" className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-kpfk-red flex items-center justify-center shadow-glow-red">
               <span className="text-white text-sm font-bold">Q</span>
             </div>
@@ -230,34 +151,16 @@ export default function DashboardLayout({
               <p className="text-sm font-semibold text-white tracking-tight">QIR</p>
               <p className="text-2xs text-warm-500">Quarterly Issues Report</p>
             </div>
-          </div>
+          </a>
         </div>
 
-        {/* Station switcher (only shown when the user has more than one station) */}
-        <StationSwitcher />
-
-        {/* Navigation */}
-        <div className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {navItems.filter((item) => !item.superAdminOnly || isSuperAdmin).map((item) => {
-            const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
-            return (
-              <a
-                key={item.href}
-                href={item.href}
-                className={`nav-item ${
-                  active
-                    ? 'bg-sidebar-active text-white font-medium'
-                    : 'text-warm-400 hover:bg-sidebar-hover hover:text-warm-200'
-                }`}
-              >
-                <span className={`w-5 h-5 shrink-0 ${active ? 'text-kpfk-gold' : 'text-warm-500'}`}>
-                  {item.icon}
-                </span>
-                {item.label}
-              </a>
-            )
-          })}
+        {/* Active station (a switcher when the user has more than one) */}
+        <div className="pt-5 md:pt-0">
+          <StationSwitcher />
         </div>
+
+        {/* Navigation — one definition in lib/nav.ts */}
+        <SidebarNav />
 
         {/* User footer */}
         <div className="px-5 py-4 border-t border-sidebar-border">

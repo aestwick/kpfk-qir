@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { parseQuarterParam } from '@/lib/nav'
 import { authedFetch } from '@/lib/api-client'
 import { getQuarterOptions } from '@/lib/quarters'
 import { summarizeDateSpread } from '@/lib/qir-format'
@@ -283,6 +284,13 @@ export default function GenerateQirPage() {
   // Q4 2020 report) for review/finalize, not just the last year.
   const quarterOptions = getQuarterOptions(6)
   const [selectedQuarter, setSelectedQuarter] = useState(quarterOptions[0])
+  // ?quarter=YYYY-Qn preselects a quarter (the sidebar's filing-deadline link
+  // points at the quarter that's actually due, not the one in progress).
+  useEffect(() => {
+    const want = parseQuarterParam(new URLSearchParams(window.location.search).get('quarter'))
+    const opt = want && quarterOptions.find((o) => o.year === want.year && o.quarter === want.quarter)
+    if (opt) setSelectedQuarter(opt)
+  }, [])
   const [drafts, setDrafts] = useState<QirDraft[]>([])
   const [activeDraft, setActiveDraft] = useState<QirDraft | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -582,7 +590,7 @@ export default function GenerateQirPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">QIR Builder</h2>
+        <h2 className="text-2xl font-bold">Quarterly report</h2>
         <div className="flex items-center gap-3">
           <select
             value={`${selectedQuarter.year}-${selectedQuarter.quarter}`}

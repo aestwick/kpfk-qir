@@ -87,7 +87,7 @@ export default function ShowPage() {
       <Breadcrumbs episodeName={showName} />
 
       <div className="flex items-center gap-3">
-        <a href="/dashboard/episodes" className="text-sm text-gray-500 hover:text-gray-700">&larr; Episodes</a>
+        <a href="/dashboard/shows" className="text-sm text-gray-500 hover:text-gray-700">&larr; Shows</a>
         <h2 className="text-2xl font-bold">{showName}</h2>
         <span className="text-sm text-gray-400">({total} episodes)</span>
       </div>

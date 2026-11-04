@@ -133,20 +133,41 @@ app/api/
 ### Dashboard Pages (all `'use client'`)
 
 ```
-app/dashboard/
-  layout.tsx                — Sidebar nav, auth wrapper, error boundary
-  page.tsx                  — Overview: pipeline viz, stats, cost analytics, activity feed
-  episodes/page.tsx         — Episode table with filters, sort, bulk actions, CSV export
+app/dashboard/              (menu label in quotes — the menu itself is lib/nav.ts)
+  layout.tsx                — Auth wrapper, sidebar shell, phone header, error boundary
+  page.tsx                  — "Home": pipeline viz, stats, cost analytics, activity feed
+  episodes/page.tsx         — "Episodes": table with filters, sort, bulk actions
   episodes/[id]/page.tsx    — Episode detail: audio player, transcript, edit summary
-  jobs/page.tsx             — Queue status monitoring (active station)
-  master/page.tsx           — Master Control (super-admin only): all-station pipeline
+  shows/page.tsx            — "Shows": directory of the station's programs
+  shows/[showKey]/page.tsx  — One show's episodes
+  shows/audit/page.tsx      — "Show check-up": per-show completeness + issues report
+  search/page.tsx           — "Search transcripts"
+  generate/page.tsx         — "Quarterly report": QIR draft builder (?quarter=YYYY-Qn)
+  compliance/page.tsx       — "Review flags"; compliance/grid — "Flags by time slot"
+  settings/page.tsx         — "Settings" (tabs addressable: ?tab=shows|members|…)
+  api-keys/page.tsx         — "API keys" (station admin)
+  jobs/page.tsx             — "Processing queue" (active station)
+  activity/page.tsx         — "Processing log"
+  master/page.tsx           — "All stations" (super-admin only): all-station pipeline
                               activity + per-station pause/resume, run-now, retry/clear
-  generate/page.tsx         — QIR draft builder: generate, curate, edit entries, finalize
-  usage/page.tsx            — Cost tracking with date range
-  audit/page.tsx            — Audit log viewer (super-admin only; trailing window, diff view)
-  settings/page.tsx         — App config + transcript corrections CRUD
-  downloads/page.tsx        — Batch export hub
+  usage/page.tsx            — "AI costs" (super-admin)
+  users/page.tsx            — "All users" (super-admin)
+  audit/page.tsx            — "Change history": audit log viewer (super-admin only)
+  downloads/page.tsx        — "Downloads": batch export hub
 ```
+
+**Navigation has one definition: `lib/nav.ts`** (`NAV_GROUPS`). The sidebar
+(`app/components/sidebar-nav.tsx`), breadcrumbs, episode "← back to" origins and
+the phone header all read it — add/rename a page there, never in a component.
+Items carry `minRole` (viewer/editor/admin/super) to hide links people can't use;
+that is a convenience only — pages/APIs still enforce access. Role comes from
+`app/components/nav-access.tsx` (the user's own `station_users` row, or
+super-admin). `reserved: true` items are slots for pages not built yet (Broadcast
+day, Show coverage, Guests & people) — delete the flag when the page ships. The
+sidebar also shows the FCC filing-deadline chip (`filingStatus()`: due the 10th
+of the month after the quarter, in the station's time zone) and a badge with this
+quarter's unreviewed critical compliance flags. Rationale:
+`docs/navigation-proposal.md`.
 
 ### Public Pages
 

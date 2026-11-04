@@ -370,7 +370,7 @@ export default function ShowAuditPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Show Audit</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Show check-up</h2>
           <p className="text-sm text-gray-500 dark:text-warm-500 mt-1">
             Audit specific shows for a date range &mdash; review existing data, prioritize what&apos;s missing, and generate reports
           </p>
@@ -817,7 +817,7 @@ export default function ShowAuditPage() {
           {/* Report header */}
           <div className="bg-white dark:bg-warm-800 rounded-xl shadow-sm border dark:border-warm-700 p-6">
             <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-1">
-              Show Audit Report
+              Show check-up report
             </h3>
             <p className="text-sm text-gray-500 dark:text-warm-400">
               {monthName(dateFrom)} &mdash; {monthName(dateTo)}

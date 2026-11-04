@@ -145,8 +145,24 @@ function ModelSelect({ value, disabled, onChange, models = OPENAI_CHAT_MODELS }:
   )
 }
 
+const TAB_KEYS: Tab[] = ['pipeline', 'prompts', 'shows', 'compliance', 'corrections', 'members']
+
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('pipeline')
+  const [activeTab, setActiveTabState] = useState<Tab>('pipeline')
+  // The tab lives in the URL (?tab=shows) so the menu and other pages can link
+  // straight to it, and a reload or station switch keeps you where you were.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get('tab') as Tab | null
+    if (t && TAB_KEYS.includes(t)) setActiveTabState(t)
+  }, [])
+  const setActiveTab = useCallback((tab: Tab) => {
+    setActiveTabState(tab)
+    const url = new URL(window.location.href)
+    if (tab === 'pipeline') url.searchParams.delete('tab')
+    else url.searchParams.set('tab', tab)
+    window.history.replaceState(window.history.state, '', url)
+    window.dispatchEvent(new Event('qir:locationchange'))
+  }, [])
   const [settings, setSettings] = useState<Record<string, unknown>>({})
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [savedValues, setSavedValues] = useState<Record<string, string>>({})
@@ -1047,12 +1063,12 @@ export default function SettingsPage() {
       <h2 className="text-2xl font-bold">Settings</h2>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b dark:border-warm-700">
+      <div className="flex gap-1 border-b dark:border-warm-700 overflow-x-auto">
         {tabs.map(tab => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === tab.key
                 ? 'border-gray-900 text-gray-900 dark:border-warm-100 dark:text-warm-100'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-warm-400 dark:hover:text-warm-300 dark:hover:border-warm-500'
