@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { authedFetch } from '@/lib/api-client'
+import { authedFetch, getActiveStationSlug } from '@/lib/api-client'
+import { publicQirPath } from '@/lib/download'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { episodeHref } from '@/lib/nav'
@@ -791,6 +792,9 @@ export default function DashboardOverview() {
 
 /* ─── System Health Footer ─── */
 function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: DashData['queues']; activity: ActivityItem[]; lastFiled: DashData['lastFiledQir']; paused: boolean }) {
+  // Station-qualified public link; the legacy /{year}/q{n} path redirects to KPFK.
+  const [stationSlug, setStationSlug] = useState<string | null>(null)
+  useEffect(() => setStationSlug(getActiveStationSlug()), [])
   const lastIngest = activity.find((a) => a.status === 'pending')?.time
   const lastTranscribe = activity.find((a) => a.status === 'transcribed')?.time
   const lastSummarize = activity.find((a) => a.status === 'summarized' || a.status === 'compliance_checked')?.time
@@ -817,8 +821,8 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
       <span>Last ingest: <span className={`font-medium ${ingestInfo.color}`}>{ingestInfo.label}</span></span>
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>
       <span>Last summarization: <span className={`font-medium ${summarizeInfo.color}`}>{summarizeInfo.label}</span></span>
-      {lastFiled && (
-        <span>Last QIR filed: <a href={`/${lastFiled.year}/q${lastFiled.quarter}`} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
+      {lastFiled && stationSlug && (
+        <span>Last QIR filed: <a href={publicQirPath(stationSlug, lastFiled.year, lastFiled.quarter)} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
       )}
     </div>
   )
