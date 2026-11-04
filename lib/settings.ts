@@ -1,6 +1,7 @@
 import { supabaseAdmin } from './supabase'
 import { getStation } from './stations'
-import { resolveChatModel } from './openai-models'
+import { resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from './openai-models'
+import { resolveGroqModel } from './groq-models'
 
 const settingsCache = new Map<string, { value: unknown; fetchedAt: number }>()
 const CACHE_TTL_MS = 60_000 // 1 minute
@@ -158,6 +159,13 @@ export async function getTranscriptionProviders(stationId: string): Promise<Tran
   return cleaned.length ? cleaned : DEFAULT_TRANSCRIPTION_PROVIDERS
 }
 
+// Which Groq Whisper model transcribes (Settings → Pipeline → Transcription
+// Providers). Per-station overridable; unknown/unset resolves to the default
+// (turbo) so a stale stored id can never reach the API.
+export async function getGroqModel(stationId: string): Promise<string> {
+  return resolveGroqModel(await getSetting<string>('transcription_model', stationId))
+}
+
 // Whether diarization (speaker labels) is requested from providers that support
 // it. On by default; speaker labels land in the VTT as WebVTT voice spans.
 export async function isDiarizationEnabled(stationId: string): Promise<boolean> {
@@ -190,6 +198,12 @@ export async function getComplianceChecksEnabled(stationId: string): Promise<Rec
     sponsor_id: true,
     indecency: true,
   }
+}
+
+// Which OpenAI model runs the AI compliance pass. Global-only like the
+// compliance prompt (FCC rules are uniform). Default + rationale: lib/openai-models.
+export async function getComplianceModel(): Promise<string> {
+  return resolveChatModel((await getSetting<string>('compliance_model')) ?? DEFAULT_COMPLIANCE_MODEL)
 }
 
 export async function getCompliancePrompt(stationId: string): Promise<string> {
@@ -460,20 +474,28 @@ Example: {"Civil Rights / Social Justice": [123, 456, 789], "Health": [101, 202]
 // override (or use {{STATION_NAME}}) for their own compliance prompt.
 export const DEFAULT_COMPLIANCE_PROMPT = `You are an FCC compliance reviewer for {{STATION_NAME}}, a noncommercial community radio station.
 
-Review the following transcript for potential compliance issues. Look for:
+Review the following transcript (it may be one section of a longer program) for potential compliance issues. Look for:
 
-1. PAYOLA/PLUGOLA: Undisclosed commercial promotion. Flag if a host promotes a product, service, or business without disclosure. Do NOT flag: pledge drive fundraising, promoting station events, journalistic discussion of books/films/music, or interviews where guests mention their own work in context.
+1. PROFANITY: Profane or obscene words in speech OR song lyrics, in any language (English and Spanish especially), including variant, partially censored, or phonetically mangled spellings a speech-to-text system may produce (e.g. "f***", "sh**", "effing", "mother f'er", "p***"). Quote the exact words as they appear in the transcript. Do NOT flag: mild words ("damn", "hell", "crap", "ass" alone), sound effects or onomatopoeia, or a profane string that is only part of a longer innocent word.
 
-2. SPONSOR IDENTIFICATION: Segments that sound like sponsored or paid content without proper FCC disclosure.
+2. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references, including in song lyrics, that could violate FCC indecency standards. Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault or harassment, or academic/documentary context where the language serves a clear informational purpose.
 
-3. INDECENCY/SEXUAL CONTENT: Graphic or explicit sexual references that could violate FCC indecency standards during safe harbor restricted hours (6am-10pm). Do NOT flag: clinical/medical terminology in health education, age-appropriate sex education, news reporting on sexual assault, or academic/documentary context.
+3. PAYOLA/PLUGOLA and SPONSOR IDENTIFICATION — flag ONLY clear-cut cases: a host or guest delivering what sounds like a paid advertisement for an outside commercial business (prices, "call now", "visit our store") with no on-air identification of who paid, or a host saying they were paid or given something to play or promote. These are rare — when in doubt, do not flag. NEVER flag any of these, which are normal noncommercial radio:
+   - Pledge drive appeals, thank-you gifts or premiums offered for a donation (books, CDs, box sets, mugs, tickets), and the station's phone number or website.
+   - Promotion of the station's own programs, events, benefit concerts, or fundraisers.
+   - Community calendar and event listings (concerts, screenings, rallies, talks), even when venues, dates, or ticket prices are named.
+   - Underwriting announcements that already identify the supporter ("Support for {{STATION_NAME}} comes from...", "This program is brought to you by...").
+   - Hosts or guests mentioning their own books, shows, films, organizations, or websites; reviews and discussion of books, films, or music; news reporting about companies.
+
+Use severity "critical" for clear profanity or explicit sexual content, "warning" for everything else.
 
 Return ONLY valid JSON. If no issues found, return empty flags array.
 {
   "flags": [
     {
-      "type": "payola_plugola" | "sponsor_id" | "indecency",
-      "excerpt": "relevant quote from transcript (under 200 chars)",
+      "type": "payola_plugola" | "sponsor_id" | "profanity" | "indecency",
+      "excerpt": "exact quote from the transcript (under 200 chars)",
+      "term": "for profanity: the single offending word exactly as written in the transcript, else omit",
       "details": "brief explanation of the concern",
       "severity": "warning" | "critical"
     }

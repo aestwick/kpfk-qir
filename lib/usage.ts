@@ -1,5 +1,7 @@
 import { supabaseAdmin } from './supabase'
 import { DEFAULT_CHAT_MODEL, chatModelCost } from './openai-models'
+import { DEFAULT_GROQ_MODEL } from './groq-models'
+import { transcriptionCostPerSecond } from './transcription/pricing'
 
 // usage_log.station_id is NOT NULL — every row must carry the tenant it belongs
 // to. These inserts are best-effort (a logging failure must never fail the
@@ -11,15 +13,6 @@ async function insertUsage(row: Record<string, unknown>, context: string) {
   if (error) {
     console.warn(`[usage] failed to log ${context} usage:`, error.message)
   }
-}
-
-// Per-provider transcription pricing (USD per second of audio). Groq is the
-// verified published rate; Deepgram/AssemblyAI are list-price estimates (their
-// diarization is included free) — advisory only, adjust per account tier.
-const TRANSCRIBE_COST_PER_SECOND: Record<string, number> = {
-  groq: 0.111 / 3600, // $0.111 / hr (whisper-large-v3)
-  deepgram: 0.0043 / 60, // $0.0043 / min (nova-2 prerecorded)
-  assemblyai: 0.12 / 3600, // ~$0.12 / hr (Universal) — estimate
 }
 
 // OpenAI GPT-4o-mini pricing: $0.15/1M input, $0.60/1M output
@@ -39,8 +32,8 @@ export async function logTranscriptionUsage(
   options?: { provider?: string; model?: string; metadata?: Record<string, unknown> }
 ) {
   const provider = options?.provider ?? 'groq'
-  const model = options?.model ?? 'whisper-large-v3'
-  const estimatedCost = durationSeconds * (TRANSCRIBE_COST_PER_SECOND[provider] ?? 0)
+  const model = options?.model ?? DEFAULT_GROQ_MODEL
+  const estimatedCost = durationSeconds * transcriptionCostPerSecond(provider, model)
 
   await insertUsage({
     station_id: stationId,
@@ -85,17 +78,16 @@ export async function logComplianceUsage(
   episodeId: number,
   inputTokens: number,
   outputTokens: number,
+  model: string = DEFAULT_CHAT_MODEL,
   metadata?: Record<string, unknown>
 ) {
-  const estimatedCost =
-    inputTokens * OPENAI_INPUT_COST_PER_TOKEN +
-    outputTokens * OPENAI_OUTPUT_COST_PER_TOKEN
+  const estimatedCost = chatModelCost(model, inputTokens, outputTokens)
 
   await insertUsage({
     station_id: stationId,
     episode_id: episodeId,
     service: 'openai',
-    model: 'gpt-4o-mini',
+    model,
     operation: 'compliance',
     input_tokens: inputTokens,
     output_tokens: outputTokens,

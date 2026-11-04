@@ -7,7 +7,8 @@ import { SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
-import { OPENAI_CHAT_MODELS, resolveChatModel } from '@/lib/openai-models'
+import { OPENAI_CHAT_MODELS, resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from '@/lib/openai-models'
+import { GROQ_WHISPER_MODELS, resolveGroqModel } from '@/lib/groq-models'
 import { resolveGroupDisplayName, showGroupKey, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
@@ -74,7 +75,6 @@ const settingFields: SettingField[] = [
   { key: 'excluded_categories', label: 'Excluded Categories (JSON array)', type: 'json' },
   { key: 'excluded_show_keys', label: 'Excluded Show Keys (JSON array)', type: 'json' },
   { key: 'summarization_model', label: 'Summarization Model', type: 'text', autoSave: true },
-  { key: 'transcription_model', label: 'Transcription Model', type: 'text', autoSave: true },
   { key: 'transcribe_batch_size', label: 'Transcribe Batch Size', type: 'number', autoSave: true },
   { key: 'summarize_batch_size', label: 'Summarize Batch Size', type: 'number', autoSave: true },
 ]
@@ -83,7 +83,7 @@ const settingFields: SettingField[] = [
 // engines that can return speaker labels. The actual order/enabled state lives in
 // the `transcription_providers` setting; this only supplies display metadata.
 const PROVIDER_META: { id: string; label: string; diarization: boolean; note: string }[] = [
-  { id: 'groq', label: 'Groq Whisper', diarization: false, note: 'whisper-large-v3 · fast, low cost · no speakers' },
+  { id: 'groq', label: 'Groq Whisper', diarization: false, note: 'model below · fast, low cost · no speakers' },
   { id: 'deepgram', label: 'Deepgram', diarization: true, note: 'nova-2 · speaker diarization' },
   { id: 'assemblyai', label: 'AssemblyAI', diarization: true, note: 'universal · speaker diarization' },
 ]
@@ -120,11 +120,13 @@ const DEFAULT_CATEGORIES = [
 
 type Tab = 'pipeline' | 'prompts' | 'shows' | 'compliance' | 'corrections' | 'members'
 
-/* ─── model dropdown shared by the prompt cards ─── */
+/* ─── model dropdown shared by the prompt cards + transcription card ─── */
 // Hovering the select shows the current model's one-line description; each
-// option carries its own description as a native tooltip too.
-function ModelSelect({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (v: string) => void }) {
-  const selected = OPENAI_CHAT_MODELS.find((m) => m.id === value)
+// option carries its own description as a native tooltip too. `models` defaults
+// to the OpenAI chat catalog; the transcription card passes the Groq catalog.
+interface ModelOption { id: string; label: string; description: string }
+function ModelSelect({ value, disabled, onChange, models = OPENAI_CHAT_MODELS }: { value: string; disabled: boolean; onChange: (v: string) => void; models?: ModelOption[] }) {
+  const selected = models.find((m) => m.id === value)
   return (
     <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-warm-400 shrink-0">
       Model
@@ -135,7 +137,7 @@ function ModelSelect({ value, disabled, onChange }: { value: string; disabled: b
         title={selected?.description}
         className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100 disabled:opacity-50"
       >
-        {OPENAI_CHAT_MODELS.map((m) => (
+        {models.map((m) => (
           <option key={m.id} value={m.id} title={m.description}>{m.label}</option>
         ))}
       </select>
@@ -168,7 +170,9 @@ export default function SettingsPage() {
   const [summarizationPrompt, setSummarizationPrompt] = useState('')
   const [savedSummarizationPrompt, setSavedSummarizationPrompt] = useState('')
   const [summarizationModel, setSummarizationModel] = useState(resolveChatModel(undefined))
+  const [groqModel, setGroqModel] = useState(resolveGroqModel(undefined))
   const [curationModel, setCurationModel] = useState(resolveChatModel(undefined))
+  const [complianceModel, setComplianceModel] = useState(DEFAULT_COMPLIANCE_MODEL)
   const [curationPrompt, setCurationPrompt] = useState('')
   const [savedCurationPrompt, setSavedCurationPrompt] = useState('')
   const [loading, setLoading] = useState(true)
@@ -306,6 +310,8 @@ export default function SettingsPage() {
       setSavedCurationPrompt(curPrompt)
       setSummarizationModel(resolveChatModel(data.settings?.summarization_model))
       setCurationModel(resolveChatModel(data.settings?.curation_model))
+      setGroqModel(resolveGroqModel(data.settings?.transcription_model))
+      setComplianceModel(resolveChatModel(data.settings?.compliance_model ?? DEFAULT_COMPLIANCE_MODEL))
     }
     if (correctionsRes.ok) {
       const data = await correctionsRes.json()
@@ -1198,6 +1204,16 @@ export default function SettingsPage() {
                         )}
                       </div>
                       <p className="text-xs text-gray-500 dark:text-warm-400 truncate">{meta?.note}</p>
+                      {p.provider === 'groq' && (
+                        <div className="mt-2">
+                          <ModelSelect
+                            value={groqModel}
+                            models={GROQ_WHISPER_MODELS}
+                            disabled={saving === 'transcription_model'}
+                            onChange={(v) => saveModel('transcription_model', v, 'Transcription model', setGroqModel, groqModel)}
+                          />
+                        </div>
+                      )}
                     </div>
                     <label className="flex items-center gap-1.5 text-sm shrink-0 cursor-pointer">
                       <input
@@ -1511,9 +1527,14 @@ export default function SettingsPage() {
               <div>
                 <h3 className="font-semibold text-gray-900 dark:text-warm-100">Compliance Prompt</h3>
                 <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">
-                  System prompt for AI-powered compliance checks (payola/plugola, sponsor ID, indecency). Also editable from the Compliance tab.
+                  System prompt for AI-powered compliance checks (profanity, indecency, payola/plugola, sponsor ID). Applies to every station. Also editable from the Compliance tab.
                 </p>
               </div>
+              <ModelSelect
+                value={complianceModel}
+                disabled={saving === 'compliance_model'}
+                onChange={(v) => saveModel('compliance_model', v, 'Compliance model', setComplianceModel, complianceModel)}
+              />
             </div>
             <div className={compliancePrompt !== savedCompliancePrompt ? 'ring-2 ring-amber-300 rounded' : ''}>
               <textarea

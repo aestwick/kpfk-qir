@@ -107,7 +107,7 @@ export async function PUT(request: NextRequest) {
     // override can never be created (which would desync display from enforcement,
     // since the workers read these global-only). compliance_checks_enabled is NOT
     // here: it stays central-default + per-station override.
-    const GLOBAL_ONLY_KEYS = new Set(['compliance_prompt', 'compliance_blocking'])
+    const GLOBAL_ONLY_KEYS = new Set(['compliance_prompt', 'compliance_blocking', 'compliance_model'])
 
     // Master-level (global) write: the centralized keys above, or an explicit
     // scope:'global' (e.g. a super-admin editing the global DEFAULT for checks).

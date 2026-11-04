@@ -18,6 +18,12 @@ export interface OpenAIChatModel {
 
 export const DEFAULT_CHAT_MODEL = 'gpt-4o-mini'
 
+// The AI compliance pass defaults higher: on the 2026-10-09 KPFK broadcast day
+// gpt-4.1-mini caught 29 lyric profanities (incl. censored "f***" forms) vs
+// gpt-4o-mini's 17, and followed the "don't flag damn/freaking" exclusions
+// better — ~3× the per-token price, ≈$23/quarter for all of KPFK.
+export const DEFAULT_COMPLIANCE_MODEL = 'gpt-4.1-mini'
+
 export const OPENAI_CHAT_MODELS: OpenAIChatModel[] = [
   {
     id: 'gpt-4o-mini',

@@ -9,6 +9,7 @@ import { getTranscriptionProviders, isDiarizationEnabled } from '../settings'
 import { groqProvider } from './groq'
 import { deepgramProvider } from './deepgram'
 import { assemblyaiProvider } from './assemblyai'
+import { transcriptionCostPerSecond } from './pricing'
 import {
   AllProvidersFailedError,
   AudioUnavailableError,
@@ -90,17 +91,9 @@ export async function runTranscription(
 }
 
 // ─── Cost estimation ────────────────────────────────────────────────────────
-// Per-second USD rates. Groq is the verified published rate; Deepgram/AssemblyAI
-// are list-price estimates (diarization is included free on both) — adjust if the
-// account is on a different tier. estimated_cost is advisory, not billed.
-const COST_PER_SECOND: Record<ProviderId, number> = {
-  groq: 0.111 / 3600, // $0.111 / hr (whisper-large-v3)
-  deepgram: 0.0043 / 60, // $0.0043 / min (nova-2 prerecorded)
-  assemblyai: 0.12 / 3600, // ~$0.12 / hr (Universal) — estimate
-}
-
-export function estimateTranscriptionCost(providerId: ProviderId, durationSec: number): number {
-  return durationSec * (COST_PER_SECOND[providerId] ?? 0)
+// Rates live in ./pricing (shared with lib/usage.ts). Advisory, not billed.
+export function estimateTranscriptionCost(providerId: ProviderId, durationSec: number, model?: string | null): number {
+  return durationSec * transcriptionCostPerSecond(providerId, model)
 }
 
 // Non-secret config status for the dashboard: which provider keys are present.

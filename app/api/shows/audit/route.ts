@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SupabaseClient } from '@supabase/supabase-js'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getGroqModel } from '@/lib/settings'
+import { groqCostPerSecond } from '@/lib/groq-models'
 
 export const dynamic = 'force-dynamic'
 
-// Groq Whisper: $0.111/hr
-const GROQ_COST_PER_SECOND = 0.111 / 3600
 // OpenAI GPT-4o-mini: ~$0.15/1M input, $0.60/1M output — rough per-episode estimate
 const ESTIMATED_SUMMARIZE_COST = 0.003
 const ESTIMATED_COMPLIANCE_COST = 0.002
@@ -131,6 +131,8 @@ export async function GET(request: NextRequest) {
     // Estimate costs for unprocessed episodes
     // Track unique episodes per stage (pending episodes cascade through all stages)
     let estimatedTranscribeCost = 0
+    // Priced at the station's configured Groq model (the default primary provider).
+    const groqRatePerSecond = groqCostPerSecond(await getGroqModel(stationId))
     let estimatedSummarizeCost = 0
     let estimatedComplianceCost = 0
     let episodesNeedingWork = 0
@@ -139,7 +141,7 @@ export async function GET(request: NextRequest) {
       if (ep.status === 'pending' || ep.status === 'failed') {
         episodesNeedingWork++
         const durationSec = (ep.duration ?? 60) * 60
-        estimatedTranscribeCost += durationSec * GROQ_COST_PER_SECOND
+        estimatedTranscribeCost += durationSec * groqRatePerSecond
         estimatedSummarizeCost += ESTIMATED_SUMMARIZE_COST
         estimatedComplianceCost += ESTIMATED_COMPLIANCE_COST
       } else if (ep.status === 'transcribed') {
