@@ -25,6 +25,8 @@ interface ShowGroupRow {
   group: string
   name: string
   keys: string[]
+  /** Each feed's own name (feeds of one show can be named differently). */
+  feeds: { key: string; name: string }[]
   category: string | null
   active: boolean
 }
@@ -55,10 +57,14 @@ export default function ShowsPage() {
       const g = map.get(id)
       if (g) {
         g.keys.push(r.key)
+        g.feeds.push({ key: r.key, name: r.display || r.key })
         g.active = g.active || r.active
         if (r.active && !g.category) g.category = r.category
       } else {
-        map.set(id, { group: r.group, name: r.display || r.key, keys: [r.key], category: r.category, active: r.active })
+        map.set(id, {
+          group: r.group, name: r.display || r.key, keys: [r.key],
+          feeds: [{ key: r.key, name: r.display || r.key }], category: r.category, active: r.active,
+        })
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
@@ -113,27 +119,45 @@ export default function ShowsPage() {
       {rows && (
         <ul className="bg-white dark:bg-surface-raised rounded-xl border border-warm-200 dark:border-warm-700 divide-y divide-warm-100 dark:divide-warm-800">
           {visible.length === 0 && <li className="px-4 py-6 text-sm text-warm-400">No shows match.</li>}
-          {visible.map((g) => (
-            <li key={g.group}>
-              <a
-                href={`/dashboard/shows/${encodeURIComponent(g.keys[0])}`}
-                className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-warm-50 dark:hover:bg-warm-800/40"
-              >
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium text-warm-800 dark:text-warm-100 truncate">{g.name}</span>
-                  {g.keys.length > 1 && (
-                    <span className="block text-2xs text-warm-400">{g.keys.length} airings/feeds</span>
-                  )}
-                </span>
-                <span className="flex items-center gap-2 shrink-0">
-                  {g.category && <span className="text-2xs text-warm-400">{g.category}</span>}
-                  {!g.active && (
-                    <span className="text-2xs px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-500">not tracked</span>
-                  )}
-                </span>
-              </a>
-            </li>
-          ))}
+          {visible.map((g) => {
+            const meta = (
+              <span className="flex items-center gap-2 shrink-0">
+                {g.category && <span className="text-2xs text-warm-400">{g.category}</span>}
+                {!g.active && (
+                  <span className="text-2xs px-1.5 py-0.5 rounded bg-warm-100 dark:bg-warm-800 text-warm-500">not tracked</span>
+                )}
+              </span>
+            )
+            const showHref = (key: string) => `/dashboard/shows/${encodeURIComponent(key)}`
+            // One feed: the whole row is the link. Several feeds (e.g. a 6am and
+            // a 9am airing): each show page lists one feed, so link every feed.
+            return g.feeds.length === 1 ? (
+              <li key={g.group}>
+                <a
+                  href={showHref(g.keys[0])}
+                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-warm-50 dark:hover:bg-warm-800/40"
+                >
+                  <span className="min-w-0 text-sm font-medium text-warm-800 dark:text-warm-100 truncate">{g.name}</span>
+                  {meta}
+                </a>
+              </li>
+            ) : (
+              <li key={g.group} className="px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 text-sm font-medium text-warm-800 dark:text-warm-100 truncate">{g.name}</span>
+                  {meta}
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="text-2xs text-warm-400">Airs on {g.feeds.length} feeds:</span>
+                  {g.feeds.map((f) => (
+                    <a key={f.key} href={showHref(f.key)} className="text-2xs text-warm-600 dark:text-warm-300 hover:text-kpfk-red underline underline-offset-2">
+                      {f.name === g.name ? f.key : f.name}
+                    </a>
+                  ))}
+                </div>
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>
