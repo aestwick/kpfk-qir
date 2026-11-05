@@ -5,6 +5,7 @@ import { getStationContext, stationErrorResponse, StationContext } from '@/lib/a
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 import { fetchAllRows } from '@/lib/fetch-all'
 import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
+import { isTranscriptionService } from '@/lib/transcription/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -264,28 +265,28 @@ async function buildDashboard(
   const quarterCounts = Object.fromEntries(qtrStatusCounts)
 
   // Aggregate usage/cost
-  const usage = { groq: 0, openai: 0, total: 0, episodes: new Set<number>(), apiCalls: 0 }
+  const usage = { transcription: 0, openai: 0, total: 0, episodes: new Set<number>(), apiCalls: 0 }
   for (const row of usageThisQuarter.data ?? []) {
     const cost = Number(row.estimated_cost) || 0
     usage.total += cost
-    if (row.service === 'groq') usage.groq += cost
-    if (row.service === 'openai') usage.openai += cost
+    if (isTranscriptionService(row.service)) usage.transcription += cost
+    else if (row.service === 'openai') usage.openai += cost
     if (row.episode_id) usage.episodes.add(row.episode_id)
     usage.apiCalls++
   }
 
   // Daily cost aggregation
-  const dailyMap = new Map<string, { groq: number; openai: number }>()
+  const dailyMap = new Map<string, { transcription: number; openai: number }>()
   for (const row of dailyCosts.data ?? []) {
     const day = row.created_at.slice(0, 10)
-    const entry = dailyMap.get(day) ?? { groq: 0, openai: 0 }
+    const entry = dailyMap.get(day) ?? { transcription: 0, openai: 0 }
     const cost = Number(row.estimated_cost) || 0
-    if (row.service === 'groq') entry.groq += cost
-    else entry.openai += cost
+    if (isTranscriptionService(row.service)) entry.transcription += cost
+    else if (row.service === 'openai') entry.openai += cost
     dailyMap.set(day, entry)
   }
   const dailyCostData = Array.from(dailyMap.entries())
-    .map(([date, costs]) => ({ date, groq: costs.groq, openai: costs.openai, total: costs.groq + costs.openai }))
+    .map(([date, costs]) => ({ date, transcription: costs.transcription, openai: costs.openai, total: costs.transcription + costs.openai }))
     .sort((a, b) => a.date.localeCompare(b.date))
 
   // Category distribution
@@ -397,11 +398,12 @@ async function buildDashboard(
     : null
 
   // Monthly cost
-  let monthGroq = 0, monthOpenai = 0
+  let monthTranscription = 0, monthOpenai = 0, monthTotal = 0
   for (const row of monthlyUsage.data ?? []) {
     const cost = Number(row.estimated_cost) || 0
-    if (row.service === 'groq') monthGroq += cost
-    else monthOpenai += cost
+    monthTotal += cost
+    if (isTranscriptionService(row.service)) monthTranscription += cost
+    else if (row.service === 'openai') monthOpenai += cost
   }
 
   // Quality flags: filter episodes that might have transcript issues
@@ -472,9 +474,9 @@ async function buildDashboard(
     // Cost/spend metrics are super-admin-only — omit the entire block otherwise.
     ...(isSuperAdmin ? {
       cost: {
-        quarter: { groq: usage.groq, openai: usage.openai, total: usage.total, episodeCount: usage.episodes.size, apiCalls: usage.apiCalls },
+        quarter: { transcription: usage.transcription, openai: usage.openai, total: usage.total, episodeCount: usage.episodes.size, apiCalls: usage.apiCalls },
         daily: dailyCostData,
-        month: { groq: monthGroq, openai: monthOpenai, total: monthGroq + monthOpenai },
+        month: { transcription: monthTranscription, openai: monthOpenai, total: monthTotal },
       },
     } : {}),
     categories: categoryData,

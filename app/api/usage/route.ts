@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/fetch-all'
+import { isTranscriptionService } from '@/lib/transcription/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate totals
     const episodes = new Set<number>()
-    let groqCost = 0
+    let transcriptionCost = 0
     let openaiCost = 0
     let totalCost = 0
     let totalDurationSeconds = 0
@@ -69,8 +70,8 @@ export async function GET(request: NextRequest) {
       totalInputTokens += inTok
       totalOutputTokens += outTok
 
-      if (row.service === 'groq') groqCost += cost
-      if (row.service === 'openai') openaiCost += cost
+      if (isTranscriptionService(row.service)) transcriptionCost += cost
+      else if (row.service === 'openai') openaiCost += cost
       if (row.episode_id) episodes.add(row.episode_id)
 
       if (!byOperation[row.operation]) {
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       entries: data,
       totals: {
-        groq: groqCost,
+        transcription: transcriptionCost,
         openai: openaiCost,
         total: totalCost,
         episodeCount: episodes.size,

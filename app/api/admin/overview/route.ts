@@ -5,6 +5,7 @@ import { getStationContext, stationErrorResponse, StationContext } from '@/lib/a
 import { fetchAllRows } from '@/lib/fetch-all'
 import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
 import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isStationOverBudget, isPipelinePaused } from '@/lib/settings'
+import { isTranscriptionService } from '@/lib/transcription/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -171,8 +172,8 @@ export async function GET(request: NextRequest) {
       ).then((data) => ({ data })),
     ])
 
-    // Per-station spend: quarter-to-date (groq/openai/total) + month-to-date total.
-    type StationCost = { groq: number; openai: number; total: number; month: number }
+    // Per-station spend: quarter-to-date (transcription/openai/total) + month-to-date total.
+    type StationCost = { transcription: number; openai: number; total: number; month: number }
     const costByStation = new Map<string, StationCost>()
     // Combined all-stations totals for the universal ceiling (every row, matching
     // lib/settings#getTotalSpend — independent of per-station attribution).
@@ -183,9 +184,9 @@ export async function GET(request: NextRequest) {
       grand.quarter += amount
       if (inMonth) grand.month += amount
       if (!row.station_id) continue
-      const c = costByStation.get(row.station_id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
+      const c = costByStation.get(row.station_id) ?? { transcription: 0, openai: 0, total: 0, month: 0 }
       c.total += amount
-      if (row.service === 'groq') c.groq += amount
+      if (isTranscriptionService(row.service)) c.transcription += amount
       else if (row.service === 'openai') c.openai += amount
       if (inMonth) c.month += amount
       costByStation.set(row.station_id, c)
@@ -241,7 +242,7 @@ export async function GET(request: NextRequest) {
     const stationsOut = stationList
       .map((s, i) => {
         const paused = stationPauseStates[i]
-        const spend = costByStation.get(s.id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
+        const spend = costByStation.get(s.id) ?? { transcription: 0, openai: 0, total: 0, month: 0 }
         const ov = overrideByStation.get(s.id) ?? { monthly: null, quarterly: null }
         const effMonthly = ov.monthly ?? budgetDefaults.monthly
         const effQuarterly = ov.quarterly ?? budgetDefaults.quarterly

@@ -24,8 +24,8 @@ interface StationRow {
   episodes: { pending: number; transcribed: number; summarized: number; compliance_checked: number; failed: number; total: number }
   lastAdvancedAt: string | null
   activity: { active: number; waiting: number; failed: number }
-  // Running spend tally: quarter-to-date (groq/openai/total) + month-to-date.
-  cost: { groq: number; openai: number; total: number; month: number }
+  // Running spend tally: quarter-to-date (transcription/openai/total) + month-to-date.
+  cost: { transcription: number; openai: number; total: number; month: number }
   // Effective spend caps (override → global) + over-budget state. `override` is
   // the station's own explicit value (null = inheriting the global default).
   budget: {
@@ -628,7 +628,7 @@ export default function MasterControlPage() {
                           <td className="px-2 py-3 tabular-nums">
                             <span className={s.episodes.failed > 0 ? 'text-red-600 dark:text-red-400 font-medium' : ''}>{s.episodes.failed}</span>
                           </td>
-                          <td className="px-2 py-3 tabular-nums" title={`Groq ${fmtCost(s.cost.groq)} · OpenAI ${fmtCost(s.cost.openai)} · month-to-date ${fmtCost(s.cost.month)}`}>
+                          <td className="px-2 py-3 tabular-nums" title={`Transcription ${fmtCost(s.cost.transcription)} · OpenAI ${fmtCost(s.cost.openai)} · month-to-date ${fmtCost(s.cost.month)}`}>
                             {fmtCost(s.cost.total)}
                           </td>
                           <td className="px-5 py-3"><StationControls s={s} /></td>
