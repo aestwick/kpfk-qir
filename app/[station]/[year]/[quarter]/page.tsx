@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import PrintButton from '@/app/components/print-button'
 import { logAuditEvent, AUDIT_ACTIONS } from '@/lib/audit'
 import type { Metadata } from 'next'
+import { parseQuarterSegment, parseYearSegment } from '@/lib/qir-format'
 
 // This page reads request headers (below) to audit each public view, which opts
 // it into per-request dynamic rendering. Finalized reports rarely change, so the
@@ -25,8 +26,8 @@ export async function generateMetadata({
 }: {
   params: { station: string; year: string; quarter: string }
 }): Promise<Metadata> {
-  const year = parseInt(params.year)
-  const quarter = parseInt(params.quarter)
+  const year = parseYearSegment(params.year)
+  const quarter = parseQuarterSegment(params.quarter)
   const station = await resolveStation(params.station)
   const name = station?.name ?? 'Quarterly Issues Report'
   const title = `${name} — Quarterly Issues Report — Q${quarter} ${year}`
@@ -72,10 +73,10 @@ export default async function PublicQirPage({
 }: {
   params: { station: string; year: string; quarter: string }
 }) {
-  const year = parseInt(params.year)
-  const quarter = parseInt(params.quarter)
+  const year = parseYearSegment(params.year)
+  const quarter = parseQuarterSegment(params.quarter)
 
-  if (isNaN(year) || isNaN(quarter) || quarter < 1 || quarter > 4) {
+  if (year === null || quarter === null) {
     notFound()
   }
 

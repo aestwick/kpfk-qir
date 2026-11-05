@@ -140,7 +140,7 @@ app/api/
                               PATCH revoke/activate, DELETE
   v1/                       — Public read API (API-key auth, GET-only). See "Public Read API".
     qir/route.ts                  — finalized reports (filter year/quarter/status)
-    qir/[year]/q[quarter]/route.ts — one finalized report + curated entries
+    qir/[year]/[quarter]/route.ts  — one finalized report + curated entries (URL /qir/2026/q2)
     episodes/route.ts             — published episode feed (keyset cursor + updated_since)
     episodes/[id]/route.ts        — episode detail by public_id (?include=transcript)
     episodes/[id]/transcript/route.ts — captions: VTT (?format=vtt) or JSON
@@ -196,7 +196,7 @@ quarter's unreviewed critical compliance flags. Rationale:
 app/
   page.tsx                  — Redirects to /dashboard
   login/page.tsx            — Supabase email/password auth
-  [station]/[year]/q[quarter]/page.tsx — Public finalized QIR (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
+  [station]/[year]/[quarter]/page.tsx — Public finalized QIR at /kpfk/2026/q2 (folder is `[quarter]`, never `q[quarter]`: Next has no partial dynamic segments, so that supplies no param; `parseQuarterSegment` in lib/qir-format.ts strips the `q`) (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
 ```
 
 ### Shared Components
@@ -335,7 +335,7 @@ The app is multi-tenant: **one codebase, one database, one deployment** serving 
 - **Request path**: `lib/auth.ts#getStationContext(request)` resolves the caller (Bearer token), their allowed stations, and the active station (from the `qir_station` cookie / `x-station-slug` header), returning a **request-scoped RLS client**. API routes use it + an explicit `.eq('station_id', …)`. Client pages call `lib/api-client.ts#authedFetch`. The active station is chosen client-side by the station switcher — the server never defaults one (a wrong default would leak cross-tenant).
 - **Workers** run with the service-role client (RLS bypassed), so their `station_id` filter is the *only* guard. Jobs carry `stationId`; the ingest/auto-retry cron acts as a per-station **dispatcher** (fans out one job per station); transcribe/summarize/compliance filter both the candidate-select and the atomic claim guard by `station_id`.
 - **Settings** resolve per station: `station_settings(station_id,key)` → global `qir_settings(key)` → hard-coded default (`lib/settings.ts`, 60s cache keyed by `(stationId,key)`). Prompts interpolate `{{STATION_NAME}}`.
-- **Public reports** live at `/[station]/[year]/q[quarter]`; legacy `/[year]/q[quarter]` 308-redirects to `/kpfk/...` (next.config.js) so filed FCC links keep resolving.
+- **Public reports** live at `/[station]/[year]/q[N]` (route folder `[station]/[year]/[quarter]`); legacy `/[year]/q[N]` 308-redirects to `/kpfk/...` (next.config.js) so filed FCC links keep resolving.
 
 ### Provisioning a new station (SQL/admin, no UI yet)
 

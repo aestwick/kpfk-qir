@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseEntryDate, summarizeDateSpread, spreadCandidates, getQuarterDateRange } from './qir-format'
+import { parseEntryDate, summarizeDateSpread, spreadCandidates, getQuarterDateRange, parseQuarterSegment, parseYearSegment } from './qir-format'
 
 describe('parseEntryDate', () => {
   it('parses ISO and the long display form to the same UTC day', () => {
@@ -80,6 +80,31 @@ describe('getQuarterDateRange', () => {
     } finally {
       if (saved === undefined) delete process.env.TZ
       else process.env.TZ = saved
+    }
+  })
+})
+
+describe('parseQuarterSegment', () => {
+  // The route folder is `[quarter]`, so a request for /kpfk/2026/q2 arrives as "q2".
+  it('accepts the q-prefixed form every public link uses', () => {
+    expect(parseQuarterSegment('q2')).toBe(2)
+    expect(parseQuarterSegment('Q4')).toBe(4)
+  })
+  it('accepts a bare quarter number', () => {
+    expect(parseQuarterSegment('1')).toBe(1)
+  })
+  it('rejects out-of-range and junk', () => {
+    for (const bad of ['q0', 'q5', '5', 'q', '', 'q2x', 'qq2', '02', undefined]) {
+      expect(parseQuarterSegment(bad)).toBeNull()
+    }
+  })
+})
+
+describe('parseYearSegment', () => {
+  it('accepts four digits only', () => {
+    expect(parseYearSegment('2026')).toBe(2026)
+    for (const bad of ['26', '20261', '2026a', '', undefined]) {
+      expect(parseYearSegment(bad)).toBeNull()
     }
   })
 })

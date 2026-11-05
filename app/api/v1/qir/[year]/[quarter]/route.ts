@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
+import { parseQuarterSegment, parseYearSegment } from '@/lib/qir-format'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -8,9 +9,9 @@ export const runtime = 'nodejs'
 // including its curated entries. 404 when no finalized report exists.
 export const GET = withApiKey(
   async (_request, { ctx, params }) => {
-    const year = parseInt(params.year)
-    const quarter = parseInt(params.quarter)
-    if (isNaN(year) || isNaN(quarter) || quarter < 1 || quarter > 4) {
+    const year = parseYearSegment(params.year)
+    const quarter = parseQuarterSegment(params.quarter)
+    if (year === null || quarter === null) {
       return { json: { error: 'Invalid year or quarter' }, status: 400 }
     }
 
