@@ -4,7 +4,7 @@ import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
-import { jobsForCaller } from '@/lib/job-scope'
+import { collectJobsForCaller } from '@/lib/job-scope'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
         await queue.clean(0, 0, 'failed')
         return NextResponse.json({ ok: true, message: `Cleared failed jobs from ${body.queue}` })
       }
-      const mine = jobsForCaller(await queue.getFailed(0, 1000), { stationId, isSuperAdmin })
+      const mine = await collectJobsForCaller((s, e) => queue.getFailed(s, e), { stationId, isSuperAdmin }, 1000)
       let removed = 0
       for (const job of mine) {
         try {
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     if (action === 'retry_failed') {
       const queue = getQueue(body.queue)
       if (!queue) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
-      const failed = jobsForCaller(await queue.getFailed(0, 100), { stationId, isSuperAdmin })
+      const failed = await collectJobsForCaller((s, e) => queue.getFailed(s, e), { stationId, isSuperAdmin }, 100)
       let retried = 0
       for (const job of failed) {
         try {
@@ -204,12 +204,14 @@ export async function GET(request: NextRequest) {
       Promise.all(
         queueNames.map(async (name) => {
           const queue = queues[name]
+          // Each list is collected per caller (paging the shared queue), so
+          // another station's jobs can't crowd the caller's out of the view.
           const [counts, failed, active, waiting, completed] = await Promise.all([
             queue.getJobCounts(),
-            queue.getFailed(0, 20),
-            queue.getActive(0, 20),
-            queue.getWaiting(0, 20),
-            queue.getCompleted(0, 30),
+            collectJobsForCaller((s, e) => queue.getFailed(s, e), scope, 20),
+            collectJobsForCaller((s, e) => queue.getActive(s, e), scope, 20),
+            collectJobsForCaller((s, e) => queue.getWaiting(s, e), scope, 20),
+            collectJobsForCaller((s, e) => queue.getCompleted(s, e), scope, 30),
           ])
           const mapJob = (job: { id: string | undefined; name: string; data: Record<string, unknown>; timestamp: number; processedOn?: number | null; finishedOn?: number | null; failedReason?: string; progress?: unknown; returnvalue?: unknown }, state: string) => ({
             id: job.id,
@@ -231,7 +233,7 @@ export async function GET(request: NextRequest) {
               completed: counts.completed ?? 0,
               failed: counts.failed ?? 0,
             },
-            failedJobs: jobsForCaller(failed as any[], scope).map((job: any) => ({
+            failedJobs: failed.map((job: any) => ({
               id: job.id,
               name: job.name,
               data: job.data,
@@ -240,9 +242,9 @@ export async function GET(request: NextRequest) {
               finishedOn: job.finishedOn,
             })),
             jobs: [
-              ...jobsForCaller(active as any[], scope).map((j: any) => mapJob(j, 'active')),
-              ...jobsForCaller(waiting as any[], scope).map((j: any) => mapJob(j, 'waiting')),
-              ...jobsForCaller(completed as any[], scope).map((j: any) => mapJob(j, 'completed')),
+              ...active.map((j: any) => mapJob(j, 'active')),
+              ...waiting.map((j: any) => mapJob(j, 'waiting')),
+              ...completed.map((j: any) => mapJob(j, 'completed')),
             ],
           }
         })

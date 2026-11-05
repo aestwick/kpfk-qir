@@ -12,3 +12,25 @@ export function jobsForCaller<T extends ScopedJob>(
   if (caller.isSuperAdmin) return jobs
   return jobs.filter((j) => j.data?.stationId === caller.stationId)
 }
+
+/**
+ * Page through a shared queue (fetchPage(start, end) is BullMQ's inclusive
+ * range, e.g. queue.getFailed) collecting the caller's jobs until `limit` are
+ * found or the queue runs out. Filtering one fixed page instead let another
+ * station's backlog hide the caller's jobs entirely (retry/clear made no
+ * progress). `maxScan` bounds the work on a very large queue.
+ */
+export async function collectJobsForCaller<T extends ScopedJob>(
+  fetchPage: (start: number, end: number) => Promise<T[]>,
+  caller: { stationId: string; isSuperAdmin: boolean },
+  limit: number,
+  { pageSize = 200, maxScan = 10_000 }: { pageSize?: number; maxScan?: number } = {}
+): Promise<T[]> {
+  const out: T[] = []
+  for (let start = 0; start < maxScan && out.length < limit; start += pageSize) {
+    const page = await fetchPage(start, start + pageSize - 1)
+    out.push(...jobsForCaller(page, caller))
+    if (page.length < pageSize) break
+  }
+  return out.slice(0, limit)
+}
