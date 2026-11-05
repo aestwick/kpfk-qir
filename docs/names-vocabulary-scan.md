@@ -43,6 +43,55 @@
 
 ---
 
+## Phase 2: what was built and what it measured (2026-11-05)
+
+**Ace's decisions:**
+- Keep transcribing music shows.
+- Delete the "D → B" rule (done 2026-11-05).
+- Import the show names we can get.
+- Spell "Renee Yaworski" without the accent.
+- Eco-Justice Radio: Carry Kim and Jessica Aldridge.
+- John Cromshow and Marylin Cavanaugh are correct as spelled.
+- Refresh semantic search after a repair: yes.
+
+**Show names now on file: 99 of 167 active shows** (up from 34).
+- Sources: Confessor's DJ column, kpfk.org co-hosts, and Ace's confirmations (migration 048). Website hosts sync in nightly.
+- This quarter, 64 of the 72 talk shows that aired have names, covering 717 of 805 episodes.
+- Still missing:
+  - Making Contact
+  - Pacifica Evening News
+  - Feminist Magazine
+  - Insurgencia Feminina
+  - Capitalism, Race and Democracy
+  - Special Programming
+
+**Before/after on a fixed set** (`npm run benchmark-names`).
+- The set: 11 talk-show chunks where a host's name is spoken, plus 4 music chunks.
+- Run on `whisper-large-v3-turbo`; cost $0.30.
+
+| Talk shows | Names spelled right |
+|---|---|
+| Today (no hint, current rules) | **8%** (2 right, 22 wrong) |
+| Approve the 8 suggested fixes | **74%** (17 right, 6 wrong) |
+| Turn on the Whisper name hint | **100%** (21 right, 0 wrong) |
+
+**But the hint has a real cost. It stays OFF.**
+- **It deletes or replaces real speech.** 130 words across the 11 talk chunks were affected:
+  - On Rising Up, a whole sentence became "Sonali Kolhatkar".
+  - On Bike Talk, a sentence about RAGBRAI vanished.
+  - On LARB, the producers' names in the credits disappeared entirely.
+- **It coarsens captions:** sometimes half as many cues (186 → 81), which makes jump-to-moment links less precise.
+- **On music, forcing the hint repeats the host's name** through the songs: 21 times on Awakenings, even after the echo guard. Production never sends it to music, but this is why that rule exists.
+
+**The safe route is rules.** The nightly miner proposes them, a person approves them, and they fix past transcripts too. That's 8% → 74% with no risk to the text, and it keeps improving as suggestions are approved. The hint stays available as a per-station switch for later experiments.
+
+**Repair of past transcripts.**
+- The 9 existing active rules (pre-approved) will be re-applied automatically the first time the workers start after deploy.
+- By a read-only count, that changes **32 stored transcripts**.
+- Every rule approved or edited after that is re-applied within minutes.
+
+**Spend:** $0.31 (Phase 1 prompt tests) + $0.30 (benchmark) = **$0.61** of the $5 cap.
+
 ## 1. Where correct spellings exist today
 
 | Source | What it is | Shows it covers (of 167 active) | Trust |
