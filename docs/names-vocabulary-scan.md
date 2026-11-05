@@ -63,9 +63,9 @@
 - **Confessor host strings are free text.** Solartopia alone has 10 versions ("Harvey \"Sunny\" Wasserman & Kevin Kamps", "HARVEY … Host; KEVIN KAMPS, Co-Host"). There are "(Guest Host)" suffixes, and the guest field mixes in titles and bios.
 - **Name splitting is needed.** "X and Y", commas, and "Name, title, org" all have to be broken into separate names.
 - **The human or website spelling may itself be wrong.** Check these before any rule is written:
-  - **"John Cromshow"** (Politics or Pedagogy): transcripts always say "Crumshaw", but kpfk.org also says Cromshow.
+  - **"John Cromshow"** (Politics or Pedagogy): transcripts always say "Crumshaw". **Confirmed by Ace 2026-11-05: Cromshow is correct.**
   - "Renèe Yaworski" is probably Renée.
-  - "Marylin Cavanaugh" is probably Marilyn.
+  - "Marylin Cavanaugh" is correct (confirmed by Ace 2026-11-05 via kpfk.org/on-air/revolucion-arcoiris).
   - "Aziz Haq" is probably Huq.
   - "John Dingus" is probably Dinges.
 - **The two sources conflict on Solartopia.** Confessor lists Kevin Kamps and the website lists Myla Reson. Both are probably right (co-hosts).
@@ -103,7 +103,7 @@
 | Margaret Prescott → Margaret Prescod | 103 / 80 | Sojourner Truth and promos | Safe as the full name |
 | Matt Cedillo → Matt Sedillo | 92 / 38 | La Raza Radio | Safe as the full name |
 | Maggie LaPique → Maggie LePique | 72 / 49 | Rock Profile and promos | Safe |
-| John Crumshaw → John Cromshow | 48 / 29 | Politics or Pedagogy | **Only if Cromshow is confirmed** |
+| John Crumshaw → John Cromshow | 48 / 29 | Politics or Pedagogy | Safe (Cromshow confirmed) |
 | Steve Scrovan → Steve Skrovan | 45 / 32 | Ralph Nader Radio Hour | Safe |
 | Nick Richard → Nick Richert | 40 / 40 | Bike Talk | **This show only** (common real name) |
 | Ramses Jaw → Ramses Ja | 40 / 30 | QR Code | Safe as the full name, this show |
@@ -251,7 +251,7 @@ About **4 days of build**. Running cost is **~$0**: the hint adds no Groq charge
 1. **Go ahead with Phase 2 as proposed** (b, d, c, e, a in that order)?
 2. **Delete rule #3 ("D → B")?** It's a database write, so I need your OK. Recommended.
 3. **Gap list:** will you confirm the AI-suggested hosts for the 42 talk shows (the appendix, starting with the six big ones)? Or should I put a "confirm host" button on the Shows page so you, the PD or producers can do it there?
-4. **John Cromshow or Crumshaw?** Also Renèe vs Renée Yaworski, and Marylin vs Marilyn Cavanaugh.
+4. ~~John Cromshow or Crumshaw?~~ Cromshow, and Marylin Cavanaugh, confirmed. Still open: Renèe vs Renée Yaworski.
 5. **Semantic search refresh after repair:** re-embed changed episodes (≈free, uses the search lane's helper), or leave it to the search session?
 6. **Name hint for music shows:** off is recommended. Are there any music-category shows that are really talk (e.g. *Perspectiva de Las Americas* is tagged Music but sounds like Spanish talk)?
 
