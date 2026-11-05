@@ -12,6 +12,9 @@
 //
 // Text-only: no audio is re-transcribed. Idempotent: re-running finds nothing
 // left to change. Summaries are not rewritten (re-summarize regenerates them).
+// Known limit: no lock against the transcribe worker — a re-transcription that
+// commits between this read and write would be overwritten with the corrected
+// OLD text. The window is seconds; re-transcribe again if it ever happens.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -31,9 +34,6 @@ import { bumpCacheVersion } from '../api-cache'
 export interface BackfillOptions {
   /** false = dry run: count what would change, write nothing. */
   apply: boolean
-  /** Stop after this many episodes; rules stay pending and the next run
-   *  continues (already-fixed episodes no longer match the prefilter). */
-  maxEpisodes?: number
   /** Restrict to these rule ids (default: every pending rule). */
   ruleIds?: number[]
 }
@@ -46,8 +46,6 @@ export interface BackfillResult {
   reembeddedEpisodes: number
   /** Per rule: episodes whose text it changed. */
   changesByRule: Record<number, number>
-  /** True when maxEpisodes cut the run short (rules left pending). */
-  truncated: boolean
   /** Rules stamped backfilled_at this run. */
   stampedRules: number[]
 }
@@ -104,7 +102,6 @@ export async function backfillPendingCorrections(
     changedEpisodes: 0,
     reembeddedEpisodes: 0,
     changesByRule: {},
-    truncated: false,
     stampedRules: [],
   }
 
@@ -114,7 +111,8 @@ export async function backfillPendingCorrections(
   result.pendingRules = pending.length
   if (!pending.length) return result
 
-  // A rule whose replacement re-matches itself would grow on every re-run.
+  // A rule that changes its own output again would grow on every re-run. It
+  // stays pending (never stamped as applied) and is reported, not re-applied.
   const safe = pending.filter((r) => {
     if (!isSelfReapplying(r)) return true
     result.skippedSelfReapplying.push(r.id)
@@ -135,15 +133,9 @@ export async function backfillPendingCorrections(
 
   const embeddingsOn = opts.apply ? await isEmbeddingsEnabled(stationId) : false
   const embeddingModel = embeddingsOn ? await getEmbeddingModel(stationId) : ''
-  let processed = 0
-
+  // One pass over every candidate (one transcript in memory at a time), so a
+  // loose prefilter costs reads once instead of stalling a capped loop.
   for (const [episodeId, ruleIds] of Array.from(byEpisode)) {
-    if (opts.maxEpisodes != null && processed >= opts.maxEpisodes) {
-      result.truncated = true
-      break
-    }
-    processed++
-
     const { data: row, error } = await client
       .from('transcripts')
       .select('transcript, vtt, episode_log!inner(station_id, show_key)')
@@ -177,6 +169,13 @@ export async function backfillPendingCorrections(
       .update({ transcript: after, vtt: vttAfter })
       .eq('episode_id', episodeId)
     if (upError) throw new Error(`episode ${episodeId}: ${upError.message}`)
+    // Captions changed: move the episode in the public feed's updated_since
+    // delta (/api/v1/episodes) so caption consumers re-pull them.
+    await client
+      .from('episode_log')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', episodeId)
+      .eq('station_id', stationId)
 
     // Search surfaces derived from the text. Best-effort: the transcript itself
     // is already fixed, and a rebuild can be re-run.
@@ -211,8 +210,8 @@ export async function backfillPendingCorrections(
 
   // Stamp rules fully processed this run — only if unchanged since we loaded
   // them (an edit mid-run clears backfilled_at and must be picked up again).
-  if (opts.apply && !result.truncated) {
-    for (const rule of pending) {
+  if (opts.apply) {
+    for (const rule of safe) {
       let q = client
         .from('transcript_corrections')
         .update({ backfilled_at: new Date().toISOString() })

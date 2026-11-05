@@ -70,6 +70,19 @@ export async function PATCH(request: NextRequest) {
   const err = correctionError(rule)
   if (err) return NextResponse.json({ error: err }, { status: 400 })
 
+  // Claim the suggestion first (only while still 'suggested'), so a double
+  // click or a unique-index clash can't leave a rule behind with the
+  // suggestion still pending — the next approve would create a duplicate.
+  const { data: claimed, error: claimErr } = await supabase
+    .from('transcript_correction_suggestions')
+    .update({ status: 'approved', correct, ...decided })
+    .eq('id', s.id)
+    .eq('station_id', stationId)
+    .eq('status', 'suggested')
+    .select('id')
+  if (claimErr) return NextResponse.json({ error: claimErr.message }, { status: 409 })
+  if (!claimed?.length) return NextResponse.json({ error: 'Already decided' }, { status: 409 })
+
   const { data: created, error: cErr } = await supabase
     .from('transcript_corrections')
     .insert({
@@ -84,14 +97,20 @@ export async function PATCH(request: NextRequest) {
     })
     .select('id')
     .single()
-  if (cErr) return NextResponse.json({ error: cErr.message }, { status: 500 })
+  if (cErr) {
+    await supabase
+      .from('transcript_correction_suggestions')
+      .update({ status: 'suggested', correct: s.correct, decided_at: null, decided_by: null })
+      .eq('id', s.id)
+      .eq('station_id', stationId)
+    return NextResponse.json({ error: cErr.message }, { status: 500 })
+  }
 
-  const { error: uErr } = await supabase
+  await supabase
     .from('transcript_correction_suggestions')
-    .update({ status: 'approved', correction_id: created.id, correct, ...decided })
+    .update({ correction_id: created.id })
     .eq('id', s.id)
     .eq('station_id', stationId)
-  if (uErr) return NextResponse.json({ error: uErr.message }, { status: 500 })
 
   queueCorrectionsBackfill(stationId)
   return NextResponse.json({ ok: true, correctionId: created.id })

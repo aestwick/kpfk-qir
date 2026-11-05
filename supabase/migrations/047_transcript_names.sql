@@ -132,6 +132,10 @@ begin
   end loop;
 end $$;
 
+-- pg_trgm (similarity) is already installed on the hosted project (public
+-- schema); `if not exists` keeps a fresh environment working too.
+create extension if not exists pg_trgm;
+
 -- ---------------------------------------------------------------------------
 -- 6. mine_name_variants — the miner's candidate search, run in the database so
 --    transcripts never leave it. For every multi-word name in the station's
@@ -159,7 +163,8 @@ returns table (
 )
 language sql
 stable
-set search_path = public
+-- `extensions` too: where Supabase installs extensions on newer projects.
+set search_path = public, extensions
 as $$
   with grp as (
     -- Same identity as lib/shows.ts#showGroupKey: trimmed group, else key, case-folded.

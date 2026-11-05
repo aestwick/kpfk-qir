@@ -78,32 +78,31 @@ const norm = (s: string) =>
 
 /**
  * Remove what a prompted run invents: segments that are the prompt's name list
- * read back ("KPFK, Pacifica, Awakenings, Michelle Coltrane"), and runs of the
- * same line repeated 3+ times in a row (keep the first two). A host saying
+ * read back ("Awakenings, Michelle Coltrane, Alice Coltrane"). A host saying
  * their own name ("This is Cary Harrison") is KEPT — an echo is a contiguous
- * piece of the list with at least two of its terms, or three-plus terms with
- * almost nothing else. Only call this on output produced WITH a prompt.
+ * piece of the list with at least two show/episode names, or three-plus with
+ * almost nothing else. Station terms ("KPFK, Pacifica Radio") never count
+ * toward an echo: a spoken station ID must survive (compliance reads it).
+ * Segments this can't judge (non-Latin script, "♪") are always kept. Only
+ * call this on output produced WITH a prompt.
  */
 export function dropPromptEchoSegments(
   segments: NormalizedSegment[],
   prompt: string,
+  stationTerms: string[] = [],
 ): NormalizedSegment[] {
   if (!prompt) return segments
-  const terms = prompt.split(',').map(norm).filter(Boolean)
-  const promptNorm = terms.join(' ')
+  const ignore = new Set(stationTerms.map(norm))
+  const allTerms = prompt.split(',').map(norm).filter(Boolean)
+  const terms = allTerms.filter((t) => !ignore.has(t))
+  const promptNorm = allTerms.join(' ')
   const termTokens = new Set(promptNorm.split(' '))
   const out: NormalizedSegment[] = []
-  let lastText = ''
-  let repeat = 0
   for (const seg of segments) {
     const t = norm(seg.text)
-    if (!t) continue
-    if (t === lastText) {
-      repeat++
-      if (repeat >= 2) continue
-    } else {
-      repeat = 0
-      lastText = t
+    if (!t) {
+      out.push(seg)
+      continue
     }
     const padded = ` ${t} `
     const termsHit = terms.filter((term) => padded.includes(` ${term} `)).length

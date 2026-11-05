@@ -51,6 +51,9 @@ export interface TranscribeContext {
   // a short comma list of this show's names, built by ./vocabulary.ts. Never
   // set for music. Providers without a hint parameter ignore it.
   prompt?: string
+  // The station-wide terms at the head of `prompt` (call letters): never
+  // treated as an echo, so a spoken station ID is never dropped.
+  promptStationTerms?: string[]
 }
 
 export interface TranscriptionProvider {

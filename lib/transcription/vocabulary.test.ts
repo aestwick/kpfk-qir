@@ -57,9 +57,17 @@ describe('dropPromptEchoSegments', () => {
     const out = dropPromptEchoSegments([seg("This is Michelle Coltrane on KPFK."), seg('Michelle Coltrane')], prompt)
     expect(out).toHaveLength(2)
   })
-  it('drops the third and later copies of a repeated line', () => {
-    const out = dropPromptEchoSegments([seg('Ski'), seg('Ski'), seg('Ski'), seg('Ski'), seg('Next')], prompt)
-    expect(out.map((s) => s.text)).toEqual(['Ski', 'Ski', 'Next'])
+  it('keeps repeated real speech (chants, refrains)', () => {
+    const out = dropPromptEchoSegments([seg('Free Palestine'), seg('Free Palestine'), seg('Free Palestine')], prompt)
+    expect(out).toHaveLength(3)
+  })
+  it('never drops a spoken station ID', () => {
+    const out = dropPromptEchoSegments([seg('KPFK, Pacifica Radio.'), seg('KPFK Pacifica')], 'KPFK, Pacifica Radio, Cary Harrison', ['KPFK', 'Pacifica Radio'])
+    expect(out).toHaveLength(2)
+  })
+  it('keeps segments it cannot judge (non-Latin script, music symbols)', () => {
+    const out = dropPromptEchoSegments([seg('Բարեւ ձեզ'), seg('♪')], prompt)
+    expect(out).toHaveLength(2)
   })
   it('is a no-op without a prompt', () => {
     const segs = [seg('Ski'), seg('Ski'), seg('Ski')]

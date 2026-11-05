@@ -111,7 +111,7 @@ export const groqProvider: TranscriptionProvider = {
       }))
       if (promptUsed && ctx.prompt) {
         // A prompted run can read the name list back as if spoken — drop it.
-        const kept = dropPromptEchoSegments(chunkSegments, ctx.prompt)
+        const kept = dropPromptEchoSegments(chunkSegments, ctx.prompt, ctx.promptStationTerms)
         if (kept.length !== chunkSegments.length) {
           console.log(`[transcribe:groq] ep ${ctx.episodeId} chunk ${i + 1}: dropped ${chunkSegments.length - kept.length} prompt-echo segment(s)`)
           chunkSegments = kept

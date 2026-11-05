@@ -222,7 +222,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
           chunkDurationSec: CHUNK_DURATION_SECONDS,
           getLocalChunks: makeChunkLoader(episode.mp3_url, tmpDir),
           model: groqModel,
-          ...(vocabularyPrompt ? { prompt: vocabularyPrompt } : {}),
+          ...(vocabularyPrompt ? { prompt: vocabularyPrompt, promptStationTerms: vocabulary?.stationTerms } : {}),
         },
         providerPlan,
       )

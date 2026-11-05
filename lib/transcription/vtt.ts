@@ -9,7 +9,7 @@ import type { NormalizedSegment } from './types'
 
 // Correction rules live in ./corrections (shared with the corrections worker and
 // the Settings test box); re-exported here for existing importers.
-import { applyCorrections } from './corrections'
+import { applyCorrections, escapeCueText } from './corrections'
 import type { Correction } from './corrections'
 export { applyCorrections, correctionsForEpisode } from './corrections'
 export type { Correction } from './corrections'
@@ -28,12 +28,6 @@ export function formatVttTime(seconds: number): string {
   const s = Math.floor(safe % 60)
   const ms = Math.floor((safe % 1) * 1000)
   return `${pad(h)}:${pad(m)}:${pad(s)}.${pad3(ms)}`
-}
-
-// Escape the few characters that are special inside VTT cue text so a stray
-// "<" in the transcript can't be read as a tag.
-function escapeCueText(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 /**

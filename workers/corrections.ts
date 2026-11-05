@@ -36,27 +36,30 @@ export async function processCorrections(job: Job) {
     return { skipped: 'paused' as const, task }
   }
 
+  // Upkeep steps are independent: a miner or CMS-sync failure must never
+  // stop the backfill of rules a person already approved.
   let cmsAdded = 0
   let mined: Awaited<ReturnType<typeof mineSuggestions>> | null = null
+  const errors: string[] = []
   if (task === 'nightly') {
-    cmsAdded = await syncCmsHosts(supabaseAdmin, stationId)
-    mined = await mineSuggestions(supabaseAdmin, stationId)
+    try {
+      cmsAdded = await syncCmsHosts(supabaseAdmin, stationId)
+    } catch (err) {
+      errors.push(`cms sync: ${err instanceof Error ? err.message : err}`)
+    }
+    try {
+      mined = await mineSuggestions(supabaseAdmin, stationId)
+    } catch (err) {
+      errors.push(`miner: ${err instanceof Error ? err.message : err}`)
+    }
+    for (const e of errors) console.warn(`[corrections] station ${stationId} ${e}`)
   }
 
-  // Bounded passes: each pass handles up to 300 episodes; a truncated pass
-  // leaves its rules pending and the next pass continues where text still matches.
-  let changed = 0
-  let reembedded = 0
-  const stamped: number[] = []
-  const skippedSelfReapplying = new Set<number>()
-  for (let pass = 0; pass < 20; pass++) {
-    const r = await backfillPendingCorrections(supabaseAdmin, stationId, { apply: true, maxEpisodes: 300 })
-    changed += r.changedEpisodes
-    reembedded += r.reembeddedEpisodes
-    stamped.push(...r.stampedRules)
-    r.skippedSelfReapplying.forEach((id) => skippedSelfReapplying.add(id))
-    if (!r.truncated) break
-  }
+  const r = await backfillPendingCorrections(supabaseAdmin, stationId, { apply: true })
+  const changed = r.changedEpisodes
+  const reembedded = r.reembeddedEpisodes
+  const stamped = r.stampedRules
+  const skippedSelfReapplying = r.skippedSelfReapplying
 
   if (changed || stamped.length || cmsAdded || mined?.queued) {
     void logAuditEvent({
@@ -68,12 +71,13 @@ export async function processCorrections(job: Job) {
         changedEpisodes: changed,
         reembeddedEpisodes: reembedded,
         rulesBackfilled: stamped,
-        skippedSelfReapplying: Array.from(skippedSelfReapplying),
+        skippedSelfReapplying,
+        errors,
         cmsHostsAdded: cmsAdded,
         suggestionsQueued: mined?.queued ?? 0,
         suggestionsUpdated: mined?.updated ?? 0,
       },
     })
   }
-  return { task, changedEpisodes: changed, reembedded, rulesBackfilled: stamped.length, cmsAdded, mined }
+  return { task, changedEpisodes: changed, reembedded, rulesBackfilled: stamped.length, cmsAdded, mined, errors }
 }

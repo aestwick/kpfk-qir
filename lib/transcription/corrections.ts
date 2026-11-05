@@ -80,14 +80,25 @@ export function correctionMatches(text: string, c: Correction): boolean {
 }
 
 /**
- * True when re-applying the rule to its own output changes it again — e.g.
- * "Cary" → "Cary Harrison" would turn into "Cary Harrison Harrison" on every
+ * True when running the rule a second time changes text it already fixed —
+ * e.g. "Cary" → "Cary Harrison" would become "Cary Harrison Harrison" on every
  * re-run. Such a rule is fine at transcription time (it runs once) but must
- * NOT be re-applied to stored transcripts.
+ * NOT be re-applied to stored transcripts. A rule that matches its own output
+ * but leaves it unchanged ("kpfk" → "KPFK") is fine.
  */
 export function isSelfReapplying(c: Correction): boolean {
   if (!c.correct) return false
-  return correctionMatches(c.correct, c)
+  const once = applyCorrections(c.correct, [c])
+  return applyCorrections(once, [c]) !== once
+}
+
+/** Escape the characters special inside WebVTT cue text (so "<" can't read as a tag). */
+export function escapeCueText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function unescapeCueText(text: string): string {
+  return text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
 }
 
 const VTT_TIMING = /^\s*\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->/
@@ -96,7 +107,9 @@ const VOICE_PREFIX = /^(<v [^>]*>)/
 /**
  * Apply rules to the cue TEXT of a stored WebVTT file, leaving the header,
  * cue numbers, timing lines and `<v Speaker N>` voice tags untouched (a rule
- * must never rewrite a timestamp or a speaker label).
+ * must never rewrite a timestamp or a speaker label). Cue text is stored
+ * escaped (buildVtt applies rules to raw text, then escapes), so it is
+ * unescaped, corrected and re-escaped — the same order as at transcription.
  */
 export function applyCorrectionsToVtt(vtt: string, corrections: Correction[]): string {
   if (!vtt || !corrections.length) return vtt
@@ -111,7 +124,7 @@ export function applyCorrectionsToVtt(vtt: string, corrections: Correction[]): s
     if (trimmed.startsWith('NOTE')) continue
     const m = line.match(VOICE_PREFIX)
     const prefix = m ? m[1] : ''
-    lines[i] = prefix + applyCorrections(line.slice(prefix.length), corrections)
+    lines[i] = prefix + escapeCueText(applyCorrections(unescapeCueText(line.slice(prefix.length)), corrections))
   }
   return lines.join('\n')
 }

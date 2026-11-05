@@ -91,7 +91,7 @@ async function transcribe(ep: Episode, arm: 'A' | 'B', prompt: string, audioDir:
     chunkDurationSec: CHUNK_DURATION_SECONDS,
     getLocalChunks: async () => [chunk],
     model: MODEL,
-    ...(prompt ? { prompt } : {}),
+    ...(prompt ? { prompt, promptStationTerms: STATION_TERMS } : {}),
   })
   await fs.writeFile(cache, JSON.stringify({ ...result, prompt }, null, 1))
   return { result, cached: false }
@@ -100,8 +100,11 @@ async function transcribe(ep: Episode, arm: 'A' | 'B', prompt: string, audioDir:
 const pct = (x: number | null) => (x == null ? '—' : `${Math.round(x * 100)}%`)
 const sum = (scores: NameScore[]) => scores.reduce((a, s) => ({ right: a.right + s.right, wrong: a.wrong + s.wrong }), { right: 0, wrong: 0 })
 
+let STATION_TERMS: string[] = []
+
 async function main() {
   const fixture: Fixture = JSON.parse(await fs.readFile(path.join(__dirname, 'data', 'names-benchmark.json'), 'utf8'))
+  STATION_TERMS = fixture.stationTerms
   await fs.mkdir(OUT, { recursive: true })
   const audioDir = path.join(os.tmpdir(), 'qir-names-benchmark')
   await fs.mkdir(audioDir, { recursive: true })

@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { applyCorrections, correctionsForEpisode } from '@/lib/transcription/corrections'
+import { applyCorrections, correctionsForEpisode, isSelfReapplying } from '@/lib/transcription/corrections'
 
 interface Correction {
   id: number
@@ -208,6 +208,8 @@ export function TranscriptCorrections({
                 <td className="px-3 py-2 text-xs">
                   {!c.active ? (
                     <span className="text-gray-400 dark:text-warm-500">—</span>
+                  ) : isSelfReapplying({ wrong: c.wrong, correct: c.correct, caseSensitive: c.case_sensitive, isRegex: c.is_regex }) ? (
+                    <span className="text-gray-500 dark:text-warm-400" title="The replacement would be changed again on a second run (e.g. Cary → Cary Harrison), so this rule only fixes NEW transcripts">New only</span>
                   ) : c.backfilled_at ? (
                     <span className="text-green-700 dark:text-green-300" title={`Applied ${new Date(c.backfilled_at).toLocaleString()}`}>Fixed</span>
                   ) : (

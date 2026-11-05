@@ -9,6 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { correctionsForEpisode } from './corrections'
 import { loadCorrectionRules, loadShowGroups } from './store'
 import { filterMinedVariants, snippetAround, type MinedVariant } from './suggestions'
+import { fetchAllRows } from '../fetch-all'
 
 /** "Arnella Barbara (Dark Star Gurl)" → "Arnella Barbara"; drops group entries
  *  ("Contributors & Community Reporters") and one-word handles the hint can't use. */
@@ -52,12 +53,10 @@ export async function syncCmsHosts(client: SupabaseClient, stationId: string): P
   }
   if (!wanted.length) return 0
 
-  const { data: existing, error: eErr } = await client
-    .from('transcript_vocabulary')
-    .select('show_key, name')
-    .eq('station_id', stationId)
-  if (eErr) throw new Error(eErr.message)
-  const have = new Set((existing ?? []).map((v) => `${v.show_key ?? ''}|${v.name.toLowerCase()}`))
+  const existing = await fetchAllRows<{ show_key: string | null; name: string }>('vocabulary', (from, to) =>
+    client.from('transcript_vocabulary').select('show_key, name').eq('station_id', stationId).order('id').range(from, to),
+  )
+  const have = new Set(existing.map((v) => `${v.show_key ?? ''}|${v.name.toLowerCase()}`))
   const toInsert = wanted.filter((w) => {
     const k = `${w.show_key}|${w.name.toLowerCase()}`
     if (have.has(k)) return false
@@ -92,20 +91,24 @@ export async function mineSuggestions(
   })
   if (error) throw new Error(`mine_name_variants: ${error.message}`)
 
-  const [{ data: vocab }, rules, groups, { data: existing }] = await Promise.all([
-    client.from('transcript_vocabulary').select('name').eq('station_id', stationId),
+  const [vocab, rules, groups, existing] = await Promise.all([
+    fetchAllRows<{ name: string }>('vocabulary', (from, to) =>
+      client.from('transcript_vocabulary').select('name').eq('station_id', stationId).order('id').range(from, to),
+    ),
     loadCorrectionRules(client, stationId),
     loadShowGroups(client, stationId),
-    client.from('transcript_correction_suggestions').select('id, show_key, variant, correct, status').eq('station_id', stationId),
+    fetchAllRows<{ id: number; show_key: string | null; variant: string; correct: string; status: string }>('suggestions', (from, to) =>
+      client.from('transcript_correction_suggestions').select('id, show_key, variant, correct, status').eq('station_id', stationId).order('id').range(from, to),
+    ),
   ])
   const rows = filterMinedVariants((raw ?? []) as MinedVariant[], {
-    knownNames: new Set((vocab ?? []).map((v) => v.name.trim().toLowerCase())),
+    knownNames: new Set(vocab.map((v) => v.name.trim().toLowerCase())),
     rulesForShow: (key) => correctionsForEpisode(rules, -1, key, groups.groupOf),
   })
 
   const keyOf = (showKey: string | null, variant: string, correct: string) =>
     `${showKey ?? ''}|${variant.toLowerCase()}|${correct.toLowerCase()}`
-  const byKey = new Map((existing ?? []).map((s) => [keyOf(s.show_key, s.variant, s.correct), s]))
+  const byKey = new Map(existing.map((s) => [keyOf(s.show_key, s.variant, s.correct), s]))
 
   const result: MineResult = { candidates: rows.length, queued: 0, updated: 0 }
   const now = new Date().toISOString()

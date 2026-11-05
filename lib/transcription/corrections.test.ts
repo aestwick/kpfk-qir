@@ -59,6 +59,10 @@ describe('isSelfReapplying', () => {
   it('flags a replacement that the pattern matches again', () => {
     expect(isSelfReapplying(rule({ wrong: 'Cary', correct: 'Cary Harrison' }))).toBe(true)
   })
+  it('passes case fixes that match their own output but do not change it', () => {
+    expect(isSelfReapplying(rule({ wrong: 'kpfk', correct: 'KPFK' }))).toBe(false)
+    expect(isSelfReapplying(rule({ wrong: 'Amy\\s+Good\\s*man', correct: 'Amy Goodman', isRegex: true }))).toBe(false)
+  })
   it('passes ordinary name fixes', () => {
     expect(isSelfReapplying(rule({ wrong: 'Carrie Harrison', correct: 'Cary Harrison' }))).toBe(false)
     expect(isSelfReapplying(rule({ wrong: '\\b(Negwa|Negua|Nagua)\\b', correct: 'Nagwa', isRegex: true, caseSensitive: true }))).toBe(false)
@@ -77,6 +81,14 @@ describe('applyCorrectionsToVtt', () => {
   it('never touches a timing line even when a rule would match it', () => {
     const out = applyCorrectionsToVtt(vtt, [rule({ wrong: '00', correct: 'XX' })])
     expect(out).toContain('00:00:01.000 --> 00:00:04.000')
+  })
+  it('matches rules against unescaped cue text and re-escapes the result', () => {
+    const v = 'WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\nAT&amp;T and Simon and Schuster\n'
+    const out = applyCorrectionsToVtt(v, [
+      rule({ wrong: 'AT&T', correct: 'AT and T' }),
+      rule({ wrong: 'Simon and Schuster', correct: 'Simon & Schuster' }),
+    ])
+    expect(out).toContain('AT and T and Simon &amp; Schuster')
   })
   it('never rewrites a speaker label', () => {
     const out = applyCorrectionsToVtt(vtt, [rule({ wrong: 'Speaker', correct: 'Host' })])
