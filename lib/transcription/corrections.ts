@@ -154,3 +154,18 @@ export function buildVariantRule(variant: string, correct: string): Pick<Correct
     isRegex: true,
   }
 }
+
+/** Why a rule can't be saved, or null when it's fine. Shared by the API
+ *  (create/edit/approve) so a broken regex never reaches a transcript. */
+export function correctionError(c: Pick<Correction, 'wrong' | 'correct' | 'isRegex'>): string | null {
+  if (!c.wrong?.trim()) return 'The "wrong" text is required'
+  if (c.correct == null || !c.correct.trim()) return 'The "correct" text is required'
+  if (c.isRegex) {
+    try {
+      new RegExp(c.wrong)
+    } catch (err) {
+      return `Invalid regex: ${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+  return null
+}
