@@ -6,7 +6,8 @@ import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
-import { resolveOrigin } from '@/lib/nav'
+import { resolveOrigin, roleAllows } from '@/lib/nav'
+import { useNavAccess } from '@/app/components/nav-access'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import type { SeekToFn } from '@/app/components/episode-media'
 import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
@@ -452,6 +453,10 @@ export default function EpisodeDetailPage() {
   const [editCategory, setEditCategory] = useState('')
   const [viewLang, setViewLang] = useState<'original' | 'english'>('original')
   const [translating, setTranslating] = useState(false)
+  // Producing a NEW translation calls a paid model (API requires editor).
+  // Viewing one that already exists is free and open to everyone.
+  const { role } = useNavAccess()
+  const canTranslate = roleAllows(role, 'editor')
   const [confirmAction, setConfirmAction] = useState<{ action: string; message: string } | null>(null)
   const [resolvingFlag, setResolvingFlag] = useState<number | null>(null)
   const [resolveNotes, setResolveNotes] = useState('')
@@ -1043,7 +1048,8 @@ export default function EpisodeDetailPage() {
             </button>
             <button
               onClick={handleTranslate}
-              disabled={translating}
+              disabled={translating || (!transcript.english_transcript && !canTranslate)}
+              title={!transcript.english_transcript && !canTranslate ? 'No English translation yet. An editor or admin can create one.' : undefined}
               className={`px-3 py-1 ${viewLang === 'english' ? 'bg-blue-600 text-white dark:bg-blue-700' : 'bg-white dark:bg-warm-800 text-gray-700 dark:text-warm-300 hover:bg-gray-50 dark:hover:bg-warm-700'} disabled:opacity-50`}
             >
               {translating ? 'Translating...' : 'English'}
