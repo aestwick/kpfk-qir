@@ -56,17 +56,39 @@ export function nameSimilarity(a: string, b: string): number {
   return shared / (ta.size + tb.size - shared)
 }
 
+/** Rough sound-alike key: the spellings transcribers and producers mix up
+ *  (c/k, ph/f, th/t, doubled letters, a silent trailing e) collapse together,
+ *  so "Thom Hartmann" ~ "Tom Hartman" and "David Corn" ~ "David Korn". */
+export function phoneticKey(name: string): string {
+  return foldName(name)
+    .split(' ')
+    .map((w) =>
+      w
+        .replace(/ph/g, 'f')
+        .replace(/th/g, 't')
+        .replace(/ck/g, 'k')
+        .replace(/c(?=[aou]|$|[^ehiy])/g, 'k')
+        .replace(/z/g, 's')
+        .replace(/(.)\1+/g, '$1')
+        .replace(/(?<=..)e$/, '')
+    )
+    .join(' ')
+}
+
 /** Two spellings are the same person when they're very similar AND their last
- *  names agree closely (keeps "Greg Palast" apart from "Greg Grandin"). */
+ *  names agree closely (keeps "Greg Palast" apart from "Greg Grandin"), either
+ *  as written or as they sound. First initials must match. */
 export function samePerson(a: string, b: string): boolean {
   const fa = foldName(a)
   const fb = foldName(b)
   if (fa === fb) return true
-  const la = fa.split(' ').pop() ?? ''
-  const lb = fb.split(' ').pop() ?? ''
-  const fa0 = fa.split(' ')[0]
-  const fb0 = fb.split(' ')[0]
-  return nameSimilarity(fa, fb) >= 0.55 && nameSimilarity(la, lb) >= 0.45 && (fa0[0] === fb0[0])
+  const close = (x: string, y: string) => {
+    const lx = x.split(' ').pop() ?? ''
+    const ly = y.split(' ').pop() ?? ''
+    return nameSimilarity(x, y) >= 0.55 && nameSimilarity(lx, ly) >= 0.45
+  }
+  if (fa[0] !== fb[0]) return false
+  return close(fa, fb) || close(phoneticKey(a), phoneticKey(b))
 }
 
 export interface PersonRow {
@@ -131,4 +153,17 @@ export function mergePeople(rows: PersonRow[]): Person[] {
     p.score = Math.max(p.score, Number(r.score))
   }
   return people.sort((a, b) => b.score - a.score || b.appearances - a.appearances)
+}
+
+/** Order matches for what was typed: best score first; on a tie, the person
+ *  whose name appears earliest in the query ("David Corn Mother Jones" → David
+ *  Corn before Mother Jones — people type the name first, the affiliation after). */
+export function rankForQuery(people: Person[], query: string): Person[] {
+  const fq = foldName(query)
+  const pos = (p: Person) => {
+    const first = foldName(p.name).split(' ')[0]
+    const i = fq.indexOf(first)
+    return i < 0 ? Infinity : i
+  }
+  return people.slice().sort((a, b) => b.score - a.score || pos(a) - pos(b) || b.appearances - a.appearances)
 }

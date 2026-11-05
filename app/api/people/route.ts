@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
-import { mergePeople, samePerson, type PersonRow } from '@/lib/people'
+import { mergePeople, rankForQuery, samePerson, type PersonRow } from '@/lib/people'
 import { loadShowCatalog, catalogName } from '@/lib/show-catalog'
 
 export const dynamic = 'force-dynamic'
@@ -22,9 +22,23 @@ export async function GET(request: NextRequest) {
     const q = (sp.get('q') ?? name).trim()
     if (q.length < 2) return NextResponse.json({ people: [] })
 
-    const { data, error } = await supabase.rpc('search_people', { p_station_id: stationId, p_query: q, p_limit: 40 })
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    const people = mergePeople((data ?? []) as PersonRow[])
+    // "David Corn Mother Jones": a name typed with extra words (an affiliation,
+    // a show) — also try each two-word window, so the name part can match.
+    const words = q.split(/\s+/).filter(Boolean)
+    const queries = [q, ...(words.length >= 3 ? words.slice(0, -1).map((w, i) => `${w} ${words[i + 1]}`).slice(0, 3) : [])]
+    const answers = await Promise.all(
+      queries.map((text) => supabase.rpc('search_people', { p_station_id: stationId, p_query: text, p_limit: 40 }))
+    )
+    const failed = answers.find((a) => a.error)
+    if (failed?.error) return NextResponse.json({ error: failed.error.message }, { status: 500 })
+    // One row per spelling (the windows overlap), keeping its best score.
+    const bySpelling = new Map<string, PersonRow>()
+    for (const a of answers)
+      for (const r of (a.data ?? []) as PersonRow[]) {
+        const prev = bySpelling.get(r.folded)
+        if (!prev || Number(r.score) > Number(prev.score)) bySpelling.set(r.folded, r)
+      }
+    const people = rankForQuery(mergePeople(Array.from(bySpelling.values())), q)
 
     if (!name) return NextResponse.json({ people: people.slice(0, 20) })
 

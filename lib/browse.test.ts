@@ -14,7 +14,7 @@ import {
 } from './broadcast-format'
 import { buildShowCatalog, groupKeysFor } from './show-catalog'
 import { buildBroadcastDay, blockAt, isSecondaryFeed, type DayEpisodeRow } from './broadcast-day'
-import { splitPeople, foldName, nameSimilarity, samePerson, mergePeople, type PersonRow } from './people'
+import { splitPeople, foldName, nameSimilarity, samePerson, mergePeople, rankForQuery, type PersonRow } from './people'
 import { buildShowReport, splitIssues, type ReportEpisodeRow } from './show-report'
 
 describe('broadcast-format', () => {
@@ -136,6 +136,11 @@ describe('people', () => {
     expect(samePerson('Sonali Kohatkar', 'Sonali Kolhatkar')).toBe(true)
     expect(samePerson('Greg Palast', 'Greg Grandin')).toBe(false)
     expect(samePerson('Juan Gonzalez', 'Juan González')).toBe(true)
+    expect(samePerson('Thom Hartmann', 'Tom Hartman')).toBe(true)
+    expect(samePerson('David Corn', 'David Korn')).toBe(true)
+    expect(samePerson('Mark Pokan', 'Mark Pocan')).toBe(true)
+    expect(samePerson('Greg Palast', 'Greg Palace')).toBe(false)
+    expect(samePerson('Gerald Horne', 'Gary Horne')).toBe(false)
   })
   it('merges spelling rows into one person', () => {
     const r = (name: string, n: number, score = 0.8): PersonRow => ({
@@ -153,6 +158,10 @@ describe('people', () => {
     expect(merged[0]).toMatchObject({ name: 'Gerald Horne', variants: ['Gerald Horn'], appearances: 13, score: 0.95 })
     expect(merged[0].spellings).toEqual(['gerald horne', 'gerald horn'])
     expect(merged[1].name).toBe('Greg Grandin')
+  })
+  it('breaks ties by where the name sits in the query', () => {
+    const r = (name: string): PersonRow => ({ folded: foldName(name), name, appearances: 2, as_host: 0, as_guest: 2, first_date: null, last_date: null, shows: [], score: 1 })
+    expect(rankForQuery(mergePeople([r('Mother Jones'), r('David Corn')]), 'David Corn Mother Jones')[0].name).toBe('David Corn')
   })
 })
 

@@ -168,7 +168,10 @@ async function main() {
   for (const e of entries) {
     const { hits, ms, supported, note } = await answer(e)
     const expected = e.expect.episode_ids ?? []
-    const window = e.need === 'show' || e.need === 'day' ? hits : hits.slice(0, 20)
+    // Search results are judged on page 1 (top 20). Day/show/person views list
+    // everything on one page, so their whole answer counts.
+    const onePage = e.need === 'show' || e.need === 'day' || (e.need === 'people' && VARIANT === 'after')
+    const window = onePage ? hits : hits.slice(0, 20)
     const gotIds = Array.from(new Set(window.map((h) => h.episodeId)))
     const found = expected.filter((id) => gotIds.includes(id)).length
     let momentOk: boolean | null = null
