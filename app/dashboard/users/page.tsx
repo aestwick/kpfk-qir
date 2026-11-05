@@ -235,7 +235,7 @@ export default function UsersPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-gray-900 dark:text-warm-100">Users</h1>
+        <h1 className="text-xl font-semibold text-gray-900 dark:text-warm-100">All users</h1>
         <p className="text-sm text-gray-600 dark:text-warm-400 mt-1">
           Manage who can access the platform. <strong>Super-admins</strong> can see and control every
           station and manage users. Per-station roles: <strong>viewers</strong> are read-only,{' '}

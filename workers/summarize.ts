@@ -109,10 +109,14 @@ export async function processSummarize(job: Job) {
 
   // Batch-fetch all transcripts upfront to avoid N+1 queries
   const epIds = filteredEpisodes.map((ep) => ep.id)
-  const { data: transcriptsData } = await supabaseAdmin
+  const { data: transcriptsData, error: transcriptsError } = await supabaseAdmin
     .from('transcripts')
     .select('episode_id, transcript')
     .in('episode_id', epIds)
+  // A failed fetch must not look like "no transcripts": that branch marks every
+  // claimed episode `transcript_missing`, a status nothing ever recovers from.
+  // Throwing leaves them `summarizing`, which auto-retry's orphan sweep resets.
+  if (transcriptsError) throw new Error(`[summarize] failed to load transcripts: ${transcriptsError.message}`)
 
   const transcriptMap = new Map(
     (transcriptsData ?? []).map((t) => [t.episode_id, t.transcript])
@@ -203,7 +207,7 @@ ${transcriptText}`
         summary: parsed.summary || null,
       })
 
-      await supabaseAdmin
+      const { error: saveError } = await supabaseAdmin
         .from('episode_log')
         .update({
           headline: parsed.headline || null,
@@ -230,6 +234,10 @@ ${transcriptText}`
           summarizationModel
         )
       }
+      // Checked after usage is logged (the OpenAI call was paid for either way).
+      // Unchecked, a failed save counted as "summarized" while the row sat in
+      // `summarizing`; throwing routes it to the normal failure handling below.
+      if (saveError) throw new Error(`Failed to save summary: ${saveError.message}`)
 
       summarized++
       summarizedIds.push(episode.id)

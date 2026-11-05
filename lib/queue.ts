@@ -39,3 +39,5 @@ export const generateQirQueue = lazyQueue('generate-qir')
 export const complianceQueue = lazyQueue('compliance')
 export const autoRetryQueue = lazyQueue('auto-retry', { attempts: 1 })
 export const discoverSyncQueue = lazyQueue('discover-sync', { attempts: 1 })
+// Transcript-name upkeep: rule backfill + nightly miner (workers/corrections.ts).
+export const correctionsQueue = lazyQueue('corrections', { attempts: 1 })

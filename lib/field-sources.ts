@@ -188,7 +188,10 @@ export function setFieldChoice(
 ): { fieldSources: FieldSources; value: string | null } {
   const prev = existing?.[field] ?? { human: null, ai: null, active: source }
   const choice: FieldChoice = { ...prev, active: source, pinned: true }
-  if (source === 'manual') choice.manual = manualValue ?? null
+  // Only overwrite the manual copy when a value was actually supplied. The
+  // Human/AI/Manual toggle sends no value, and treating `undefined` as null
+  // erased a hand-typed summary the moment someone clicked back to "Manual".
+  if (source === 'manual' && manualValue !== undefined) choice.manual = manualValue
   const fs: FieldSources = { ...(existing ?? {}), [field]: choice }
   return { fieldSources: fs, value: resolveChoice(choice) }
 }

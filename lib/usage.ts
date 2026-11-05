@@ -171,3 +171,27 @@ export async function logCurationUsage(
     metadata: metadata ?? {},
   }, 'curation')
 }
+
+// On-demand transcript translation (episode detail page). Its own operation so
+// the per-operation cost breakdown doesn't fold it into summarization.
+export async function logTranslationUsage(
+  stationId: string,
+  episodeId: number,
+  inputTokens: number,
+  outputTokens: number,
+  model: string = DEFAULT_CHAT_MODEL,
+  metadata?: Record<string, unknown>
+) {
+  await insertUsage({
+    station_id: stationId,
+    episode_id: episodeId,
+    service: 'openai',
+    model,
+    operation: 'translate',
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    duration_seconds: null,
+    estimated_cost: chatModelCost(model, inputTokens, outputTokens),
+    metadata: metadata ?? {},
+  }, 'translation')
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseEntryDate, summarizeDateSpread, spreadCandidates } from './qir-format'
+import { parseEntryDate, summarizeDateSpread, spreadCandidates, getQuarterDateRange } from './qir-format'
 
 describe('parseEntryDate', () => {
   it('parses ISO and the long display form to the same UTC day', () => {
@@ -64,5 +64,22 @@ describe('spreadCandidates', () => {
     const withUndated = [...days, { id: 999, date: '', good: true }]
     const picked = spreadCandidates(withUndated, 15, get, score)
     expect(picked.map((e) => e.id)).toContain(999)
+  })
+})
+
+describe('getQuarterDateRange', () => {
+  it('returns the calendar quarter regardless of the host timezone', () => {
+    const saved = process.env.TZ
+    try {
+      for (const tz of ['UTC', 'America/Los_Angeles', 'Europe/Berlin', 'Asia/Tokyo']) {
+        process.env.TZ = tz
+        expect(getQuarterDateRange(2026, 3)).toMatchObject({ start: '2026-07-01', end: '2026-09-30' })
+        expect(getQuarterDateRange(2026, 1)).toMatchObject({ start: '2026-01-01', end: '2026-03-31' })
+        expect(getQuarterDateRange(2024, 4)).toMatchObject({ start: '2024-10-01', end: '2024-12-31' })
+      }
+    } finally {
+      if (saved === undefined) delete process.env.TZ
+      else process.env.TZ = saved
+    }
   })
 })

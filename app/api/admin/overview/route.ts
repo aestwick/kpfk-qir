@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/fetch-all'
+import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
+import { setGlobalPaused, setStationPaused, sweepFailedJobs } from '@/lib/pipeline-control'
 import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isStationOverBudget, isPipelinePaused } from '@/lib/settings'
+import { isTranscriptionService } from '@/lib/transcription/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -108,7 +112,7 @@ export async function GET(request: NextRequest) {
               .from('episode_log')
               .select('updated_at')
               .eq('station_id', s.id)
-              .in('status', ['transcribed', 'summarized', 'compliance_checked'])
+              .in('status', [...TRANSCRIBED_STATUSES])
               .order('updated_at', { ascending: false })
               .limit(1)
               .maybeSingle(),
@@ -157,14 +161,20 @@ export async function GET(request: NextRequest) {
       ),
       // Running spend tally: every station's usage this quarter (month-to-date is
       // a subset). Service-role cross-tenant read, aggregated per station below.
-      supabaseAdmin
-        .from('usage_log')
-        .select('station_id, service, estimated_cost, created_at')
-        .gte('created_at', start),
+      // Paged: a quarter is ~9k rows; PostgREST caps a response at 1000.
+      fetchAllRows<{ station_id: string | null; service: string; estimated_cost: number | null; created_at: string }>(
+        'quarter usage',
+        (from, to) => supabaseAdmin
+          .from('usage_log')
+          .select('station_id, service, estimated_cost, created_at')
+          .gte('created_at', start)
+          .order('id')
+          .range(from, to)
+      ).then((data) => ({ data })),
     ])
 
-    // Per-station spend: quarter-to-date (groq/openai/total) + month-to-date total.
-    type StationCost = { groq: number; openai: number; total: number; month: number }
+    // Per-station spend: quarter-to-date (transcription/openai/total) + month-to-date total.
+    type StationCost = { transcription: number; openai: number; total: number; month: number }
     const costByStation = new Map<string, StationCost>()
     // Combined all-stations totals for the universal ceiling (every row, matching
     // lib/settings#getTotalSpend — independent of per-station attribution).
@@ -175,9 +185,9 @@ export async function GET(request: NextRequest) {
       grand.quarter += amount
       if (inMonth) grand.month += amount
       if (!row.station_id) continue
-      const c = costByStation.get(row.station_id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
+      const c = costByStation.get(row.station_id) ?? { transcription: 0, openai: 0, total: 0, month: 0 }
       c.total += amount
-      if (row.service === 'groq') c.groq += amount
+      if (isTranscriptionService(row.service)) c.transcription += amount
       else if (row.service === 'openai') c.openai += amount
       if (inMonth) c.month += amount
       costByStation.set(row.station_id, c)
@@ -233,7 +243,7 @@ export async function GET(request: NextRequest) {
     const stationsOut = stationList
       .map((s, i) => {
         const paused = stationPauseStates[i]
-        const spend = costByStation.get(s.id) ?? { groq: 0, openai: 0, total: 0, month: 0 }
+        const spend = costByStation.get(s.id) ?? { transcription: 0, openai: 0, total: 0, month: 0 }
         const ov = overrideByStation.get(s.id) ?? { monthly: null, quarterly: null }
         const effMonthly = ov.monthly ?? budgetDefaults.monthly
         const effQuarterly = ov.quarterly ?? budgetDefaults.quarterly
@@ -320,11 +330,7 @@ export async function POST(request: NextRequest) {
     // -- Global master pause (every station) --
     if (action === 'pause_all' || action === 'resume_all') {
       const paused = action === 'pause_all'
-      const { error } = await supabaseAdmin
-        .from('qir_settings')
-        .upsert({ key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() }, { onConflict: 'key' })
-      if (error) throw error
-      invalidateSetting('pipeline_paused')
+      await setGlobalPaused(paused)
       return NextResponse.json({ ok: true, message: paused ? 'All stations paused' : 'All stations resumed', paused })
     }
 
@@ -398,14 +404,7 @@ export async function POST(request: NextRequest) {
       const station = await resolveStation()
       if (!station) return NextResponse.json({ error: 'Unknown or missing stationId' }, { status: 400 })
       const paused = action === 'pause_station'
-      const { error } = await supabaseAdmin
-        .from('station_settings')
-        .upsert(
-          { station_id: station.id, key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() },
-          { onConflict: 'station_id,key' }
-        )
-      if (error) throw error
-      invalidateSetting('pipeline_paused')
+      await setStationPaused(station.id, paused)
       return NextResponse.json({ ok: true, message: `${station.slug} ${paused ? 'paused' : 'resumed'}`, paused })
     }
 
@@ -483,20 +482,11 @@ export async function POST(request: NextRequest) {
       const targets: QueueName[] = only ? [only] : (Object.keys(QUEUES) as QueueName[])
       const stationId = body.stationId as string | undefined
 
-      let count = 0
-      for (const name of targets) {
-        const failed = await QUEUES[name].getFailed(0, 1000)
-        const scoped = stationId ? failed.filter((j: any) => j.data?.stationId === stationId) : failed
-        for (const job of scoped) {
-          try {
-            if (action === 'retry_failed') await job.retry()
-            else await job.remove()
-            count++
-          } catch {
-            // Job may have been removed or already retried — skip.
-          }
-        }
-      }
+      const count = await sweepFailedJobs({
+        action: action === 'retry_failed' ? 'retry' : 'clear',
+        queues: targets,
+        stationId,
+      })
       const verb = action === 'retry_failed' ? 'Retried' : 'Cleared'
       const scope = stationId ? ' for station' : ''
       const where = only ? ` ${only}` : ''

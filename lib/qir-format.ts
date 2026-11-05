@@ -41,10 +41,24 @@ export function formatQirEntry(entry: QirEntry): string {
   return lines.join('\n')
 }
 
+/** Episode statuses eligible for a QIR draft (fully summarized). */
+export const QIR_CANDIDATE_STATUSES = ['summarized', 'compliance_checked'] as const
+
+/**
+ * PostgREST `.or()` filter for a quarter's QIR candidates: aired in [start,end],
+ * or (no air_date) created in that window. Shared by the generate worker and
+ * the report page's compliance-blocking panel so both see the same episodes.
+ */
+export function quarterEpisodeOrFilter(start: string, end: string): string {
+  return `and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`
+}
+
 export function getQuarterDateRange(year: number, quarter: number): { start: string; end: string; label: string } {
   const startMonth = (quarter - 1) * 3
-  const start = new Date(year, startMonth, 1).toISOString().slice(0, 10)
-  const end = new Date(year, startMonth + 3, 0).toISOString().slice(0, 10)
+  // UTC arithmetic: local-time Date + toISOString() shifted both dates back a
+  // day on any host east of UTC (Q3 became Jun 30 – Sep 29).
+  const start = new Date(Date.UTC(year, startMonth, 1)).toISOString().slice(0, 10)
+  const end = new Date(Date.UTC(year, startMonth + 3, 0)).toISOString().slice(0, 10)
 
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   const startLabel = `${monthNames[startMonth]} 1, ${year}`

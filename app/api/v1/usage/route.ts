@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { withApiKey } from '@/lib/api-handler'
+import { fetchAllRows } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -13,18 +14,22 @@ export const GET = withApiKey(
     const from = sp.get('from')
     const to = sp.get('to')
 
-    let query = supabaseAdmin
-      .from('usage_log')
-      .select('service, model, input_tokens, output_tokens, duration_seconds, estimated_cost, created_at')
-      .eq('station_id', ctx.stationId)
+    // Paged past PostgREST's 1000-row cap (a month is ~3k rows).
+    let rows: { service: string; input_tokens: number | null; output_tokens: number | null; estimated_cost: number | null }[]
+    try {
+      rows = await fetchAllRows('usage', (lo, hi) => {
+        let query = supabaseAdmin
+          .from('usage_log')
+          .select('service, input_tokens, output_tokens, estimated_cost')
+          .eq('station_id', ctx.stationId)
+        if (from) query = query.gte('created_at', from)
+        if (to) query = query.lte('created_at', to)
+        return query.order('id').range(lo, hi)
+      })
+    } catch (err) {
+      return { json: { error: (err as Error).message }, status: 500 }
+    }
 
-    if (from) query = query.gte('created_at', from)
-    if (to) query = query.lte('created_at', to)
-
-    const { data, error } = await query
-    if (error) return { json: { error: error.message }, status: 500 }
-
-    const rows = data ?? []
     const byService: Record<string, { calls: number; input_tokens: number; output_tokens: number; cost: number }> = {}
     let totalCost = 0
     for (const r of rows) {

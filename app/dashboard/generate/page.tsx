@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { parseQuarterParam, episodeHref } from '@/lib/nav'
+import { complianceValidation, type BlockingStatus } from '@/lib/compliance-blocking'
 import { authedFetch } from '@/lib/api-client'
 import { getQuarterOptions } from '@/lib/quarters'
 import { summarizeDateSpread } from '@/lib/qir-format'
@@ -61,6 +63,12 @@ interface AvailableShow {
   categories?: Record<string, number>
 }
 
+/** GET /api/qir/blocking — live view of what compliance blocking holds out. */
+interface BlockingInfo extends BlockingStatus {
+  candidates: number
+  blocked: { episode_id: number; blocking_flags: number; unreviewed: number; show_name: string | null; air_date: string | null }[]
+}
+
 interface ValidationCheck {
   label: string
   status: 'pass' | 'warn' | 'fail'
@@ -91,7 +99,7 @@ function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
   return grouped
 }
 
-function runValidation(draft: QirDraft, complianceSummary: Record<string, { count: number; critical: number }>, allCategories: string[]): ValidationCheck[] {
+function runValidation(draft: QirDraft, complianceSummary: Record<string, { count: number; critical: number }>, allCategories: string[], blocking: BlockingInfo | null): ValidationCheck[] {
   const checks: ValidationCheck[] = []
   const entries = draft.curated_entries ?? []
   const grouped = groupByCategory(entries)
@@ -147,16 +155,12 @@ function runValidation(draft: QirDraft, complianceSummary: Record<string, { coun
     checks.push({ label: 'Complete entries', status: 'warn', detail: `${missingFields.length} entries missing summary, host, or headline` })
   }
 
-  // 6. Compliance flags
+  // 6. Compliance flags — counts the same set the generate worker blocks on
+  // (critical + not dismissed, unreviewed included) and says whether blocking
+  // is on. Rule lives in lib/compliance-blocking.ts.
   const totalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.count, 0)
   const criticalFlags = Object.values(complianceSummary).reduce((a, b) => a + b.critical, 0)
-  if (totalFlags === 0) {
-    checks.push({ label: 'Compliance', status: 'pass', detail: 'No active compliance flags' })
-  } else if (criticalFlags > 0) {
-    checks.push({ label: 'Compliance', status: 'fail', detail: `${criticalFlags} critical compliance flags active` })
-  } else {
-    checks.push({ label: 'Compliance', status: 'warn', detail: `${totalFlags} active compliance warnings` })
-  }
+  checks.push({ label: 'Compliance', ...complianceValidation(blocking, { total: totalFlags, critical: criticalFlags }) })
 
   return checks
 }
@@ -283,6 +287,21 @@ export default function GenerateQirPage() {
   // Q4 2020 report) for review/finalize, not just the last year.
   const quarterOptions = getQuarterOptions(6)
   const [selectedQuarter, setSelectedQuarter] = useState(quarterOptions[0])
+  // ?quarter=YYYY-Qn preselects a quarter (the sidebar's filing-deadline link
+  // points at the quarter that's actually due, not the one in progress). Data
+  // loading waits for this so the default quarter is never fetched first.
+  const [quarterReady, setQuarterReady] = useState(false)
+  useEffect(() => {
+    const want = parseQuarterParam(new URLSearchParams(window.location.search).get('quarter'))
+    const opt = want && quarterOptions.find((o) => o.year === want.year && o.quarter === want.quarter)
+    if (opt) setSelectedQuarter(opt)
+    setQuarterReady(true)
+  }, [])
+  // The quarter the page is showing right now. A response for any other
+  // quarter (the user switched while it was in flight) is discarded, so an
+  // edit or finalize can never land on a different quarter's draft.
+  const currentQuarterKey = useRef('')
+  currentQuarterKey.current = `${selectedQuarter.year}-${selectedQuarter.quarter}`
   const [drafts, setDrafts] = useState<QirDraft[]>([])
   const [activeDraft, setActiveDraft] = useState<QirDraft | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -293,6 +312,7 @@ export default function GenerateQirPage() {
   const [editSummary, setEditSummary] = useState('')
   const [confirmFinalize, setConfirmFinalize] = useState<number | null>(null)
   const [complianceSummary, setComplianceSummary] = useState<Record<string, { count: number; critical: number }>>({})
+  const [blocking, setBlocking] = useState<BlockingInfo | null>(null)
   const [issueCategories, setIssueCategories] = useState<string[]>(DEFAULT_CATEGORIES)
 
   // Show selection state
@@ -306,11 +326,13 @@ export default function GenerateQirPage() {
   const [showGuidance, setShowGuidance] = useState(false)
 
   const fetchShows = useCallback(async () => {
+    const key = `${selectedQuarter.year}-${selectedQuarter.quarter}`
     setShowsLoading(true)
     try {
       const res = await authedFetch(
         `/api/qir/shows?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`
       )
+      if (key !== currentQuarterKey.current) return
       if (res.ok) {
         const data = await res.json()
         const shows: AvailableShow[] = data.shows ?? []
@@ -320,18 +342,25 @@ export default function GenerateQirPage() {
         setSelectedShows(new Set(shows.map(s => s.group)))
       }
     } finally {
-      setShowsLoading(false)
+      if (key === currentQuarterKey.current) setShowsLoading(false)
     }
   }, [selectedQuarter.year, selectedQuarter.quarter])
 
   const fetchDrafts = useCallback(async () => {
+    const key = `${selectedQuarter.year}-${selectedQuarter.quarter}`
     setLoading(true)
     try {
-      const [draftsRes, dashRes, settingsRes] = await Promise.all([
+      setBlocking(null)
+      const [draftsRes, dashRes, settingsRes, blockingRes] = await Promise.all([
         authedFetch(`/api/qir?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`),
         authedFetch('/api/dashboard'),
         authedFetch('/api/settings'),
+        authedFetch(`/api/qir/blocking?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`).catch(() => null),
       ])
+      if (key !== currentQuarterKey.current) return
+      if (blockingRes?.ok) {
+        setBlocking(await blockingRes.json())
+      }
       if (draftsRes.ok) {
         const data = await draftsRes.json()
         setDrafts(data.drafts ?? [])
@@ -350,15 +379,16 @@ export default function GenerateQirPage() {
         }
       }
     } finally {
-      setLoading(false)
+      if (key === currentQuarterKey.current) setLoading(false)
     }
   }, [selectedQuarter.year, selectedQuarter.quarter])
 
   useEffect(() => {
+    if (!quarterReady) return
     setActiveDraft(null)
     fetchDrafts()
     fetchShows()
-  }, [fetchDrafts, fetchShows])
+  }, [fetchDrafts, fetchShows, quarterReady])
 
   const totalAvailableEpisodes = useMemo(
     () => availableShows.reduce((sum, s) => sum + s.episode_count, 0),
@@ -570,7 +600,7 @@ export default function GenerateQirPage() {
   const totalCurated = activeDraft?.curated_entries?.length ?? 0
 
   // Run validation checks if we have a draft
-  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary, issueCategories) : []
+  const validationChecks = activeDraft ? runValidation(activeDraft, complianceSummary, issueCategories, blocking) : []
   const hasBlockers = validationChecks.some(c => c.status === 'fail')
 
   // Community service rating
@@ -582,7 +612,7 @@ export default function GenerateQirPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">QIR Builder</h2>
+        <h2 className="text-2xl font-bold">Quarterly report</h2>
         <div className="flex items-center gap-3">
           <select
             value={`${selectedQuarter.year}-${selectedQuarter.quarter}`}
@@ -831,6 +861,11 @@ export default function GenerateQirPage() {
         </div>
       )}
 
+      {/* ═══ Compliance blocking — episodes held out of the draft ═══ */}
+      {blocking && blocking.blocked.length > 0 && (
+        <BlockedEpisodesPanel blocking={blocking} />
+      )}
+
       {/* ═══ Pre-finalization Validation Checklist ═══ */}
       {activeDraft && activeDraft.status === 'draft' && validationChecks.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:border-warm-700 dark:shadow-card-dark">
@@ -1040,6 +1075,72 @@ export default function GenerateQirPage() {
         onConfirm={() => confirmFinalize && executeFinalize(confirmFinalize, 'finalize')}
         onCancel={() => setConfirmFinalize(null)}
       />
+    </div>
+  )
+}
+
+/* ─── Compliance blocking panel ─── */
+const REVIEW_FLAGS_HREF = '/dashboard/compliance?severity=critical&status=suggested'
+
+function BlockedEpisodesPanel({ blocking }: { blocking: BlockingInfo }) {
+  const [expanded, setExpanded] = useState(false)
+  const n = blocking.blocked.length
+  const shown = expanded ? blocking.blocked : blocking.blocked.slice(0, 10)
+  const on = blocking.blocking_enabled
+  const tone = on
+    ? 'border-amber-200 bg-amber-50 dark:bg-amber-900/15 dark:border-amber-800/40'
+    : 'border-red-200 bg-red-50 dark:bg-red-900/15 dark:border-red-800/40'
+  return (
+    <div className={`rounded-xl border ${tone}`}>
+      <div className="px-5 py-3 flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-warm-100">
+            {on
+              ? `${n} episode${n === 1 ? '' : 's'} held out by compliance blocking`
+              : `Compliance blocking is off — ${n} episode${n === 1 ? '' : 's'} with undismissed critical flags`}
+          </h3>
+          <p className="text-xs text-gray-600 dark:text-warm-400 mt-0.5">
+            {on
+              ? 'These episodes have a critical compliance flag that hasn\u2019t been dismissed, so they are left out of the report. Dismiss a false alarm (or confirm it) on the Review flags page, then regenerate the draft to include them.'
+              : 'Blocking is off, so these episodes can appear in the report even though their critical flags haven\u2019t been dismissed.'}
+            {' '}
+            {blocking.unreviewed_flags > 0 && (
+              <>{blocking.unreviewed_flags} of {blocking.blocking_flags} critical flag{blocking.blocking_flags === 1 ? '' : 's'} have never been reviewed.</>
+            )}
+          </p>
+        </div>
+        <a
+          href={REVIEW_FLAGS_HREF}
+          className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 dark:bg-warm-800 dark:border-warm-600 dark:hover:bg-warm-700 dark:text-warm-200"
+        >
+          Review critical flags →
+        </a>
+      </div>
+      <ul className="divide-y divide-black/5 dark:divide-white/5 border-t border-black/5 dark:border-white/5">
+        {shown.map((b) => (
+          <li key={b.episode_id}>
+            <a
+              href={episodeHref(b.episode_id, '/dashboard/generate')}
+              className="flex items-center gap-3 px-5 py-2 text-sm hover:bg-white/60 dark:hover:bg-warm-800/50"
+            >
+              <span className="text-xs text-gray-500 dark:text-warm-400 tabular-nums w-24 shrink-0">{b.air_date ?? '—'}</span>
+              <span className="truncate flex-1 text-gray-800 dark:text-warm-200">{b.show_name ?? `Episode #${b.episode_id}`}</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 font-medium shrink-0">
+                {b.blocking_flags} critical{b.unreviewed > 0 ? ` · ${b.unreviewed} unreviewed` : ''}
+              </span>
+            </a>
+          </li>
+        ))}
+      </ul>
+      {n > 10 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="w-full px-5 py-2 text-xs text-blue-600 dark:text-blue-400 hover:underline border-t border-black/5 dark:border-white/5"
+        >
+          {expanded ? 'Show fewer' : `Show all ${n}`}
+        </button>
+      )}
     </div>
   )
 }

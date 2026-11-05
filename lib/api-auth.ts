@@ -28,7 +28,7 @@ export interface ApiKeyContext {
 }
 
 export interface ApiAuthError {
-  status: 401 | 403 | 429
+  status: 401 | 403 | 429 | 503
   error: string
 }
 
@@ -85,7 +85,9 @@ export async function authenticateApiKey(request: NextRequest): Promise<ApiAuthR
 
   if (error) {
     console.error('authenticateApiKey lookup failed:', error.message)
-    return { error: { status: 401, error: 'Could not validate API key' } }
+    // A database blip is our outage, not a bad key: 503 so consumers retry
+    // instead of treating a valid key as revoked.
+    return { error: { status: 503, error: 'Could not validate API key right now; try again' } }
   }
   if (!data || !data.active) {
     return { error: { status: 401, error: 'Invalid or revoked API key' } }

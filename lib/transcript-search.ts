@@ -211,8 +211,18 @@ export async function searchTranscriptsSemantic(
 
   const { built, also } = await buildStationQuery(supabase, params.stationId, params.query)
   const pool = 50
+  // Keyword side of the fusion: episodes with ALL the words first; only when
+  // none has them all, fall back to ANY word. ANY-word matching on its own
+  // flooded concept searches with noise ("grief over the climate crisis" →
+  // every news segment that says "climate").
+  const lexical = async (): Promise<V2Row[]> => {
+    if (!built) return []
+    const strict = await runV2(supabase, params.stationId, built.all, built.any, a, pool, 0)
+    if (strict.length || !built.any) return strict
+    return runV2(supabase, params.stationId, built.any, built.any, a, pool, 0)
+  }
   const [lexRows, sem] = await Promise.all([
-    built ? runV2(supabase, params.stationId, built.any ?? built.all, built.any, a, pool, 0) : Promise.resolve([] as V2Row[]),
+    lexical(),
     supabase.rpc('search_episodes_semantic', {
       p_station_id: params.stationId,
       p_embedding: toPgVector(embedding),

@@ -222,9 +222,9 @@ export interface UsageLog {
   id: number
   station_id: string
   episode_id: number | null
-  service: 'groq' | 'openai'
+  service: 'groq' | 'deepgram' | 'assemblyai' | 'openai'
   model: string
-  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance' | 'embed' | 'verify'
+  operation: 'transcribe' | 'summarize' | 'curate' | 'compliance' | 'embed' | 'verify' | 'translate'
   input_tokens: number
   output_tokens: number
   duration_seconds: number | null

@@ -70,7 +70,13 @@ export async function GET(request: NextRequest) {
       if (resourceType) qb = qb.eq('resource_type', resourceType)
       if (operation) qb = qb.eq('operation', operation)
       if (stationId) qb = qb.eq('station_id', stationId)
-      if (q) qb = qb.or(`action.ilike.%${q}%,resource_id.ilike.%${q}%,resource_type.ilike.%${q}%`)
+      if (q) {
+        // PostgREST's or= syntax treats , ( ) as structure; a search containing
+        // them broke the filter (500). Drop them — they're never in an action
+        // name, resource type or id worth searching for.
+        const term = q.replace(/[,()]/g, ' ').trim()
+        if (term) qb = qb.or(`action.ilike.%${term}%,resource_id.ilike.%${term}%,resource_type.ilike.%${term}%`)
+      }
       return qb
     }
 
