@@ -19,6 +19,7 @@ import {
 import type { EpisodeLog } from '../lib/types'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { fetchBlockingFlags } from '../lib/compliance-blocking'
+import { parseCurationResponse, selectionLine, rewriteUserMessage, rewriteFor, applyCuration, mapLimit, type CurationRewrite } from '../lib/qir-curation'
 
 export interface GenerateQirOptions {
   year: number
@@ -180,10 +181,9 @@ export async function processGenerateQir(job: Job) {
       (e) => isoDateById.get(e.episode_id) ?? e.air_date,
       candidateScore
     )
-    const entrySummaries = entries.map(
-      (e) =>
-        `  ID:${e.episode_id} | ${e.show_name} | ${e.air_date} | "${e.headline}" | Guest: ${e.guest || 'none'} | ${e.summary.slice(0, 200)}`
-    )
+    // Snippets are for CHOOSING only; descriptions are written in the rewrite
+    // pass below from the full summary (lib/qir-curation.ts).
+    const entrySummaries = entries.map((e) => selectionLine(e))
     categorySummaries.push(
       `\n## ${category} (${entries.length} entries)\n${entrySummaries.join('\n')}`
     )
@@ -227,45 +227,53 @@ ${categorySummaries.join('\n')}`
     throw new Error(`OpenAI returned empty or invalid curation selection: ${content.slice(0, 200)}`)
   }
 
-  // Collect selected episode IDs + capture the model's filing-ready rewrite. The
-  // curation prompt returns, per category, an array of { id, topic, description }
-  // objects (it both SELECTS and rewrites each entry). Accept a bare-number shape
-  // too, so a prompt/parser mismatch degrades to selection-only instead of silently
-  // yielding zero entries — which is exactly what the number[]-only parser did once
-  // the prompt was switched to rich objects (it added objects to a Set<number>).
-  const curatedIds = new Set<number>()
-  const rewriteById = new Map<number, { topic?: string; description?: string }>()
-  for (const items of Object.values(curatedSelection)) {
-    if (!Array.isArray(items)) continue
-    for (const item of items) {
-      if (typeof item === 'number') {
-        curatedIds.add(item)
-      } else if (item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'number') {
-        const it = item as { id: number; topic?: string; description?: string }
-        curatedIds.add(it.id)
-        rewriteById.set(it.id, { topic: it.topic, description: it.description })
-      }
-    }
-  }
+  // Pass 1 result: WHICH episodes. Its topics/descriptions are not filed —
+  // written from 200-char snippets, some landed on the wrong episode.
+  const selection = parseCurationResponse(curatedSelection)
+  const curatedIds = selection.ids
 
   // Fail loudly rather than store a useless 0-entry draft (the old silent failure).
   if (curatedIds.size === 0) {
     throw new Error(`OpenAI curation selected no valid episode IDs: ${content.slice(0, 200)}`)
   }
 
-  // Build curated entries list, applying the model's filing-ready rewrite
-  // (topic → headline, description → summary) when present.
-  const curatedEntries = allEntries
-    .filter((e) => curatedIds.has(e.episode_id))
-    .map((e) => {
-      const rw = rewriteById.get(e.episode_id)
-      if (!rw) return e
-      return {
-        ...e,
-        headline: rw.topic?.trim() || e.headline,
-        summary: rw.description?.trim() || e.summary,
-      }
-    })
+  // Pass 2: rewrite each selected entry ON ITS OWN from its FULL summary,
+  // under the same curation prompt (its rewrite rules). One episode per call,
+  // so a description can't land on the wrong episode. An entry whose call fails
+  // or comes back empty keeps its full stored summary, never pass 1's text.
+  const selectedEntries = allEntries.filter((e) => curatedIds.has(e.episode_id))
+  const rewriteById = new Map<number, CurationRewrite>()
+  let rewriteFallbacks = 0
+  const rewriteUsage = { input: 0, output: 0 }
+  // A selection-only prompt (bare ids, e.g. the built-in default) asks for no
+  // rewrite, so there's nothing to redo — entries keep their stored summary.
+  const promptRewrites = selection.rewrites.size > 0
+  await mapLimit(promptRewrites ? selectedEntries : [], 8, async (entry) => {
+    try {
+      const res = await openai.chat.completions.create({
+        model: curationModel,
+        messages: [
+          { role: 'system', content: curationSystemPrompt },
+          { role: 'user', content: rewriteUserMessage(entry) },
+        ],
+        temperature: 0.3,
+        response_format: { type: 'json_object' },
+      })
+      rewriteUsage.input += res.usage?.prompt_tokens ?? 0
+      rewriteUsage.output += res.usage?.completion_tokens ?? 0
+      const rw = rewriteFor(entry, parseCurationResponse(JSON.parse(res.choices[0]?.message?.content ?? '{}')))
+      if (rw) rewriteById.set(entry.episode_id, rw)
+      else rewriteFallbacks++
+    } catch (err) {
+      console.warn(`[generate-qir] rewrite failed for episode ${entry.episode_id} — using its stored summary:`, err instanceof Error ? err.message : err)
+      rewriteFallbacks++
+    }
+  })
+  if (promptRewrites && rewriteFallbacks) console.warn(`[generate-qir] ${rewriteFallbacks} entr${rewriteFallbacks === 1 ? 'y' : 'ies'} kept the stored summary (no rewrite)`)
+
+  const curatedEntries = selectedEntries.map((e) =>
+    applyCuration(e, rewriteById.get(e.episode_id))
+  )
   const spread = summarizeDateSpread(curatedEntries.map((e) => isoDateById.get(e.episode_id) ?? e.air_date))
   if (spread) console.log(`[generate-qir] curated ${curatedEntries.length} entries spanning ${spread.spanDays} days across ${spread.months} month(s)`)
   const curatedText = formatCuratedReport(curatedEntries, year, quarter, station.name)
@@ -328,6 +336,17 @@ ${categorySummaries.join('\n')}`
       draft_id: draft?.id,
       episodes_considered: allEntries.length,
       episodes_curated: curatedEntries.length,
+      pass: 'select',
+    })
+  }
+  if (rewriteUsage.input || rewriteUsage.output) {
+    await logCurationUsage(stationId, rewriteUsage.input, rewriteUsage.output, curationModel, {
+      year,
+      quarter,
+      draft_id: draft?.id,
+      pass: 'rewrite',
+      entries_rewritten: rewriteById.size,
+      rewrite_fallbacks: rewriteFallbacks,
     })
   }
 
