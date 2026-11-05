@@ -166,7 +166,7 @@ export default function UsagePage() {
               <p className="text-xl font-bold">{formatCost(totals?.groq ?? 0)}</p>
             </div>
             <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
-              <p className="text-xs text-gray-500 dark:text-warm-400">OpenAI (Summarization)</p>
+              <p className="text-xs text-gray-500 dark:text-warm-400">OpenAI (summaries, compliance, translation)</p>
               <p className="text-xl font-bold">{formatCost(totals?.openai ?? 0)}</p>
             </div>
             <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
