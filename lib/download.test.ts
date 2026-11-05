@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { filenameFromContentDisposition, publicQirPath, readCookieValue } from './download'
+import { filenameFromContentDisposition, publicQirPath } from './download'
 
 describe('filenameFromContentDisposition', () => {
   it('reads the quoted form the downloads route emits', () => {
@@ -16,18 +16,6 @@ describe('filenameFromContentDisposition', () => {
   it('returns null when missing', () => {
     expect(filenameFromContentDisposition(null)).toBeNull()
     expect(filenameFromContentDisposition('inline')).toBeNull()
-  })
-})
-
-describe('readCookieValue', () => {
-  it('finds a cookie among others', () => {
-    expect(readCookieValue('a=1; qir_station=wpfw; b=2', 'qir_station')).toBe('wpfw')
-  })
-  it('does not match a suffix of another cookie name', () => {
-    expect(readCookieValue('old_qir_station=kpfk', 'qir_station')).toBeNull()
-  })
-  it('decodes values', () => {
-    expect(readCookieValue('qir_station=k%20pfk', 'qir_station')).toBe('k pfk')
   })
 })
 

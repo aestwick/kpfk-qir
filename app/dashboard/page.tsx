@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { authedFetch, getActiveStationSlug } from '@/lib/api-client'
+import { authedFetch } from '@/lib/api-client'
+import { useNavAccess } from '@/app/components/nav-access'
 import { publicQirPath } from '@/lib/download'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
@@ -793,8 +794,7 @@ export default function DashboardOverview() {
 /* ─── System Health Footer ─── */
 function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: DashData['queues']; activity: ActivityItem[]; lastFiled: DashData['lastFiledQir']; paused: boolean }) {
   // Station-qualified public link; the legacy /{year}/q{n} path redirects to KPFK.
-  const [stationSlug, setStationSlug] = useState<string | null>(null)
-  useEffect(() => setStationSlug(getActiveStationSlug()), [])
+  const stationSlug = useNavAccess().active?.slug ?? null
   const lastIngest = activity.find((a) => a.status === 'pending')?.time
   const lastTranscribe = activity.find((a) => a.status === 'transcribed')?.time
   const lastSummarize = activity.find((a) => a.status === 'summarized' || a.status === 'compliance_checked')?.time

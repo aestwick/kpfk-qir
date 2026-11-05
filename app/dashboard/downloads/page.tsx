@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { getQuarterOptions } from '@/lib/quarters'
-import { downloadWithAuth, getActiveStationSlug } from '@/lib/api-client'
+import { downloadWithAuth } from '@/lib/api-client'
+import { useNavAccess } from '@/app/components/nav-access'
 import { publicQirPath } from '@/lib/download'
 
 export default function DownloadsPage() {
@@ -12,10 +13,9 @@ export default function DownloadsPage() {
   const [selected, setSelected] = useState(quarterOptions[0])
   const [busyType, setBusyType] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // Read after mount (document.cookie isn't available during prerender). The
-  // station switcher reloads the page on change, so this stays current.
-  const [stationSlug, setStationSlug] = useState<string | null>(null)
-  useEffect(() => setStationSlug(getActiveStationSlug()), [])
+  // Reactive active station: NavAccessProvider may resolve (and write the
+  // cookie for) the station after this page mounts, without a reload.
+  const stationSlug = useNavAccess().active?.slug ?? null
 
   // /api/downloads needs the Bearer token, which a plain <a href> can't send.
   async function handleDownload(type: string) {

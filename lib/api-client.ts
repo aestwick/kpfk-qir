@@ -1,6 +1,5 @@
 import { createBrowserClient } from '@/lib/supabase'
-import { filenameFromContentDisposition, readCookieValue } from '@/lib/download'
-import { STATION_COOKIE } from '@/lib/station-cookie'
+import { filenameFromContentDisposition } from '@/lib/download'
 
 /**
  * fetch wrapper for dashboard (client) pages that attaches the caller's Supabase
@@ -42,10 +41,4 @@ export async function downloadWithAuth(url: string, fallbackFilename: string): P
   a.remove()
   // Defer revoke so the browser has started the download.
   setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
-}
-
-/** The active station slug from the qir_station cookie (set by the station switcher). */
-export function getActiveStationSlug(): string | null {
-  if (typeof document === 'undefined') return null
-  return readCookieValue(document.cookie, STATION_COOKIE)
 }

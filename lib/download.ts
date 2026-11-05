@@ -23,18 +23,6 @@ export function filenameFromContentDisposition(header: string | null | undefined
   return null
 }
 
-/** Read one cookie value out of a `document.cookie`-style string. */
-export function readCookieValue(cookieString: string, name: string): string | null {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = cookieString.match(new RegExp('(?:^|;\\s*)' + escaped + '=([^;]*)'))
-  if (!match) return null
-  try {
-    return decodeURIComponent(match[1])
-  } catch {
-    return match[1]
-  }
-}
-
 /**
  * Path of a station's public finalized QIR. Always station-qualified: the
  * legacy `/{year}/q{quarter}` form 308-redirects to KPFK (next.config.js), so
