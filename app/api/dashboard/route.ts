@@ -268,15 +268,18 @@ async function buildDashboard(
     // (lib/compliance-blocking.ts). The ACTIVE_REVIEW_STATUSES counts above
     // leave out unreviewed flags, so on their own they can read "no active
     // flags" while episodes are being held out.
-    supabase
+    // Paged: hosted PostgREST caps a response at 1000 rows (Q3 2026 alone
+    // had 148 such flags; a busy quarter could pass the cap).
+    pagedRows('blocking flags', (from, to) => supabase
       .from('compliance_flags')
-      .select('episode_id, severity, review_status, episode_log!inner(station_id, status)')
+      .select('id, episode_id, severity, review_status, episode_log!inner(station_id, status)')
       .eq('severity', BLOCKING_SEVERITY)
       .neq('review_status', CLEARING_REVIEW_STATUS)
       .eq('episode_log.station_id', stationId)
       .in('episode_log.status', [...QIR_CANDIDATE_STATUSES])
       .or(quarterEpisodeOrFilter(qtr.start, qtr.end), { referencedTable: 'episode_log' })
-      .limit(5000),
+      .order('id')
+      .range(from, to)),
 
     isComplianceBlocking(),
   ])

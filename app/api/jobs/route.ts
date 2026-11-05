@@ -206,7 +206,9 @@ export async function GET(request: NextRequest) {
           const queue = queues[name]
           const [counts, failed, active, waiting, completed] = await Promise.all([
             queue.getJobCounts(),
-            queue.getFailed(0, 20),
+            // Shared queue: read a deep window, then keep this station's 20
+            // newest, so other stations' failures can't crowd ours out.
+            queue.getFailed(0, 999).then((jobs) => jobs.filter(ownJob).slice(0, 20)),
             queue.getActive(0, 20),
             queue.getWaiting(0, 20),
             queue.getCompleted(0, 30),
@@ -232,7 +234,7 @@ export async function GET(request: NextRequest) {
               failed: counts.failed ?? 0,
             },
             // Only this station's failures: retry/clear act on these alone.
-            failedJobs: failed.filter(ownJob).map((job: any) => ({
+            failedJobs: failed.map((job: any) => ({
               id: job.id,
               name: job.name,
               data: job.data,
