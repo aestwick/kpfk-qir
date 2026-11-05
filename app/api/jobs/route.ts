@@ -186,7 +186,15 @@ export async function GET(request: NextRequest) {
   try {
     const ctx = await getStationContext(request)
     if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
+    const { supabase, stationId, isSuperAdmin } = ctx.context
+
+    // The BullMQ queues are shared by every station, and job payloads and
+    // error text can name another station's shows/episodes. Station members
+    // only see their own station's jobs; super-admins see all (Master Control
+    // is their cross-station view). Failed jobs are always scoped to the
+    // active station because Retry/Clear here act on that station alone.
+    const ownJob = (job: any) => job.data?.stationId === stationId
+    const visible = (job: any) => isSuperAdmin || ownJob(job)
 
     const queues = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
     const queueNames = Object.keys(queues) as (keyof typeof queues)[]
@@ -224,7 +232,7 @@ export async function GET(request: NextRequest) {
               failed: counts.failed ?? 0,
             },
             // Only this station's failures: retry/clear act on these alone.
-            failedJobs: failed.filter((job: any) => job.data?.stationId === stationId).map((job: any) => ({
+            failedJobs: failed.filter(ownJob).map((job: any) => ({
               id: job.id,
               name: job.name,
               data: job.data,
@@ -233,9 +241,9 @@ export async function GET(request: NextRequest) {
               finishedOn: job.finishedOn,
             })),
             jobs: [
-              ...active.map((j: any) => mapJob(j, 'active')),
-              ...waiting.map((j: any) => mapJob(j, 'waiting')),
-              ...completed.map((j: any) => mapJob(j, 'completed')),
+              ...active.filter(visible).map((j: any) => mapJob(j, 'active')),
+              ...waiting.filter(visible).map((j: any) => mapJob(j, 'waiting')),
+              ...completed.filter(visible).map((j: any) => mapJob(j, 'completed')),
             ],
           }
         })
