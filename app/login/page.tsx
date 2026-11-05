@@ -44,7 +44,10 @@ export default function LoginPage() {
       }).catch(() => {})
     }
 
-    window.location.href = '/dashboard'
+    // Return to the page that sent the user here (e.g. a shared compliance
+    // report link). Same-origin paths only, so ?next= can't redirect off-site.
+    const next = new URLSearchParams(window.location.search).get('next')
+    window.location.href = next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : '/dashboard'
   }
 
   return (

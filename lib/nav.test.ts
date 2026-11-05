@@ -70,7 +70,8 @@ describe('resolveOrigin', () => {
 
   it('prefers the more specific grid prefix over compliance', () => {
     expect(resolveOrigin('/dashboard/compliance/grid').label).toBe('Flags by time slot')
-    expect(resolveOrigin('/dashboard/compliance?tab=open').label).toBe('Review flags')
+    expect(resolveOrigin('/dashboard/compliance?tab=open').label).toBe('All flags')
+    expect(resolveOrigin('/dashboard/compliance/triage?tier=B').label).toBe('Review flags')
   })
 
   it('preserves the query string in the returned href', () => {
@@ -116,7 +117,7 @@ describe('visibleNav', () => {
 
   it('shows viewers only the reading sections', () => {
     expect(ids('viewer')).toEqual([
-      'home', 'episodes', 'shows', 'search', 'show-checkup', 'downloads', 'report', 'compliance', 'compliance-grid',
+      'home', 'episodes', 'shows', 'search', 'show-checkup', 'downloads', 'report', 'compliance', 'compliance-all', 'compliance-grid',
     ])
   })
 
@@ -153,7 +154,8 @@ describe('matchNavItem / activeNavItem', () => {
     expect(matchNavItem('/dashboard/shows/risingup')?.id).toBe('shows')
     expect(matchNavItem('/dashboard/shows/audit')?.id).toBe('show-checkup')
     expect(matchNavItem('/dashboard/compliance/grid')?.id).toBe('compliance-grid')
-    expect(matchNavItem('/dashboard/compliance')?.id).toBe('compliance')
+    expect(matchNavItem('/dashboard/compliance')?.id).toBe('compliance-all')
+    expect(matchNavItem('/dashboard/compliance/triage')?.id).toBe('compliance')
     expect(matchNavItem('/dashboard/nope')).toBeNull()
   })
 
@@ -168,7 +170,8 @@ describe('matchNavItem / activeNavItem', () => {
   })
 
   it('highlights the section an episode was opened from', () => {
-    expect(activeNavItem('/dashboard/episodes/42', 'from=%2Fdashboard%2Fcompliance%3Fstatus%3Dsuggested')?.id).toBe('compliance')
+    expect(activeNavItem('/dashboard/episodes/42', 'from=%2Fdashboard%2Fcompliance%3Fstatus%3Dsuggested')?.id).toBe('compliance-all')
+    expect(activeNavItem('/dashboard/episodes/42', 'from=%2Fdashboard%2Fcompliance%2Ftriage')?.id).toBe('compliance')
     expect(activeNavItem('/dashboard/episodes/42', 'seek=3&from=%2Fdashboard%2Fsearch')?.id).toBe('search')
     expect(activeNavItem('/dashboard/episodes/42', 'from=%2Fdashboard')?.id).toBe('episodes')
     expect(activeNavItem('/dashboard/episodes/42')?.id).toBe('episodes')
@@ -183,9 +186,9 @@ describe('matchNavItem / activeNavItem', () => {
 
 describe('breadcrumbTrail', () => {
   it('returns Home › section for a section page', () => {
-    expect(breadcrumbTrail('/dashboard/compliance')).toEqual([
+    expect(breadcrumbTrail('/dashboard/compliance/triage')).toEqual([
       { label: 'Home', href: '/dashboard' },
-      { label: 'Review flags', href: '/dashboard/compliance' },
+      { label: 'Review flags', href: '/dashboard/compliance/triage' },
     ])
   })
 

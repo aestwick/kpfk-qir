@@ -34,3 +34,30 @@ export function restrictedHoursCheck(airStart: string | null, durationMin: numbe
   anyRestricted ||= isRestrictedMinute(startMin + lengthMin - 1)
   return (offsetSec) => (offsetSec == null ? anyRestricted : isRestrictedMinute(startMin + offsetSec / 60))
 }
+
+// Where each whole-word occurrence of `word` sits: its index in the transcript
+// and the start time of the caption cue it was spoken in. The transcript and
+// the captions come from the same transcription, so the k-th match in one is
+// the k-th match in the other; pairing by order (with the same Unicode-aware
+// pattern on both sides) times each hit at its own cue. A plain substring
+// search over cues used to time "fuck" at the first "motherfucking" and "culo"
+// at "vehículo", sending "Listen" to the wrong moment. `time` is null when the
+// captions have fewer matches than the transcript (no VTT, or a word split
+// across cues).
+export interface CueLike { startSeconds: number; text: string }
+export interface WordOccurrence { index: number; time: number | null }
+
+export function wordOccurrences(transcript: string, cues: CueLike[], word: string): WordOccurrence[] {
+  const times: number[] = []
+  for (const cue of cues) {
+    const p = wordPattern(word)
+    while (p.exec(cue.text) !== null) times.push(Math.floor(cue.startSeconds))
+  }
+  const out: WordOccurrence[] = []
+  const p = wordPattern(word)
+  let m: RegExpExecArray | null
+  while ((m = p.exec(transcript)) !== null) {
+    out.push({ index: m.index, time: times[out.length] ?? null })
+  }
+  return out
+}
