@@ -44,6 +44,8 @@ interface DashData {
   }
   coverageGaps: string[]
   complianceSummary: Record<string, { count: number; critical: number }>
+  /** This quarter: episodes compliance blocking holds out of the report. */
+  complianceBlocking?: { enabled: boolean; heldOut: number; blockingFlags: number; unreviewed: number }
   qirStatus: { status: string; version: number; entryCount: number } | null
   qualityFlags: QualityFlag[]
   lastFiledQir: { id: number; year: number; quarter: number; version: number; updated_at: string } | null
@@ -673,7 +675,7 @@ export default function DashboardOverview() {
             </div>
           )}
 
-          {totalFlags > 0 && (
+          {(totalFlags > 0 || (data.complianceBlocking?.heldOut ?? 0) > 0) && (
             <div className="card overflow-hidden">
               <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
                 <h3 className="section-header">Compliance</h3>
@@ -681,7 +683,24 @@ export default function DashboardOverview() {
                   {totalFlags} active
                 </span>
               </div>
-              <div className="px-5 py-4">
+              <div className="px-5 py-4 space-y-3">
+                {data.complianceBlocking && data.complianceBlocking.heldOut > 0 && (
+                  <a
+                    href="/dashboard/compliance?severity=critical&status=suggested"
+                    className="block text-sm rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 hover:bg-red-100 dark:bg-red-900/20 dark:border-red-800/40 dark:text-red-300 dark:hover:bg-red-900/30"
+                  >
+                    <span className="font-semibold tabular-nums">
+                      {data.complianceBlocking.heldOut} episode{data.complianceBlocking.heldOut === 1 ? '' : 's'}
+                    </span>{' '}
+                    {data.complianceBlocking.enabled
+                      ? 'held out of this quarter\u2019s report by compliance blocking'
+                      : 'this quarter have critical flags not yet dismissed (blocking is off, so they stay in the report)'}
+                    {data.complianceBlocking.unreviewed > 0 && (
+                      <> — {data.complianceBlocking.unreviewed} critical flag{data.complianceBlocking.unreviewed === 1 ? '' : 's'} never reviewed</>
+                    )}
+                    . Review →
+                  </a>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(complianceSummary).map(([type, { count, critical }]) => (
                     <a

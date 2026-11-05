@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused } from '@/lib/settings'
+import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused, isComplianceBlocking } from '@/lib/settings'
+import { BLOCKING_SEVERITY, CLEARING_REVIEW_STATUS, summarizeBlockedEpisodes, type BlockingFlagRow } from '@/lib/compliance-blocking'
+import { QIR_CANDIDATE_STATUSES, quarterEpisodeOrFilter } from '@/lib/qir-format'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 import { fetchAllRows } from '@/lib/fetch-all'
@@ -93,6 +95,8 @@ async function buildDashboard(
     qualityFlagEpisodes,
     lastFiledQir,
     lastCompletedJobs,
+    blockingFlagRows,
+    complianceBlockingOn,
   ] = await Promise.all([
     // 1. Overall status counts
     Promise.all(
@@ -257,7 +261,33 @@ async function buildDashboard(
       .in('operation', ['transcribe', 'summarize', 'compliance', 'ingest'])
       .order('created_at', { ascending: false })
       .limit(20),
+
+    // 21. Flags that compliance blocking holds out of THIS quarter's report:
+    // critical + not dismissed (unreviewed 'suggested' included) on the
+    // quarter's report candidates — the same rule as workers/generate-qir.ts
+    // (lib/compliance-blocking.ts). The ACTIVE_REVIEW_STATUSES counts above
+    // leave out unreviewed flags, so on their own they can read "no active
+    // flags" while episodes are being held out.
+    supabase
+      .from('compliance_flags')
+      .select('episode_id, severity, review_status, episode_log!inner(station_id, status)')
+      .eq('severity', BLOCKING_SEVERITY)
+      .neq('review_status', CLEARING_REVIEW_STATUS)
+      .eq('episode_log.station_id', stationId)
+      .in('episode_log.status', [...QIR_CANDIDATE_STATUSES])
+      .or(quarterEpisodeOrFilter(qtr.start, qtr.end), { referencedTable: 'episode_log' })
+      .limit(5000),
+
+    isComplianceBlocking(),
   ])
+
+  const blockedEpisodes = summarizeBlockedEpisodes((blockingFlagRows.data ?? []) as unknown as BlockingFlagRow[])
+  const complianceBlocking = {
+    enabled: complianceBlockingOn,
+    heldOut: blockedEpisodes.length,
+    blockingFlags: blockedEpisodes.reduce((n, b) => n + b.blocking_flags, 0),
+    unreviewed: blockedEpisodes.reduce((n, b) => n + b.unreviewed, 0),
+  }
 
   // Aggregate status counts
   const allCounts = Object.fromEntries(statusCounts)
@@ -490,6 +520,7 @@ async function buildDashboard(
     },
     coverageGaps,
     complianceSummary: complianceFlagCounts,
+    complianceBlocking,
     qirStatus,
     qualityFlags,
     lastFiledQir: lastFiled,
