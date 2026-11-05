@@ -6,7 +6,7 @@ Ingests episodes from the KPFK archive, transcribes audio with Groq Whisper, sum
 
 ## Stack
 
-- **Next.js 14** (App Router) — dashboard + public QIR pages + API
+- **Next.js 15.5** (App Router, React 19) — dashboard + public QIR pages + API
 - **Supabase** (Postgres + Auth) — database and authentication
 - **BullMQ + Redis** — background job queue
 - **Groq API** (whisper-large-v3) — audio transcription

@@ -75,7 +75,7 @@ Configurable from the Settings page (polled every 30s by workers):
 
 | Layer | Technology | Role |
 |-------|-----------|------|
-| **Frontend** | Next.js 14 (App Router) | Dashboard UI + API routes + public QIR pages |
+| **Frontend** | Next.js 15.5 (App Router, React 19) | Dashboard UI + API routes + public QIR pages |
 | **Database** | Supabase (hosted PostgreSQL) | All persistent state, auth |
 | **Job Queue** | BullMQ + Redis | Background processing, cron scheduling |
 | **Transcription** | Groq API (whisper-large-v3) | Speech-to-text |

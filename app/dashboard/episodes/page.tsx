@@ -105,7 +105,7 @@ export default function EpisodesPage() {
   function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
 
   // Debounce text filter updates to URL
-  const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const showDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   function setShowFilter(v: string) {
     setShowFilterLocal(v)

@@ -83,7 +83,9 @@ function rateLimitHeaders(limit: number, remaining: number, resetSec: number): R
 export function withApiKey(handler: Handler, opts: WithApiKeyOptions) {
   return async (
     request: NextRequest,
-    routeCtx?: { params?: Record<string, string> },
+    // Next 15+: route params arrive as a Promise (an empty one on static
+    // routes). Must be non-optional to satisfy Next's build-time route check.
+    routeCtx: { params: Promise<Record<string, string>> },
   ): Promise<Response> => {
     // 1. Authenticate the key.
     const auth = await authenticateApiKey(request)
@@ -108,7 +110,7 @@ export function withApiKey(handler: Handler, opts: WithApiKeyOptions) {
       )
     }
 
-    const params = routeCtx?.params ?? {}
+    const params = (await routeCtx?.params) ?? {}
 
     // 4. Run the handler, through the response cache when configured. 5xx results
     //    throw out of run() so they are surfaced as 500 and never cached. 4xx

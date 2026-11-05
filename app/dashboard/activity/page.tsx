@@ -86,7 +86,7 @@ export default function ActivityPage() {
   }, [router])
 
   // Debounce show search URL updates
-  const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const showDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const fetchActivity = useCallback(async () => {
     setLoading(true)

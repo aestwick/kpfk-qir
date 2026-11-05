@@ -93,7 +93,7 @@ export default function SearchPage() {
   }, [router, pathname])
 
   // Debounce the query input to the URL (350ms — same as the episodes page).
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   function setQuery(v: string) {
     setQueryLocal(v)
     clearTimeout(debounceRef.current)
