@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { createBrowserClient } from '@/lib/supabase'
 import { useNavAccess } from '@/app/components/nav-access'
@@ -11,7 +12,17 @@ import {
 } from '@/lib/nav'
 
 /* ─── Small session cache so the live bits (badge, deadline) don't refetch on
- *     every page load. Every navigation is a full page load today. ─── */
+ *     every page load, and render on the first paint instead of popping in. ─── */
+
+/** The cached value even if it's past its TTL — a starting point to paint with. */
+function peekCached<T>(key: string): T | null {
+  try {
+    const raw = sessionStorage.getItem(key)
+    return raw ? (JSON.parse(raw).value as T) : null
+  } catch {
+    return null
+  }
+}
 
 function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   try {
@@ -59,13 +70,14 @@ export function useActiveNavItem(): NavItem | null {
  * into the thousands and would just read as noise. RLS-scoped count, no rows.
  */
 function useComplianceToReview(stationId: string | undefined, today: Date | null): number | null {
-  const [count, setCount] = useState<number | null>(null)
   const qStart = today ? new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1) : null
   const startIso = qStart ? isoDate(qStart) : null
+  const key = stationId && startIso ? `qir_nav_flags_${stationId}_${startIso}` : null
+  const [count, setCount] = useState<number | null>(() => (key ? peekCached<number>(key) : null))
   useEffect(() => {
     if (!stationId || !startIso) return
     let cancelled = false
-    cached(`qir_nav_flags_${stationId}_${startIso}`, 60_000, async () => {
+    cached(key!, 60_000, async () => {
       const supabase = createBrowserClient()
       const { count, error } = await supabase
         .from('compliance_flags')
@@ -77,7 +89,7 @@ function useComplianceToReview(stationId: string | undefined, today: Date | null
       return error ? null : count ?? 0
     }).then((n) => { if (!cancelled) setCount(n) }).catch(() => {})
     return () => { cancelled = true }
-  }, [stationId, startIso])
+  }, [stationId, startIso, key])
   return count
 }
 
@@ -87,7 +99,7 @@ function isoDate(d: Date): string {
 
 /** Quarters with a finalized report at the active station. */
 function useFinalizedQuarters(stationId: string | undefined): QuarterRef[] | null {
-  const [quarters, setQuarters] = useState<QuarterRef[] | null>(null)
+  const [quarters, setQuarters] = useState<QuarterRef[] | null>(() => (stationId ? peekCached<QuarterRef[]>(`qir_nav_final_${stationId}`) : null))
   useEffect(() => {
     if (!stationId) return
     let cancelled = false
@@ -214,7 +226,7 @@ export function SidebarNav() {
                   const isActive = current?.id === item.id
                   const badge = item.badge === 'complianceToReview' && toReview ? toReview : null
                   return (
-                    <a
+                    <Link
                       key={item.id}
                       href={item.href}
                       title={item.hint}
@@ -239,7 +251,7 @@ export function SidebarNav() {
                           {badge > 99 ? '99+' : badge}
                         </span>
                       )}
-                    </a>
+                    </Link>
                   )
                 })}
               </div>

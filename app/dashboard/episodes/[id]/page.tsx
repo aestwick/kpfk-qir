@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { useParams, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import { SkeletonBlock } from '@/app/components/skeleton'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { resolveOrigin, roleAllows } from '@/lib/nav'
@@ -592,7 +593,7 @@ export default function EpisodeDetailPage() {
     await authedFetch('/api/compliance', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: flagId, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
+      body: JSON.stringify({ id: flagId, review_status: status, resolved_notes: notes }),
     })
     setResolvingFlag(null)
     setResolveNotes('')
@@ -742,7 +743,7 @@ export default function EpisodeDetailPage() {
       <Breadcrumbs episodeName={episode.show_name ?? `Episode ${episode.id}`} origin={origin} />
 
       <div className="flex items-center gap-3">
-        <a href={origin.href} className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; {origin.label}</a>
+        <Link href={origin.href} scroll={false} className="text-sm text-gray-500 hover:text-gray-700 dark:text-warm-400 dark:hover:text-warm-200">&larr; {origin.label}</Link>
         <a href={`/dashboard/shows/${encodeURIComponent(episode.show_key)}`} className="text-2xl font-bold hover:text-blue-700 dark:hover:text-blue-400 transition-colors">
           {episode.show_name ?? `Episode ${episode.id}`}
         </a>

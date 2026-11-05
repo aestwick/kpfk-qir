@@ -12,6 +12,9 @@ export { STATION_COOKIE }
 
 export interface StationContext {
   userId: string
+  // The signed-in user's email, for attributing human decisions (e.g. who
+  // reviewed a compliance flag). Null only if the auth user has no email.
+  userEmail: string | null
   role: StationRole
   stationId: string
   stationSlug: string
@@ -119,6 +122,7 @@ export async function getStationContext(request: NextRequest): Promise<StationCo
   return {
     context: {
       userId,
+      userEmail: userData.user.email ?? null,
       role: match.role,
       stationId: match.station_id,
       stationSlug: match.slug,

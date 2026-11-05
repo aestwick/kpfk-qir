@@ -10,8 +10,17 @@ import { useNavAccess } from '@/app/components/nav-access'
  * nobody wonders whose data they're looking at.
  */
 export function StationSwitcher() {
-  const { stations, active, switchStation } = useNavAccess()
+  const { stations, active, switchStation, loading } = useNavAccess()
 
+  // Hold the space while access loads, so the menu below doesn't jump down.
+  if (!active && loading) {
+    return (
+      <div className="px-5 pb-4" aria-hidden="true">
+        <p className="text-2xs text-warm-500 mb-1.5">Station</p>
+        <div className="h-[34px] rounded-lg bg-sidebar-hover animate-pulse" />
+      </div>
+    )
+  }
   if (!active) return null
 
   if (stations.length <= 1) {

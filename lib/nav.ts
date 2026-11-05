@@ -106,7 +106,8 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'compliance',
     label: 'Compliance',
     items: [
-      { id: 'compliance', href: '/dashboard/compliance', label: 'Review flags', icon: 'flag', minRole: 'viewer', exclude: ['/dashboard/compliance/grid'], badge: 'complianceToReview', hint: 'Possible profanity and indecency to review' },
+      { id: 'compliance', href: '/dashboard/compliance/triage', label: 'Review flags', icon: 'flag', minRole: 'viewer', badge: 'complianceToReview', hint: 'Possible profanity and indecency, most urgent first' },
+      { id: 'compliance-all', href: '/dashboard/compliance', label: 'All flags', icon: 'flag', minRole: 'viewer', parent: 'compliance', exclude: ['/dashboard/compliance/grid', '/dashboard/compliance/triage'], hint: 'Every flag in one table, with filters' },
       { id: 'compliance-grid', href: '/dashboard/compliance/grid', label: 'Flags by time slot', icon: 'grid', minRole: 'viewer', parent: 'compliance', hint: 'When in the week flags happen' },
     ],
   },

@@ -145,15 +145,17 @@ function flatten(shows: ReportShow[]): FlatFlag[] {
 export default function ReportClient({
   stationSlug,
   quarter,
-  initialShows,
   initialFilters,
 }: {
   stationSlug: string
   quarter: string
-  initialShows: ReportShow[]
   initialFilters: { types: string[]; severities: string[]; statuses: ReviewStatus[]; show: string }
 }) {
-  const [allFlags, setAllFlags] = useState<FlatFlag[]>(() => flatten(initialShows))
+  const [allFlags, setAllFlags] = useState<FlatFlag[]>([])
+  // The report is staff-only: flags come from the authenticated API (RLS
+  // applies), never from the server render, so a shared link shows nothing to
+  // someone who isn't signed in to this station.
+  const [access, setAccess] = useState<'checking' | 'signed-in' | 'signed-out' | 'error'>('checking')
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(() => new Set(initialFilters.types))
   const [selectedSeverities, setSelectedSeverities] = useState<Set<string>>(() => new Set(initialFilters.severities))
   const [selectedStatuses, setSelectedStatuses] = useState<Set<ReviewStatus>>(() => new Set(initialFilters.statuses))
@@ -171,17 +173,16 @@ export default function ReportClient({
   const [busyFlag, setBusyFlag] = useState<number | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  // On mount: if the viewer is signed in, unlock triage and pull the *full*
-  // flag set (all review statuses, quarter-scoped) so status filtering and
-  // suggestions work in-page. Anonymous/print viewers keep the server payload
-  // (active offenses only), so AI suggestions are never exposed publicly.
+  // On mount: require a session, then pull the full flag set (all review
+  // statuses, quarter-scoped) so status filtering and triage work in-page.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         const supabase = createBrowserClient()
         const { data: { session } } = await supabase.auth.getSession()
-        if (cancelled || !session) return
+        if (cancelled) return
+        if (!session) { setAccess('signed-out'); return }
         setCanTriage(true)
         userEmailRef.current = session.user?.email ?? null
         const params = new URLSearchParams({ status: REVIEW_STATUSES.join(',') })
@@ -189,13 +190,15 @@ export default function ReportClient({
         const res = await authedFetch(`/api/compliance/report?${params.toString()}`, {
           headers: { 'x-station-slug': stationSlug },
         })
-        if (!res.ok || cancelled) return
+        if (cancelled) return
+        if (res.status === 401 || res.status === 403) { setAccess('signed-out'); return }
+        if (!res.ok) { setAccess('error'); return }
         const data = await res.json()
-        if (Array.isArray(data.shows)) {
-          setAllFlags(flatten(data.shows as ReportShow[]))
-        }
+        if (cancelled) return
+        setAllFlags(flatten(Array.isArray(data.shows) ? (data.shows as ReportShow[]) : []))
+        setAccess('signed-in')
       } catch {
-        /* leave the server payload in place */
+        if (!cancelled) setAccess('error')
       }
     })()
     return () => { cancelled = true }
@@ -343,7 +346,7 @@ export default function ReportClient({
         const res = await authedFetch('/api/compliance', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json', 'x-station-slug': stationSlug },
-          body: JSON.stringify({ id: flag.id, review_status: status, resolved_by: userEmailRef.current ?? 'compliance-report' }),
+          body: JSON.stringify({ id: flag.id, review_status: status }),
         })
         if (res.ok) {
           setAllFlags((prev) =>
@@ -379,6 +382,23 @@ export default function ReportClient({
         ? 'bg-blue-600 text-white border-blue-600'
         : 'bg-white dark:bg-warm-800 text-gray-600 dark:text-warm-300 border-gray-300 dark:border-warm-600 hover:border-gray-400 dark:hover:border-warm-500'
     }`
+
+  if (access !== 'signed-in') {
+    const next = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/compliance-report'
+    return (
+      <div className="no-print border dark:border-warm-700 rounded-lg p-8 text-center space-y-3">
+        {access === 'checking' && <p className="text-sm text-gray-500 dark:text-warm-400">Loading the report…</p>}
+        {access === 'signed-out' && (
+          <>
+            <p className="font-semibold">Sign in to view this report</p>
+            <p className="text-sm text-gray-500 dark:text-warm-400">Compliance flags are visible only to station staff with access to this station.</p>
+            <a href={`/login?next=${encodeURIComponent(next)}`} className="inline-block px-4 py-2 rounded-lg bg-kpfk-red text-white text-sm font-medium">Sign in</a>
+          </>
+        )}
+        {access === 'error' && <p className="text-sm text-red-600">The report couldn't be loaded. Refresh to try again.</p>}
+      </div>
+    )
+  }
 
   return (
     <>
