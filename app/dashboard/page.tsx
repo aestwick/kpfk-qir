@@ -11,7 +11,7 @@ import { describePause } from '@/lib/job-actions'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
-interface DailyPoint { date: string; groq: number; openai: number; total: number }
+interface DailyPoint { date: string; transcription: number; openai: number; total: number }
 interface CategoryItem { name: string; count: number }
 interface ShowItem { name: string; total: number; summarized: number }
 interface RecentEp { id: number; show_name: string | null; headline: string | null; status: string; updated_at: string; air_date: string | null; issue_category: string | null }
@@ -24,9 +24,9 @@ interface DashData {
   queues: { ingest: JobCounts; transcribe: JobCounts; summarize: JobCounts; compliance: JobCounts }
   // Cost/spend is super-admin-only; the API omits this block for everyone else.
   cost?: {
-    quarter: { groq: number; openai: number; total: number; episodeCount: number; apiCalls: number }
+    quarter: { transcription: number; openai: number; total: number; episodeCount: number; apiCalls: number }
     daily: DailyPoint[]
-    month: { groq: number; openai: number; total: number }
+    month: { transcription: number; openai: number; total: number }
   }
   categories: CategoryItem[]
   shows: ShowItem[]
@@ -761,7 +761,7 @@ export default function DashboardOverview() {
               {new Date().toLocaleString('en-US', { month: 'long' })} spend: {fmtCost(cost.month.total)}
             </span>
             <span className="text-xs text-warm-400 tabular-nums">
-              Groq {fmtCost(cost.month.groq)} / OpenAI {fmtCost(cost.month.openai)}
+              Transcription {fmtCost(cost.month.transcription)} / OpenAI {fmtCost(cost.month.openai)}
             </span>
             {cost.quarter.episodeCount > 0 && (
               <span className="text-xs text-warm-400 tabular-nums">
