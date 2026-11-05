@@ -61,6 +61,39 @@ export function selectionLine(e: QirEntry, snippetChars = 200): string {
 }
 
 /**
+ * The selection-pass user message for ONE category. Selection used to be a
+ * single call over every category at once (~49k tokens); the model never
+ * filled them — 21–40 picks against a cap of 8×12 — and Q3 2026 v4 came back
+ * with Government / Politics, International Affairs and Arts & Culture missing
+ * entirely. One call per category means no category can be skipped.
+ */
+export function selectionUserMessage(opts: {
+  category: string
+  candidates: QirEntry[]
+  maxPerCategory: number
+  quarterMonths: string[]
+  guidance?: string
+}): string {
+  const { category, candidates, maxPerCategory, quarterMonths, guidance } = opts
+  const guidanceSection = guidance ? `\n\nADDITIONAL GUIDANCE FROM THE EDITOR:\n${guidance}\n` : ''
+  return `Select up to ${maxPerCategory} entries in the category "${category}" for the FCC Quarterly Issues Report. Return them under the key "${category}". Choose only from the IDs listed below.
+The report must show service across the WHOLE quarter: spread selections across ${quarterMonths.join(', ')} rather than clustering in one stretch.
+${guidanceSection}
+## ${category} (${candidates.length} entries)
+${candidates.map((e) => selectionLine(e)).join('\n')}`
+}
+
+/**
+ * The ids a per-category selection response picked: only ids that were in
+ * this category's candidate list (a model can echo an id it wasn't offered),
+ * in the order returned, capped at `max`.
+ */
+export function selectedIdsFor(parsed: ParsedCuration, candidates: QirEntry[], max: number): number[] {
+  const offered = new Set(candidates.map((e) => e.episode_id))
+  return Array.from(parsed.ids).filter((id) => offered.has(id)).slice(0, max)
+}
+
+/**
  * The rewrite-pass input for one category: the shape the curation prompt
  * describes (JSON episode objects), with the FULL summary.
  */

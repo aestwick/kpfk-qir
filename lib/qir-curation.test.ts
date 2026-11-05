@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseCurationResponse, selectionLine, rewriteInput, rewriteUserMessage, rewriteFor, applyCuration, mapLimit } from './qir-curation'
+import { parseCurationResponse, selectionLine, selectionUserMessage, selectedIdsFor, rewriteInput, rewriteUserMessage, rewriteFor, applyCuration, mapLimit } from './qir-curation'
 import type { QirEntry } from './qir-format'
 
 const longSummary =
@@ -97,5 +97,37 @@ describe('mapLimit', () => {
   })
   it('handles an empty list', async () => {
     expect(await mapLimit([], 4, async () => 1)).toEqual([])
+  })
+})
+
+describe('per-category selection', () => {
+  const other: QirEntry = { ...entry, episode_id: 9142, headline: 'Banking and empire', guest: 'Alex Cranor' }
+
+  it('asks for one category only, keyed by it, listing only its candidates', () => {
+    const msg = selectionUserMessage({
+      category: 'Government / Politics',
+      candidates: [entry, other],
+      maxPerCategory: 12,
+      quarterMonths: ['July', 'August', 'September'],
+      guidance: 'Prefer local stories',
+    })
+    expect(msg).toContain('Select up to 12 entries in the category "Government / Politics"')
+    expect(msg).toContain('under the key "Government / Politics"')
+    expect(msg).toContain('## Government / Politics (2 entries)')
+    expect(msg).toContain('ID:6162')
+    expect(msg).toContain('ID:9142')
+    expect(msg).toContain('July, August, September')
+    expect(msg).toContain('Prefer local stories')
+  })
+
+  it('keeps only offered ids, in returned order, capped', () => {
+    const parsed = parseCurationResponse({ 'Government / Politics': [9142, 5555, { id: 6162, description: 'x' }] })
+    expect(selectedIdsFor(parsed, [entry, other], 12)).toEqual([9142, 6162])
+    expect(selectedIdsFor(parsed, [entry, other], 1)).toEqual([9142])
+  })
+
+  it('accepts picks returned under a different key (the model renamed the category)', () => {
+    const parsed = parseCurationResponse({ Politics: [6162] })
+    expect(selectedIdsFor(parsed, [entry, other], 12)).toEqual([6162])
   })
 })
