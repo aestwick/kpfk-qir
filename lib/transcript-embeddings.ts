@@ -89,6 +89,10 @@ export interface EpisodeEmbeddingSource {
   human_summary?: string | null
 }
 
+/** The episode_log columns episodeEmbeddingText() reads (shared select list). */
+export const EPISODE_EMBEDDING_FIELDS =
+  'id, station_id, show_name, title, headline, host, guest, issue_category, summary, human_summary'
+
 /** Character cap on the embedded text (~1.5k tokens): summaries are well under
  *  this; the cap only guards against a pasted rundown blowing up a batch. */
 const EPISODE_TEXT_MAX = 6000
