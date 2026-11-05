@@ -210,6 +210,12 @@ export interface TranscriptSearchResult {
   snippet: string
   startMs: number | null
   matchType?: 'lexical' | 'semantic'
+  /** Station-local air time (Postgres time, "09:00:00"). */
+  airStart?: string | null
+  host?: string | null
+  guest?: string | null
+  /** The caption at the moment (highlighted with the same sentinels). */
+  momentText?: string | null
 }
 
 export interface UsageLog {

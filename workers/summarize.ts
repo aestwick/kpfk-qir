@@ -5,7 +5,8 @@ import { getProcessingWindowBounds } from '../lib/quarters'
 import { logSummarizationUsage, logEmbeddingUsage } from '../lib/usage'
 import { getExcludedCategories, getSummarizeBatchSize, getSummarizationPrompt, getSummarizationModel, isPipelinePaused, isEmbeddingsEnabled, getEmbeddingModel } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
-import { buildEpisodeChunkRows, storeEpisodeChunks } from '../lib/transcript-embeddings'
+import { buildEpisodeEmbeddingRows, storeEpisodeEmbeddings, EPISODE_EMBEDDING_FIELDS, type EpisodeEmbeddingSource } from '../lib/transcript-embeddings'
+import { refreshSearchVocab } from '../lib/transcript-search'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { applyAi, FieldSources } from '../lib/field-sources'
 
@@ -50,8 +51,10 @@ export async function processSummarize(job: Job) {
   const batchSize = await getSummarizeBatchSize(stationId)
   const systemPrompt = await getSummarizationPrompt(stationId)
   const summarizationModel = await getSummarizationModel(stationId)
-  // Phase 2 semantic search: embed each episode's transcript right after the
-  // summary (resolved once per batch — the 60s settings cache makes this cheap).
+  // Smart search: one vector per episode (title, host, guests, issues, summary),
+  // embedded once per batch after summarizing (resolved once per batch — the
+  // 60s settings cache makes this cheap). Per-chunk embeddings were retired:
+  // their HNSW inserts timed out (~1s/row), so ~4 in 5 were paid for and lost.
   const embeddingsEnabled = await isEmbeddingsEnabled(stationId)
   const embeddingModel = await getEmbeddingModel(stationId)
   const { start, end } = resolveWindow(job)
@@ -108,7 +111,7 @@ export async function processSummarize(job: Job) {
   const epIds = filteredEpisodes.map((ep) => ep.id)
   const { data: transcriptsData, error: transcriptsError } = await supabaseAdmin
     .from('transcripts')
-    .select('episode_id, transcript, vtt')
+    .select('episode_id, transcript')
     .in('episode_id', epIds)
   // A failed fetch must not look like "no transcripts": that branch marks every
   // claimed episode `transcript_missing`, a status nothing ever recovers from.
@@ -118,11 +121,8 @@ export async function processSummarize(job: Job) {
   const transcriptMap = new Map(
     (transcriptsData ?? []).map((t) => [t.episode_id, t.transcript])
   )
-  const vttMap = new Map(
-    (transcriptsData ?? []).map((t) => [t.episode_id, t.vtt as string | null])
-  )
-
   let summarized = 0
+  const summarizedIds: number[] = []
 
   for (let i = 0; i < filteredEpisodes.length; i++) {
     const episode = filteredEpisodes[i]
@@ -239,22 +239,8 @@ ${transcriptText}`
       // `summarizing`; throwing routes it to the normal failure handling below.
       if (saveError) throw new Error(`Failed to save summary: ${saveError.message}`)
 
-      // Embed the transcript for semantic search (Phase 2). Best-effort and
-      // auxiliary — like the cue populate in transcribe.ts, a failure here must
-      // never fail a successfully-summarized episode (search degrades to lexical).
-      if (embeddingsEnabled) {
-        try {
-          const vtt = vttMap.get(episode.id)
-          const { rows, tokens } = await buildEpisodeChunkRows(vtt, embeddingModel, openai)
-          await storeEpisodeChunks(supabaseAdmin, episode.id, rows)
-          if (tokens > 0) await logEmbeddingUsage(stationId, episode.id, tokens, embeddingModel)
-          if (rows.length) console.log(`[summarize] ep ${episode.id} embedded ${rows.length} chunks`)
-        } catch (embErr) {
-          console.warn(`[summarize] ep ${episode.id} embedding failed:`, embErr instanceof Error ? embErr.message : embErr)
-        }
-      }
-
       summarized++
+      summarizedIds.push(episode.id)
       console.log(`[summarize] ep ${episode.id} done: "${parsed.headline?.slice(0, 60)}"`)
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
@@ -281,6 +267,31 @@ ${transcriptText}`
   const remaining = claimable.length > claimIds.length
   if (remaining) {
     console.log(`[summarize] ${claimable.length - claimIds.length} more claimable transcribed — will continue`)
+  }
+
+  // Search upkeep for what this batch summarized. Best-effort and auxiliary —
+  // a failure here must never fail a successfully-summarized batch (search just
+  // lags until the next batch or `npm run backfill-episode-embeddings`).
+  if (summarizedIds.length) {
+    if (embeddingsEnabled) {
+      try {
+        const { data: eps } = await supabaseAdmin
+          .from('episode_log')
+          .select(EPISODE_EMBEDDING_FIELDS)
+          .eq('station_id', stationId)
+          .in('id', summarizedIds)
+        const { rows, tokens } = await buildEpisodeEmbeddingRows((eps ?? []) as unknown as EpisodeEmbeddingSource[], embeddingModel, undefined, openai)
+        await storeEpisodeEmbeddings(supabaseAdmin, rows)
+        if (tokens > 0) await logEmbeddingUsage(stationId, null, tokens, embeddingModel, { episodes: rows.length })
+      } catch (embErr) {
+        console.warn('[summarize] episode embedding failed:', embErr instanceof Error ? embErr.message : embErr)
+      }
+    }
+    try {
+      await refreshSearchVocab(supabaseAdmin, stationId, { maxBatches: 3 })
+    } catch (vocabErr) {
+      console.warn('[summarize] search vocabulary refresh failed:', vocabErr instanceof Error ? vocabErr.message : vocabErr)
+    }
   }
 
   if (summarized > 0) {
