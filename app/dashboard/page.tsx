@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import { useNavAccess } from '@/app/components/nav-access'
+import { publicQirPath } from '@/lib/download'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
-import { episodeHref, publicReportHref, roleAllows } from '@/lib/nav'
+import { episodeHref, roleAllows } from '@/lib/nav'
 import { describePause } from '@/lib/job-actions'
-import { useNavAccess } from '@/app/components/nav-access'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
@@ -845,6 +846,8 @@ export default function DashboardOverview() {
 
 /* ─── System Health Footer ─── */
 function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: DashData['queues']; activity: ActivityItem[]; lastFiled: DashData['lastFiledQir']; paused: boolean }) {
+  // Station-qualified public link; the legacy /{year}/q{n} path redirects to KPFK.
+  const stationSlug = useNavAccess().active?.slug ?? null
   const lastIngest = activity.find((a) => a.status === 'pending')?.time
   const lastTranscribe = activity.find((a) => a.status === 'transcribed')?.time
   const lastSummarize = activity.find((a) => a.status === 'summarized' || a.status === 'compliance_checked')?.time
@@ -861,10 +864,6 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
   const transcribeInfo = staleness(lastTranscribe)
   const summarizeInfo = staleness(lastSummarize)
 
-  // Public reports are per station (/<slug>/<year>/q<n>); the legacy
-  // /<year>/q<n> form redirects to KPFK's, whatever station is active.
-  const stationSlug = useNavAccess().active?.slug
-
   const workersRunning = queues.ingest.active + queues.transcribe.active + queues.summarize.active + queues.compliance.active > 0
   const workerColor = workersRunning ? 'text-emerald-600' : 'text-red-600'
 
@@ -876,7 +875,7 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>
       <span>Last summarization: <span className={`font-medium ${summarizeInfo.color}`}>{summarizeInfo.label}</span></span>
       {lastFiled && stationSlug && (
-        <span>Last QIR filed: <a href={publicReportHref(stationSlug, lastFiled)} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
+        <span>Last QIR filed: <a href={publicQirPath(stationSlug, lastFiled.year, lastFiled.quarter)} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
       )}
     </div>
   )

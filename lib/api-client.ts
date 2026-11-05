@@ -1,5 +1,5 @@
 import { createBrowserClient } from '@/lib/supabase'
-import { filenameFromContentDisposition } from '@/lib/content-disposition'
+import { filenameFromContentDisposition } from '@/lib/download'
 
 /**
  * fetch wrapper for dashboard (client) pages that attaches the caller's Supabase
@@ -18,21 +18,20 @@ export async function authedFetch(input: RequestInfo | URL, init: RequestInit = 
 }
 
 /**
- * Download an authenticated API response as a file. A plain <a href> to an API
- * route sends no Bearer token (→ 401 "Missing bearer token"), so fetch with
- * authedFetch, turn the body into a Blob and click a temporary object-URL link.
- * The filename comes from the server's Content-Disposition; `fallbackName` is
- * used only if the server sent none. Throws with the server's error message on
- * a non-2xx response so the caller can show it.
+ * Download a file from an authenticated API route. Plain `<a href>` links can't
+ * carry the Bearer header getStationContext requires (the Supabase session lives
+ * in localStorage, not a cookie), so fetch with authedFetch and save the body as
+ * a Blob, keeping the server's Content-Disposition filename. Throws with the
+ * server's error message on a non-2xx response.
  */
-export async function downloadAuthed(url: string, fallbackName: string): Promise<void> {
+export async function downloadWithAuth(url: string, fallbackFilename: string): Promise<void> {
   const res = await authedFetch(url)
   if (!res.ok) {
-    const data = await res.json().catch(() => ({} as { error?: string }))
-    throw new Error(data.error || `Download failed (${res.status})`)
+    const data = await res.json().catch(() => ({}))
+    throw new Error((data as { error?: string }).error || `Download failed (${res.status})`)
   }
   const blob = await res.blob()
-  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition'), fallbackName)
+  const filename = filenameFromContentDisposition(res.headers.get('Content-Disposition')) ?? fallbackFilename
   const objectUrl = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = objectUrl
@@ -40,6 +39,6 @@ export async function downloadAuthed(url: string, fallbackName: string): Promise
   document.body.appendChild(a)
   a.click()
   a.remove()
-  // Revoke on the next tick so the click has started the download first.
+  // Defer revoke so the browser has started the download.
   setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
 }

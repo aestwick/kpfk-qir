@@ -2,37 +2,42 @@
 
 import { useState } from 'react'
 import { getQuarterOptions } from '@/lib/quarters'
-import { downloadAuthed } from '@/lib/api-client'
+import { downloadWithAuth } from '@/lib/api-client'
 import { useNavAccess } from '@/app/components/nav-access'
-import { publicReportHref } from '@/lib/nav'
+import { publicQirPath } from '@/lib/download'
 
 export default function DownloadsPage() {
   // Reach back far enough to export historical-backfill quarters (e.g. WPFW's
   // one-off Q4 2020), not just the last year. The downloads API is quarter-agnostic.
   const quarterOptions = getQuarterOptions(6)
   const [selected, setSelected] = useState(quarterOptions[0])
-  const { active } = useNavAccess()
-  const [busy, setBusy] = useState<string | null>(null)
+  const [busyType, setBusyType] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Reactive active station: NavAccessProvider may resolve (and write the
+  // cookie for) the station after this page mounts, without a reload.
+  const stationSlug = useNavAccess().active?.slug ?? null
 
-  // The downloads API needs the Bearer token, which a plain <a href> doesn't
-  // send — fetch it and save the blob under the server's filename instead.
+  // /api/downloads needs the Bearer token, which a plain <a href> can't send.
   async function handleDownload(type: string) {
-    setBusy(type)
+    setBusyType(type)
     setError(null)
     try {
-      await downloadAuthed(
-        `/api/downloads?year=${selected.year}&quarter=${selected.quarter}&type=${type}`,
-        `${type}_Q${selected.quarter}_${selected.year}.${type === 'episodes' ? 'csv' : 'txt'}`,
+      const params = new URLSearchParams({
+        year: String(selected.year),
+        quarter: String(selected.quarter),
+        type,
+      })
+      const ext = type === 'episodes' ? 'csv' : 'txt'
+      await downloadWithAuth(
+        `/api/downloads?${params}`,
+        `${type}_Q${selected.quarter}_${selected.year}.${ext}`
       )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Download failed')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Download failed')
     } finally {
-      setBusy(null)
+      setBusyType(null)
     }
   }
-
-  const publicHref = active ? publicReportHref(active.slug, selected) : null
 
   const downloads = [
     {
@@ -95,9 +100,6 @@ export default function DownloadsPage() {
             Batch Downloads — {selected.label}
           </h3>
         </div>
-        {error && (
-          <p role="alert" className="px-4 pt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
-        )}
         <div className="divide-y dark:divide-warm-700">
           {downloads.map((dl) => (
             <div
@@ -111,14 +113,19 @@ export default function DownloadsPage() {
               <button
                 type="button"
                 onClick={() => handleDownload(dl.type)}
-                disabled={busy !== null}
-                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+                disabled={busyType !== null}
+                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50 disabled:cursor-wait dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
               >
-                {busy === dl.type ? 'Preparing…' : 'Download'}
+                {busyType === dl.type ? 'Preparing…' : 'Download'}
               </button>
             </div>
           ))}
         </div>
+        {error && (
+          <p role="alert" className="px-4 py-3 border-t text-sm text-red-600 dark:border-warm-700 dark:text-red-400">
+            {error}
+          </p>
+        )}
       </div>
 
       {/* QIR Exports */}
@@ -161,17 +168,19 @@ export default function DownloadsPage() {
         <p className="text-sm text-gray-600 dark:text-warm-400 mb-2">
           Finalized QIR reports are published at:
         </p>
-        {publicHref ? (
+        {stationSlug ? (
           <a
-            href={publicHref}
+            href={publicQirPath(stationSlug, selected.year, selected.quarter)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
           >
-            {publicHref}
+            {publicQirPath(stationSlug, selected.year, selected.quarter)}
           </a>
         ) : (
-          <span className="text-sm text-gray-400 dark:text-warm-500">Choose a station to see its public link.</span>
+          <p className="text-sm text-gray-400 dark:text-warm-500">
+            Select a station to see its public report link.
+          </p>
         )}
       </div>
     </div>
