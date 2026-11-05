@@ -55,12 +55,17 @@ workers/
                       transcript + VTT. Groq path ffmpeg-chunks; Deepgram/
                       AssemblyAI take mp3_url directly. Diarized speaker labels →
                       WebVTT voice spans. Records provider/model per transcript.
+                      Applies show/episode-scoped correction rules; sends the
+                      optional name hint (talk shows only).
   summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata.
                       Records AI copy + resolves human/AI winner per field
                       (lib/field-sources.ts)
   generate-qir.ts   — Group episodes → OpenAI curation → build draft
   discover-sync.ts  — Daily: scrape each station's archive program list →
                       insert NEW show_keys as inactive (opt-out onboarding)
+  corrections.ts    — Transcript names: re-apply pending correction rules to
+                      STORED transcripts (startup + on rule change); nightly
+                      CMS-host sync + suggested-corrections miner
 ```
 
 ### Library / Shared
@@ -73,6 +78,12 @@ lib/
                       runTranscription (fallback) + cost rates + config status.
                       groq.ts (chunked Whisper), deepgram.ts / assemblyai.ts
                       (URL-based, diarizing). vtt.ts: speaker-aware VTT builder.
+                      Names: corrections.ts (one rule engine: scope, VTT-safe
+                      apply, SQL prefilter), repair.ts (rules → stored
+                      transcripts), vocabulary.ts (Whisper name hint + echo
+                      guard), names.ts, store.ts (DB loaders), miner.ts +
+                      suggestions.ts (nightly miner), cues.ts (cue rebuild),
+                      chunking.ts (ffmpeg chunk args), benchmark.ts (scoring)
   confessor.ts      — Confessor archive API client (?req=fil) + pubfile projection
                       (host/guest/issues/human_summary) with loose-JSON parsing
   field-sources.ts  — Per-field human/ai/manual provenance engine (build/apply/
@@ -110,7 +121,10 @@ app/api/
   qir/export/route.ts       — GET export as CSV or text
   downloads/route.ts        — GET batch download transcripts, VTTs, episode CSV
   settings/route.ts         — GET all / PUT upsert setting
-  corrections/route.ts      — CRUD for transcript corrections
+  corrections/route.ts      — CRUD for transcript corrections (show_key scope;
+                              edits clear backfilled_at → stored-text repair)
+  corrections/vocabulary/   — per-show name list (transcript_vocabulary)
+  corrections/suggestions/  — miner suggestions: approve (→ rule) / reject
   usage/route.ts            — GET cost analytics with date range
   audit/route.ts            — GET audit log (super-admin only, paginated, filterable)
   audit/event/route.ts      — POST client-reported auth/station events (allowlisted)
@@ -213,6 +227,12 @@ supabase/migrations/
   037_transcription_providers.sql — transcripts.provider/model; seeds
                                   transcription_providers (order+enable) +
                                   diarization_enabled defaults in qir_settings
+  ...
+  047_transcript_names.sql      — transcript_corrections.show_key + backfilled_at;
+                                  transcript_vocabulary; transcript_correction_
+                                  suggestions; mine_name_variants() RPC
+  048_seed_kpfk_vocabulary.sql  — KPFK show names (Confessor DJ list, kpfk.org,
+                                  Ace's confirmations)
 ```
 
 **Migrations are tracked** — QIR has its own tracker, **`public.schema_migrations`**
@@ -276,7 +296,9 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 
 **Auth is active** — `dashboard/layout.tsx` requires a Supabase session and redirects to `/login` otherwise. (An older note about an "auth bypass" is obsolete.)
 
-**Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.
+**Transcript corrections** are applied as post-processing after the provider returns text. They support plain text and regex patterns, and a scope: station-wide, one **show** (`show_key`, every feed of its `show_group`) or one episode. Managed from Settings → Corrections. **Rules also fix stored transcripts**: a rule with `backfilled_at` null (new, edited, re-enabled, or approved) is re-applied by the corrections worker to every stored transcript in its scope — transcript text, VTT cue text (never timings or `<v>` tags), `transcript_cues`, and re-embedded `transcript_chunks` — then stamped (`lib/transcription/repair.ts`). Text only, no audio. A rule whose replacement re-matches itself ("Cary" → "Cary Harrison") is skipped for stored text. All rule logic lives in `lib/transcription/corrections.ts` (JS regex — never translated to SQL except as a superset prefilter, because Postgres reads `\b` as backspace).
+
+**Names: vocabulary hint + suggested corrections** (design + measurements: `docs/names-vocabulary-scan.md`). `transcript_vocabulary` holds each show's correctly spelled hosts/regulars (`show_key` null = station-wide terms). It is seeded from Confessor's DJ list (migration 048), and the corrections worker copies new website (CMS) hosts in nightly; a name switched **off** is never re-added. Two consumers: (1) the **Whisper hint** — when `vocabulary_hint_enabled` (per station, default **off**), Groq gets a short comma list (station terms, show names, that episode's Confessor names; ≤600 UTF-8 bytes) as `prompt`; **never for Music** (every prompt made music transcripts worse, and Groq's no_speech_prob can't detect music), a rejected prompt retries the chunk without it, and segments that echo the list back are dropped. (2) the **nightly miner** — `mine_name_variants()` (SQL, pg_trgm) finds capitalized pairs near a show's known names in its last 60 days of transcripts; `lib/transcription/suggestions.ts` filters noise; results wait in `transcript_correction_suggestions` until a person approves (creates a show-scoped rule → repair) or rejects (sticks). Measure changes with `npm run benchmark-names` (fixed episode set incl. music, ~$0.30/run on turbo).
 
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
 

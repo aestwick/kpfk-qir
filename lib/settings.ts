@@ -173,6 +173,14 @@ export async function isDiarizationEnabled(stationId: string): Promise<boolean> 
   return (await getSetting<boolean>('diarization_enabled', stationId)) ?? true
 }
 
+// Whisper vocabulary hint (lib/transcription/vocabulary.ts): send each talk
+// episode's show names to Groq as a spelling `prompt`. OFF by default — turned
+// on per station after the names benchmark (scripts/benchmark-names.ts) shows
+// it helps talk shows and leaves music untouched. Never applied to Music.
+export async function isVocabularyHintEnabled(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('vocabulary_hint_enabled', stationId)) ?? false
+}
+
 export async function getSummarizeBatchSize(stationId: string): Promise<number> {
   return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
 }

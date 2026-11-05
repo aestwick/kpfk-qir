@@ -12,7 +12,7 @@
 // episode_id, so no per-station fan-out is needed here.
 
 import { supabaseAdmin } from '../lib/supabase'
-import { parseVtt } from '../lib/vtt'
+import { replaceEpisodeCues } from '../lib/transcription/cues'
 
 const FORCE = process.argv.includes('--force')
 const PAGE = 200
@@ -25,23 +25,7 @@ async function hasCues(episodeId: number): Promise<boolean> {
   return (count ?? 0) > 0
 }
 
-async function writeCues(episodeId: number, vtt: string): Promise<number> {
-  const cues = parseVtt(vtt)
-  await supabaseAdmin.from('transcript_cues').delete().eq('episode_id', episodeId)
-  if (!cues.length) return 0
-  const rows = cues.map((c) => ({
-    episode_id: episodeId,
-    cue_idx: c.index,
-    start_ms: c.startMs,
-    end_ms: c.endMs,
-    text: c.text,
-  }))
-  for (let k = 0; k < rows.length; k += 500) {
-    const { error } = await supabaseAdmin.from('transcript_cues').insert(rows.slice(k, k + 500))
-    if (error) throw new Error(error.message)
-  }
-  return rows.length
-}
+const writeCues = (episodeId: number, vtt: string) => replaceEpisodeCues(supabaseAdmin, episodeId, vtt)
 
 async function main() {
   console.log(`[backfill-cues] starting${FORCE ? ' (--force: rebuilding all)' : ''}`)
