@@ -213,6 +213,16 @@ supabase/migrations/
   037_transcription_providers.sql — transcripts.provider/model; seeds
                                   transcription_providers (order+enable) +
                                   diarization_enabled defaults in qir_settings
+  ...
+  046_lockdown_public_exposure.sql — closes what the public anon key reached:
+                                  qir_settings/schema_migrations service-only,
+                                  drops episode_log "Public read access" (anon
+                                  keeps published-only, 6-column read for the
+                                  public site's episode player), legacy RPC,
+                                  shared-DB contacts/tags/show_page tables
+  047_role_aware_write_policies.sql — user_has_station_role(); *_write policies
+                                  need editor; station pause/spend keys super-
+                                  admin only; usage_log service-role only
 ```
 
 **Migrations are tracked** — QIR has its own tracker, **`public.schema_migrations`**
@@ -291,7 +301,7 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 The app is multi-tenant: **one codebase, one database, one deployment** serving multiple radio stations (KPFK + the other Pacifica stations). Isolation is **defense in depth** — Postgres RLS is the hard backstop, and app code *also* filters every query by `station_id`.
 
 - **Tenant tables** (migrations 012–015): `stations` (slug, name, timezone, `rss_base_url`, `mp3_filename_prefix`, `station_id_patterns`), `station_users` (user↔station with role viewer/editor/admin), `super_admins`, `station_settings` (per-station overrides). Every tenant-scoped table (`episode_log`, `show_keys`, `qir_drafts`, `transcript_corrections`, `compliance_wordlist`, `usage_log`) carries `station_id`; `transcripts`/`compliance_flags` inherit scope via their `episode_id` join. `qir_settings` stays **global** (the default layer under `station_settings`).
-- **RLS** (014): `user_station_ids()` returns the caller's stations (memberships, or all for super_admins); policies gate every tenant table by it. Finalized `qir_drafts` are additionally public-readable (`status='final'`).
+- **RLS** (014): `user_station_ids()` returns the caller's stations (memberships, or all for super_admins); policies gate every tenant table by it. Finalized `qir_drafts` are additionally public-readable (`status='final'`). Writes additionally need **editor** (`user_has_station_role(station_id, 'editor')`, migration 047), mirroring `lib/auth.ts#requireRole`. The public **anon** key can read only `episode_log`'s published rows and only `mp3_url, headline, host, guest, summary, transcript_url` (the public site's episode player), plus `tags`/`show_tags` (046). Everything else it can't touch: `qir_settings` and `schema_migrations` are service-role/postgres only. **When the public site needs another field, grant that column to anon explicitly; never add a `USING (true)` policy.**
 - **Request path**: `lib/auth.ts#getStationContext(request)` resolves the caller (Bearer token), their allowed stations, and the active station (from the `qir_station` cookie / `x-station-slug` header), returning a **request-scoped RLS client**. API routes use it + an explicit `.eq('station_id', …)`. Client pages call `lib/api-client.ts#authedFetch`. The active station is chosen client-side by the station switcher — the server never defaults one (a wrong default would leak cross-tenant).
 - **Workers** run with the service-role client (RLS bypassed), so their `station_id` filter is the *only* guard. Jobs carry `stationId`; the ingest/auto-retry cron acts as a per-station **dispatcher** (fans out one job per station); transcribe/summarize/compliance filter both the candidate-select and the atomic claim guard by `station_id`.
 - **Settings** resolve per station: `station_settings(station_id,key)` → global `qir_settings(key)` → hard-coded default (`lib/settings.ts`, 60s cache keyed by `(stationId,key)`). Prompts interpolate `{{STATION_NAME}}`.

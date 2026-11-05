@@ -130,8 +130,9 @@ export async function getStationContext(request: NextRequest): Promise<StationCo
 }
 
 // Role hierarchy for write-gating: viewer < editor < admin. Super admins outrank
-// all. Roles are enforced in the app layer (RLS stays membership-scoped as the
-// backstop), mirroring how workers rely on explicit app-layer guards.
+// all. Enforced here AND in RLS: the *_write policies require editor via
+// user_has_station_role() (migration 047), so a viewer's JWT can't write
+// directly through PostgREST either. Keep the two in step.
 const ROLE_RANK: Record<StationRole, number> = { viewer: 0, editor: 1, admin: 2 }
 
 /** True if the caller meets or exceeds `min` for the active station. */

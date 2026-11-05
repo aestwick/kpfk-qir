@@ -273,6 +273,17 @@ export async function isStationPaused(stationId: string): Promise<boolean> {
   return parseJsonValue(data?.value) === true
 }
 
+/**
+ * station_settings keys only a super-admin may write: the per-station pause
+ * flag and spend caps (budget controls set in Master Control). Mirrored in the
+ * station_settings_write RLS policy (migration 047).
+ */
+export const SUPER_ADMIN_STATION_KEYS: ReadonlySet<string> = new Set([
+  'pipeline_paused',
+  'spend_limit_monthly',
+  'spend_limit_quarterly',
+])
+
 // ─── Spend limits (super-admin-managed; auto-pause enforcement) ─────────────
 // Budgets live in the same key-value layers as everything else. Two independent
 // layers, both enforced (a station trips if EITHER is breached):

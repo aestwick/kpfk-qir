@@ -4,6 +4,7 @@ import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
+import { jobsForCaller } from '@/lib/job-scope'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,13 +12,20 @@ export async function POST(request: NextRequest) {
   try {
     const ctx = await getStationContext(request)
     if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
+    const { supabase, stationId, isSuperAdmin } = ctx.context
 
     const denied = requireRole(ctx.context, 'editor')
     if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
     const { action } = body
+
+    // The global pause and pipeline mode act on EVERY station (and BullMQ-pause
+    // the shared worker pool), so they're super-admin only. Station-level
+    // pause/resume lives in Master Control (api/admin/overview).
+    if ((action === 'pause_pipeline' || action === 'resume_pipeline' || action === 'set_pipeline_mode') && !isSuperAdmin) {
+      return stationErrorResponse({ status: 403, error: 'Pausing or changing the whole pipeline is limited to super-admins' })
+    }
 
     // Pipeline pause/resume (qir_settings is global config — left unscoped)
     if (action === 'pause_pipeline' || action === 'resume_pipeline') {
@@ -48,15 +56,30 @@ export async function POST(request: NextRequest) {
     if (action === 'clear_failed') {
       const queue = getQueue(body.queue)
       if (!queue) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
-      await queue.clean(0, 0, 'failed')
-      return NextResponse.json({ ok: true, message: `Cleared failed jobs from ${body.queue}` })
+      // The queues are shared by every station: a station user clears only
+      // their own station's failed jobs.
+      if (isSuperAdmin) {
+        await queue.clean(0, 0, 'failed')
+        return NextResponse.json({ ok: true, message: `Cleared failed jobs from ${body.queue}` })
+      }
+      const mine = jobsForCaller(await queue.getFailed(0, 1000), { stationId, isSuperAdmin })
+      let removed = 0
+      for (const job of mine) {
+        try {
+          await job.remove()
+          removed++
+        } catch {
+          // Job may have been retried or removed concurrently — skip
+        }
+      }
+      return NextResponse.json({ ok: true, message: `Cleared ${removed} failed jobs from ${body.queue}` })
     }
 
     // Retry all failed jobs in a queue
     if (action === 'retry_failed') {
       const queue = getQueue(body.queue)
       if (!queue) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
-      const failed = await queue.getFailed(0, 100)
+      const failed = jobsForCaller(await queue.getFailed(0, 100), { stationId, isSuperAdmin })
       let retried = 0
       for (const job of failed) {
         try {
@@ -168,7 +191,10 @@ export async function GET(request: NextRequest) {
   try {
     const ctx = await getStationContext(request)
     if (ctx.error) return stationErrorResponse(ctx.error)
-    const { supabase, stationId } = ctx.context
+    const { supabase, stationId, isSuperAdmin } = ctx.context
+    // Job payloads and error text are per station; the queues are shared. Counts
+    // stay global (numbers only), job details are limited to the caller's station.
+    const scope = { stationId, isSuperAdmin }
 
     const queues = { ingest: ingestQueue, transcribe: transcribeQueue, summarize: summarizeQueue, compliance: complianceQueue }
     const queueNames = Object.keys(queues) as (keyof typeof queues)[]
@@ -205,7 +231,7 @@ export async function GET(request: NextRequest) {
               completed: counts.completed ?? 0,
               failed: counts.failed ?? 0,
             },
-            failedJobs: failed.map((job: any) => ({
+            failedJobs: jobsForCaller(failed as any[], scope).map((job: any) => ({
               id: job.id,
               name: job.name,
               data: job.data,
@@ -214,9 +240,9 @@ export async function GET(request: NextRequest) {
               finishedOn: job.finishedOn,
             })),
             jobs: [
-              ...active.map((j: any) => mapJob(j, 'active')),
-              ...waiting.map((j: any) => mapJob(j, 'waiting')),
-              ...completed.map((j: any) => mapJob(j, 'completed')),
+              ...jobsForCaller(active as any[], scope).map((j: any) => mapJob(j, 'active')),
+              ...jobsForCaller(waiting as any[], scope).map((j: any) => mapJob(j, 'waiting')),
+              ...jobsForCaller(completed as any[], scope).map((j: any) => mapJob(j, 'completed')),
             ],
           }
         })

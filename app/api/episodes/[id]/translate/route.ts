@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { bumpCacheVersion } from '@/lib/api-cache'
 import { logTranslationUsage } from '@/lib/usage'
 
@@ -11,6 +11,9 @@ export async function POST(
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
+    // Writes the transcript and spends OpenAI money — editor, like other edits.
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
     const { supabase, stationId } = result.context
 
     const episodeId = parseInt(params.id)
