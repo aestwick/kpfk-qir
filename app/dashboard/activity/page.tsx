@@ -232,7 +232,7 @@ export default function ActivityPage() {
     <div className="space-y-6 max-w-4xl">
       {/* Header + Range */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold dark:text-warm-100">Activity Log</h2>
+        <h2 className="text-2xl font-bold dark:text-warm-100">Processing log</h2>
         <div className="flex gap-1">
           {RANGE_OPTIONS.map((opt) => (
             <button

@@ -44,6 +44,7 @@ import { supabaseAdmin } from '../lib/supabase'
 import { fetchConfessorEpisodes, normalizeConfessorMp3Url, projectPubfile } from '../lib/confessor'
 import { applyHuman, seedMissingFromFlat, type DualField, type FieldSources } from '../lib/field-sources'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { fetchAllRows } from '../lib/fetch-all'
 import type { ConfessorPubfile } from '../lib/types'
 
 interface Args {
@@ -160,6 +161,9 @@ async function writeEpisode(
       guest: flat.guest,
       issue_category: flat.issue_category,
       summary: flat.summary,
+      // Bump it: nothing in the DB does, and the public feed's
+      // ?updated_since= delta (and CLAUDE.md) rely on it moving on every edit.
+      updated_at: new Date().toISOString(),
     })
     .eq('id', episode.id)
     .eq('updated_at', f.updated_at) // optimistic: bail if the row moved
@@ -198,16 +202,18 @@ async function main() {
   // rows (a Confessor row can match one by mp3_url, which is how an RSS episode
   // picks up human metadata it never had).
   const since = new Date(Date.now() - args.days * 86400_000).toISOString().slice(0, 10)
-  let epQuery = supabaseAdmin
-    .from('episode_log')
-    .select('id, public_id, show_key, air_date, status, host, guest, issue_category, summary, human_summary, field_sources, mp3_url')
-    .eq('station_id', station.id)
-    .neq('status', 'archived')
-    .gte('air_date', since)
-  if (args.show) epQuery = epQuery.eq('show_key', args.show)
-
-  const { data: episodes, error: epErr } = await epQuery
-  if (epErr) throw new Error(`episode load failed: ${epErr.message}`)
+  // Paged: 60 days of KPFK is ~1,400 episodes and PostgREST caps a response
+  // at 1000, so an unpaged load silently re-synced an arbitrary subset.
+  const episodes = await fetchAllRows('episodes', (from, to) => {
+    let epQuery = supabaseAdmin
+      .from('episode_log')
+      .select('id, public_id, show_key, air_date, status, host, guest, issue_category, summary, human_summary, field_sources, mp3_url')
+      .eq('station_id', station.id)
+      .neq('status', 'archived')
+      .gte('air_date', since)
+    if (args.show) epQuery = epQuery.eq('show_key', args.show)
+    return epQuery.order('id').range(from, to)
+  })
 
   const byUrl = new Map<string, EpisodeRow>()
   for (const e of episodes ?? []) byUrl.set((e as unknown as { mp3_url: string }).mp3_url, e as unknown as EpisodeRow)

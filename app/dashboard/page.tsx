@@ -2,13 +2,16 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import { useNavAccess } from '@/app/components/nav-access'
+import { publicQirPath } from '@/lib/download'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
-import { episodeHref } from '@/lib/nav'
+import { episodeHref, roleAllows } from '@/lib/nav'
+import { describePause } from '@/lib/job-actions'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
-interface DailyPoint { date: string; groq: number; openai: number; total: number }
+interface DailyPoint { date: string; transcription: number; openai: number; total: number }
 interface CategoryItem { name: string; count: number }
 interface ShowItem { name: string; total: number; summarized: number }
 interface RecentEp { id: number; show_name: string | null; headline: string | null; status: string; updated_at: string; air_date: string | null; issue_category: string | null }
@@ -21,9 +24,9 @@ interface DashData {
   queues: { ingest: JobCounts; transcribe: JobCounts; summarize: JobCounts; compliance: JobCounts }
   // Cost/spend is super-admin-only; the API omits this block for everyone else.
   cost?: {
-    quarter: { groq: number; openai: number; total: number; episodeCount: number; apiCalls: number }
+    quarter: { transcription: number; openai: number; total: number; episodeCount: number; apiCalls: number }
     daily: DailyPoint[]
-    month: { groq: number; openai: number; total: number }
+    month: { transcription: number; openai: number; total: number }
   }
   categories: CategoryItem[]
   shows: ShowItem[]
@@ -42,10 +45,15 @@ interface DashData {
   }
   coverageGaps: string[]
   complianceSummary: Record<string, { count: number; critical: number }>
+  /** This quarter: episodes compliance blocking holds out of the report. */
+  complianceBlocking?: { enabled: boolean; heldOut: number; blockingFlags: number; unreviewed: number }
   qirStatus: { status: string; version: number; entryCount: number } | null
   qualityFlags: QualityFlag[]
   lastFiledQir: { id: number; year: number; quarter: number; version: number; updated_at: string } | null
+  /** Effective: the all-stations switch OR this station's own flag. */
   pipelinePaused: boolean
+  pipelinePausedGlobal?: boolean
+  pipelinePausedStation?: boolean
 }
 
 const BADGE_COLORS: Record<string, string> = {
@@ -155,6 +163,8 @@ export default function DashboardOverview() {
   const [gapsCollapsed, setGapsCollapsed] = useState(false)
   const [nextIngest, setNextIngest] = useState(getNextIngestMinutes())
   const { toast } = useToast()
+  const { role, isSuperAdmin } = useNavAccess()
+  const canEdit = roleAllows(role, 'editor')
 
   const fetchData = useCallback(async () => {
     try {
@@ -185,20 +195,27 @@ export default function DashboardOverview() {
     return () => clearInterval(timer)
   }, [])
 
-  async function togglePause() {
-    const action = data?.pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
-    setActionLoading('pause')
+  // scope 'station' → this station's own flag (any editor);
+  // scope 'all' → the all-stations kill switch (super-admin only).
+  async function togglePause(scope: 'station' | 'all') {
+    const currentlyPaused = scope === 'all' ? !!data?.pipelinePausedGlobal : !!data?.pipelinePausedStation
+    if (scope === 'all' && !currentlyPaused && !confirm('Pause processing for EVERY station?')) return
+    const action = scope === 'all'
+      ? (currentlyPaused ? 'resume_all' : 'pause_all')
+      : (currentlyPaused ? 'resume_pipeline' : 'pause_pipeline')
+    setActionLoading(scope === 'all' ? 'pause-all' : 'pause')
     try {
       const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
+      const body = await res.json().catch(() => ({} as { error?: string; message?: string }))
       if (!res.ok) {
-        toast('error', 'Failed to toggle pipeline')
+        toast('error', body.error ?? 'Failed to change pause state')
         return
       }
-      toast('success', action === 'pause_pipeline' ? 'Pipeline paused' : 'Pipeline resumed')
+      toast('success', body.message ?? 'Updated')
       setTimeout(fetchData, 1000)
     } catch {
       toast('error', 'Network error')
@@ -295,6 +312,10 @@ export default function DashboardOverview() {
   )
 
   const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
+  const pausedGlobal = !!data.pipelinePausedGlobal
+  // Older API responses only carried the effective flag; treat that as station.
+  const pausedStation = data.pipelinePausedStation ?? (pipelinePaused && !pausedGlobal)
+  const pause = describePause({ global: pausedGlobal, station: pausedStation })
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -353,8 +374,8 @@ export default function DashboardOverview() {
           {pipelinePaused ? (
             <div className="flex items-center gap-2.5">
               <span className="inline-flex rounded-full h-3 w-3 bg-red-500" />
-              <span className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase tracking-wider">Paused</span>
-              <span className="text-sm text-red-500 dark:text-red-400">Pipeline is stopped — no jobs will run</span>
+              <span className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase tracking-wider">{pause.headline}</span>
+              <span className="text-sm text-red-500 dark:text-red-400">{pause.detail}</span>
             </div>
           ) : anyProcessing ? (
             <>
@@ -387,20 +408,37 @@ export default function DashboardOverview() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={togglePause}
-            disabled={actionLoading !== null}
-            className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
-              pipelinePaused
-                ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
-                : 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300'
-            }`}
-          >
-            {actionLoading === 'pause' ? (
-              <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
-            ) : pipelinePaused ? 'Resume Pipeline' : 'Pause Pipeline'}
-          </button>
-          {!pipelinePaused && (['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
+          {canEdit && (
+            <button
+              onClick={() => togglePause('station')}
+              disabled={actionLoading !== null}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                pausedStation
+                  ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300'
+              }`}
+            >
+              {actionLoading === 'pause' ? (
+                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+              ) : pausedStation ? 'Resume this station' : 'Pause this station'}
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              onClick={() => togglePause('all')}
+              disabled={actionLoading !== null}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                pausedGlobal
+                  ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
+                  : 'bg-white border-red-300 text-red-700 hover:bg-red-50 dark:bg-transparent dark:border-red-700 dark:text-red-300'
+              }`}
+            >
+              {actionLoading === 'pause-all' ? (
+                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+              ) : pausedGlobal ? 'Resume all stations' : 'Pause all stations'}
+            </button>
+          )}
+          {!pipelinePaused && canEdit && (['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
             <button
               key={action}
               onClick={() => triggerAction(action)}
@@ -638,7 +676,7 @@ export default function DashboardOverview() {
             </div>
           )}
 
-          {totalFlags > 0 && (
+          {(totalFlags > 0 || (data.complianceBlocking?.heldOut ?? 0) > 0) && (
             <div className="card overflow-hidden">
               <div className="px-5 py-3.5 border-b border-warm-100 dark:border-warm-700 flex items-center justify-between">
                 <h3 className="section-header">Compliance</h3>
@@ -646,7 +684,24 @@ export default function DashboardOverview() {
                   {totalFlags} active
                 </span>
               </div>
-              <div className="px-5 py-4">
+              <div className="px-5 py-4 space-y-3">
+                {data.complianceBlocking && data.complianceBlocking.heldOut > 0 && (
+                  <a
+                    href="/dashboard/compliance?severity=critical&status=suggested"
+                    className="block text-sm rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-800 hover:bg-red-100 dark:bg-red-900/20 dark:border-red-800/40 dark:text-red-300 dark:hover:bg-red-900/30"
+                  >
+                    <span className="font-semibold tabular-nums">
+                      {data.complianceBlocking.heldOut} episode{data.complianceBlocking.heldOut === 1 ? '' : 's'}
+                    </span>{' '}
+                    {data.complianceBlocking.enabled
+                      ? 'held out of this quarter\u2019s report by compliance blocking'
+                      : 'this quarter have critical flags not yet dismissed (blocking is off, so they stay in the report)'}
+                    {data.complianceBlocking.unreviewed > 0 && (
+                      <> — {data.complianceBlocking.unreviewed} critical flag{data.complianceBlocking.unreviewed === 1 ? '' : 's'} never reviewed</>
+                    )}
+                    . Review →
+                  </a>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(complianceSummary).map(([type, { count, critical }]) => (
                     <a
@@ -706,7 +761,7 @@ export default function DashboardOverview() {
               {new Date().toLocaleString('en-US', { month: 'long' })} spend: {fmtCost(cost.month.total)}
             </span>
             <span className="text-xs text-warm-400 tabular-nums">
-              Groq {fmtCost(cost.month.groq)} / OpenAI {fmtCost(cost.month.openai)}
+              Transcription {fmtCost(cost.month.transcription)} / OpenAI {fmtCost(cost.month.openai)}
             </span>
             {cost.quarter.episodeCount > 0 && (
               <span className="text-xs text-warm-400 tabular-nums">
@@ -791,6 +846,8 @@ export default function DashboardOverview() {
 
 /* ─── System Health Footer ─── */
 function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: DashData['queues']; activity: ActivityItem[]; lastFiled: DashData['lastFiledQir']; paused: boolean }) {
+  // Station-qualified public link; the legacy /{year}/q{n} path redirects to KPFK.
+  const stationSlug = useNavAccess().active?.slug ?? null
   const lastIngest = activity.find((a) => a.status === 'pending')?.time
   const lastTranscribe = activity.find((a) => a.status === 'transcribed')?.time
   const lastSummarize = activity.find((a) => a.status === 'summarized' || a.status === 'compliance_checked')?.time
@@ -817,8 +874,8 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
       <span>Last ingest: <span className={`font-medium ${ingestInfo.color}`}>{ingestInfo.label}</span></span>
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>
       <span>Last summarization: <span className={`font-medium ${summarizeInfo.color}`}>{summarizeInfo.label}</span></span>
-      {lastFiled && (
-        <span>Last QIR filed: <a href={`/${lastFiled.year}/q${lastFiled.quarter}`} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
+      {lastFiled && stationSlug && (
+        <span>Last QIR filed: <a href={publicQirPath(stationSlug, lastFiled.year, lastFiled.quarter)} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
       )}
     </div>
   )

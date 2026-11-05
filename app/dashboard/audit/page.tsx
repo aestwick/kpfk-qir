@@ -203,7 +203,7 @@ export default function AuditLogPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-2xl font-bold">Audit Log</h2>
+        <h2 className="text-2xl font-bold">Change history</h2>
         <p className="text-sm text-warm-500 dark:text-warm-400 mt-1">
           Every user and system action across all stations. Read coverage is selective
           (episode &amp; transcript views, member list, public report views) — a missing

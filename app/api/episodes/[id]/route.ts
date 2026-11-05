@@ -199,7 +199,7 @@ export async function PATCH(
       const fields = dateFieldsFromUrl(parsed, ep.duration)
       await supabase
         .from('episode_log')
-        .update(fields)
+        .update({ ...fields, updated_at: new Date().toISOString() })
         .eq('id', episodeId)
         .eq('station_id', stationId)
       await invalidatePublicApiCache(stationId)
@@ -279,9 +279,11 @@ export async function PATCH(
       safeUpdates.field_sources = fieldSources
     }
 
+    // Bump updated_at (no DB trigger does) so ?updated_since= consumers of the
+    // public feed see curator edits.
     const { error } = await supabase
       .from('episode_log')
-      .update(safeUpdates)
+      .update({ ...safeUpdates, updated_at: new Date().toISOString() })
       .eq('id', episodeId)
       .eq('station_id', stationId)
 

@@ -21,6 +21,7 @@ export default function LoginPage() {
       // Record the failed attempt. No session exists, so post unauthenticated;
       // the audit route allows login_failed anonymously. Fire-and-forget.
       void fetch('/api/audit/event', {
+        keepalive: true,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'auth.login_failed', metadata: { email } }),
@@ -33,7 +34,10 @@ export default function LoginPage() {
     // Record the successful login with the fresh session token.
     const token = data.session?.access_token
     if (token) {
+      // keepalive: a navigation right after would otherwise cancel this request
+      // (why almost no auth.login rows were ever recorded).
       void fetch('/api/audit/event', {
+        keepalive: true,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action: 'auth.login', metadata: { email } }),

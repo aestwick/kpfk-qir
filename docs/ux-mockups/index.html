@@ -1,0 +1,566 @@
+<title>QIR Mockups, Nov 2026</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a mock of the QIR dashboard's content area (no sidebar; nav is another session's lane),
+   with a view switcher across the top and a phone-frame toggle. Tokens follow tailwind.config.ts. */
+:root{
+  --bg:#FAF9F7; --panel:#FFFFFF; --sunk:#F5F3F0; --line:#E8E5E0; --line-2:#D4D0C9;
+  --fg:#1C1A17; --fg-2:#5C574F; --fg-3:#7D7870;
+  --red:#C41E3A; --red-soft:#FBE9EC; --gold:#B08A2E; --gold-soft:#FBF3DF;
+  --ok:#2F7D4F; --ok-soft:#E5F3EA; --warn:#A25B00; --warn-soft:#FDF0DC; --crit:#B3261E; --crit-soft:#FBE7E5;
+  --info:#2D5F9A; --info-soft:#E6EEF8; --mute-soft:#EFEDE9;
+  --chrome:#191817; --chrome-fg:#F5F3F0;
+  --sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono","SF Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1C1A17; --panel:#2A2722; --sunk:#232019; --line:#3F3B35; --line-2:#5C574F;
+  --fg:#F5F3F0; --fg-2:#D4D0C9; --fg-3:#A8A39B;
+  --red:#E0566B; --red-soft:#3A2024; --gold:#E8C97A; --gold-soft:#3A3220;
+  --ok:#6CC08E; --ok-soft:#1F3328; --warn:#F0A64A; --warn-soft:#3A2C18; --crit:#F08078; --crit-soft:#3E2220;
+  --info:#8AB4E8; --info-soft:#1E2A3A; --mute-soft:#33302A; --chrome:#0F0E0C; --chrome-fg:#F5F3F0; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1C1A17; --panel:#2A2722; --sunk:#232019; --line:#3F3B35; --line-2:#5C574F;
+  --fg:#F5F3F0; --fg-2:#D4D0C9; --fg-3:#A8A39B;
+  --red:#E0566B; --red-soft:#3A2024; --gold:#E8C97A; --gold-soft:#3A3220;
+  --ok:#6CC08E; --ok-soft:#1F3328; --warn:#F0A64A; --warn-soft:#3A2C18; --crit:#F08078; --crit-soft:#3E2220;
+  --info:#8AB4E8; --info-soft:#1E2A3A; --mute-soft:#33302A; --chrome:#0F0E0C; --chrome-fg:#F5F3F0; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+a.btn{text-decoration:none;color:inherit;display:inline-block}
+a.btn.primary{color:#fff}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.5;margin:0}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--red);outline-offset:2px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.num{font-variant-numeric:tabular-nums}
+h1,h2,h3{text-wrap:balance;margin:0}
+h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:16px;font-weight:650}
+h3{font-size:14px;font-weight:600}
+p{margin:0}
+.eyebrow{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3)}
+
+/* chrome */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--chrome);color:var(--chrome-fg);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:10px;
+  display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:21;background:var(--chrome)}
+.brand{display:flex;gap:8px;align-items:center;font-weight:600}
+.brand i{display:grid;place-items:center;width:26px;height:26px;border-radius:7px;background:#C41E3A;color:#fff;font-style:normal;font-size:12px;font-weight:700}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;flex:1;min-width:0}
+.tabs a{color:#D4D0C9;text-decoration:none;padding:6px 10px;border-radius:7px;font-size:13px;white-space:nowrap}
+.tabs a[aria-current="page"]{background:#352F28;color:#fff}
+.tabs a:hover{background:#2A2722}
+.toggle{display:flex;gap:6px;align-items:center;font-size:12px;color:#A8A39B}
+.toggle button{background:#2A2722;border:1px solid #3F3B35;border-radius:7px;padding:5px 9px;color:#F5F3F0}
+.toggle button[aria-pressed="true"]{background:#C41E3A;border-color:#C41E3A}
+.note{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:8px;
+  background:var(--gold-soft);color:var(--fg-2);font-size:12.5px;border-bottom:1px solid var(--line)}
+.stage{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 64px}
+.frame{container-type:inline-size;max-width:1240px;margin:0 auto}
+body.phone .frame{max-width:390px;border:10px solid var(--chrome);border-radius:34px;padding:16px 12px 28px;background:var(--bg);min-height:760px}
+.view{display:grid;gap:20px}
+.view[hidden]{display:none!important}
+
+/* primitives */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.pad{padding:16px 18px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spread{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.muted{color:var(--fg-3)} .soft{color:var(--fg-2)}
+.small{font-size:12.5px}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--mute-soft);color:var(--fg-2)}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.crit{background:var(--crit-soft);color:var(--crit)} .pill.info{background:var(--info-soft);color:var(--info)}
+.pill.gold{background:var(--gold-soft);color:var(--gold)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block}
+.btn{border:1px solid var(--line-2);background:var(--panel);border-radius:8px;padding:7px 12px;font-size:13px;font-weight:550;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.primary{background:var(--red);border-color:var(--red);color:#fff}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--fg-2)}
+.btn.sm{padding:4px 9px;font-size:12px}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--sunk);color:var(--fg-2)}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))} .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+@container (max-width:760px){.g2,.g3{grid-template-columns:minmax(0,1fr)}}
+.scroll-x{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-3);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--line)}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--chrome);color:#fff;padding:10px 14px;border-radius:10px;font-size:13px;display:flex;gap:12px;align-items:center;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+.toast button{background:none;border:0;color:#E8C97A;font-weight:600}
+.callout{border-left:3px solid var(--gold);padding:8px 12px;background:var(--gold-soft);border-radius:0 8px 8px 0;font-size:12.5px;color:var(--fg-2)}
+
+/* ---------- DESK ---------- */
+.needs{display:grid;gap:10px}
+.need{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:12px;align-items:start;padding:14px 16px;border-bottom:1px solid var(--line)}
+.need:last-child{border-bottom:0}
+.need .ico{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-weight:700;font-size:13px}
+.need.crit .ico{background:var(--crit-soft);color:var(--crit)} .need.warn .ico{background:var(--warn-soft);color:var(--warn)} .need.info .ico{background:var(--info-soft);color:var(--info)}
+@container (max-width:560px){.need{grid-template-columns:28px minmax(0,1fr)}.need .btn{grid-column:2;justify-self:start}}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@container (max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{padding:14px 16px}
+.kpi b{display:block;font-size:24px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+.bar{height:6px;border-radius:3px;background:var(--sunk);overflow:hidden}
+.bar>span{display:block;height:100%;background:var(--ok)}
+.st-cards{display:none}
+@container (max-width:640px){.st-table{display:none}.st-cards{display:grid;gap:10px}}
+.spark{display:block;width:100%;height:44px}
+
+/* ---------- TRIAGE ---------- */
+.tiers{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@container (max-width:760px){.tiers{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tier{text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:12px 14px;display:grid;gap:2px}
+.tier[aria-pressed="true"]{border-color:var(--red);box-shadow:0 0 0 3px var(--red-soft)}
+.tier b{font-size:22px;font-variant-numeric:tabular-nums}
+.tier small{color:var(--fg-3);font-size:12px}
+.tri{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;align-items:start}
+@container (max-width:860px){.tri{grid-template-columns:minmax(0,1fr)}}
+.flist{max-height:620px;overflow:auto}
+.frow{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);text-align:left;width:100%;background:none;border-left:3px solid transparent;border-top:0;border-right:0}
+.frow[aria-selected="true"]{background:var(--sunk);border-left-color:var(--red)}
+.frow.done{opacity:.45}
+.term{align-self:start;font-family:var(--mono);font-size:12px;font-weight:500;padding:1px 6px;border-radius:5px;background:var(--crit-soft);color:var(--crit)}
+.term.w{background:var(--warn-soft);color:var(--warn)} .term.ai{background:var(--info-soft);color:var(--info)}
+.ctx{font-size:13px;color:var(--fg-2)}
+.ctx mark{background:var(--gold-soft);color:var(--fg);font-weight:600;padding:0 2px;border-radius:3px}
+.detail{position:sticky;top:70px}
+.player{background:var(--sunk);border-radius:10px;padding:12px;display:grid;gap:8px}
+.wave{display:flex;align-items:center;gap:2px;height:38px}
+.wave i{flex:1;background:var(--line-2);border-radius:1px}
+.wave i.hit{background:var(--red)}
+.wave i.played{background:var(--fg-3)}
+.decide{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.decide button{text-align:left;border:1px solid var(--line-2);border-radius:9px;background:var(--panel);padding:9px 11px;display:grid;gap:1px}
+.decide button:hover{background:var(--sunk)}
+.decide button.v{border-color:var(--crit);color:var(--crit)}
+.decide small{color:var(--fg-3);font-size:11.5px}
+.scope{display:grid;gap:6px}
+.scope label{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.progress{display:flex;gap:10px;align-items:center}
+.progress .bar{flex:1}
+
+/* ---------- FILING ---------- */
+.qtabs{display:flex;gap:8px;flex-wrap:wrap}
+.qtab{border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:8px 12px;text-align:left;display:grid;gap:2px;min-width:150px}
+.qtab[aria-pressed="true"]{border-color:var(--red);box-shadow:0 0 0 3px var(--red-soft)}
+.timeline{display:grid;gap:0}
+.ver{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:12px;padding:12px 0;border-bottom:1px dashed var(--line)}
+.ver:last-child{border-bottom:0}
+.ver .node{width:14px;height:14px;border-radius:50%;border:2px solid var(--line-2);margin-top:3px;background:var(--panel)}
+.ver.filed .node{background:var(--ok);border-color:var(--ok)}
+.ver.cand .node{border-color:var(--red)}
+@container (max-width:560px){.ver{grid-template-columns:22px minmax(0,1fr)}.ver>.row:last-child{grid-column:2}}
+.check{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);align-items:start}
+.check:last-child{border-bottom:0}
+.check .m{font-weight:700;font-size:13px;line-height:20px}
+.check.ok .m{color:var(--ok)} .check.warn .m{color:var(--warn)} .check.crit .m{color:var(--crit)}
+.receipt{border:1px solid var(--ok);background:var(--ok-soft);border-radius:12px;padding:16px 18px;display:grid;gap:8px}
+.receipt dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;margin:0;font-size:13px}
+.receipt dt{color:var(--fg-3)} .receipt dd{margin:0}
+.modal-bg{position:fixed;inset:0;background:rgba(15,14,12,.5);display:grid;place-items:center;z-index:40;padding:16px}
+.modal{background:var(--panel);border-radius:14px;max-width:480px;width:100%;padding:20px;display:grid;gap:14px;border:1px solid var(--line)}
+.field{display:grid;gap:4px;font-size:13px}
+.field input,.field select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line-2);border-radius:8px;padding:8px 10px;width:100%}
+
+/* ---------- EPISODE ---------- */
+.ep-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px}
+@container (max-width:640px){.ep-head{grid-template-columns:minmax(0,1fr)}}
+.cmp{display:grid;grid-template-columns:120px minmax(0,1fr) minmax(0,1fr);border-top:1px solid var(--line)}
+.cmp>div{padding:12px 14px;border-bottom:1px solid var(--line);min-width:0}
+.cmp .lab{font-weight:600;font-size:13px}
+.cmp .opt{display:grid;gap:6px;align-content:start;border-left:1px solid var(--line)}
+.cmp .opt.on{background:var(--ok-soft)}
+.cmp .hd{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-3);background:var(--sunk)}
+.cmp .opt button{justify-self:start}
+@container (max-width:640px){.cmp{grid-template-columns:minmax(0,1fr)}.cmp .opt{border-left:0}.cmp .hd{display:none}.cmp .opt::before{content:attr(data-src);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--fg-3)}}
+.lint{display:inline;background:var(--warn-soft);color:var(--warn);border-radius:3px;padding:0 3px}
+.inqir{display:grid;gap:6px;padding:14px 16px}
+.savebar{position:sticky;bottom:calc(12px + env(safe-area-inset-bottom,0px));display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 14px;border-radius:12px;background:var(--chrome);color:#fff}
+.tx{display:grid;gap:2px;font-size:13.5px}
+.cue{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;padding:4px 6px;border-radius:6px}
+.cue:hover{background:var(--sunk)}
+.cue .t{font-family:var(--mono);font-size:12px;color:var(--info);padding-top:1px}
+.cue .spk{font-weight:600;color:var(--fg-2);margin-right:4px}
+
+/* ---------- COVERAGE ---------- */
+.hbars{display:grid;gap:9px}
+.hb{display:grid;grid-template-columns:200px minmax(0,1fr) 64px;gap:12px;align-items:center;font-size:13px}
+@container (max-width:560px){.hb{grid-template-columns:minmax(0,1fr) 56px}.hb .track{grid-column:1 / -1;grid-row:2}}
+.track{height:14px;border-radius:4px;background:var(--sunk);overflow:hidden}
+.track span{display:block;height:100%;background:var(--red);border-radius:4px}
+.track span.thin{background:var(--gold)}
+.quote{border-left:3px solid var(--red);padding:2px 0 2px 12px;display:grid;gap:3px}
+.copybox{background:var(--sunk);border-radius:10px;padding:14px;font-size:13.5px;line-height:1.6}
+</style>
+
+<header class="top">
+  <div class="brand"><i>Q</i> QIR mockups</div>
+  <nav class="tabs" aria-label="Mockup views">
+    <a href="#desk">1 · Station desk</a>
+    <a href="#triage">2 · Flag triage</a>
+    <a href="#filing">3 · Filing record</a>
+    <a href="#episode">4 · Episode fix-up</a>
+    <a href="#coverage">5 · Coverage story</a>
+  </nav>
+  <div class="toggle"><span>View as</span>
+    <button id="btn-desktop" aria-pressed="true">Desktop</button>
+    <button id="btn-phone" aria-pressed="false">Phone</button>
+  </div>
+</header>
+<div class="note">Clickable mockup, not the live app. Numbers come from read-only queries of the live QIR database on Nov 4, 2026. Buttons change only this page. See <span class="mono">docs/ux-ideas-2026-11.md</span> for the reasoning.</div>
+
+<main class="stage"><div class="frame">
+
+<!-- ================= 1. DESK ================= -->
+<section class="view" id="v-desk" data-view="desk">
+  <div class="spread">
+    <div><p class="eyebrow">Wednesday, Nov 4 · all stations</p><h1>Station desk</h1></div>
+    <div class="row"><span class="pill gold">Q4 2026 filing due Jan 10 · 67 days</span></div>
+  </div>
+
+  <div class="card">
+    <div class="pad spread" style="border-bottom:1px solid var(--line)"><h2>Needs you</h2><span class="muted small">5 items · sorted by deadline and risk</span></div>
+    <div class="needs">
+      <div class="need crit"><div class="ico">!</div><div><h3>KPFK Q3 2026: no filing on record</h3><p class="soft small">It was due Oct 10. Version 3 was exported twice on Oct 5 but never marked final, so the app can't show what's in the public file.</p></div><a class="btn primary" href="#filing">Record what we filed</a></div>
+      <div class="need crit"><div class="ico">43</div><div><h3>43 daytime profanity flags this quarter, none reviewed</h3><p class="soft small">These aired 6am–10pm with a high-risk word. About 45 minutes of listening. The other 506 Q4 flags can be closed by rule.</p></div><a class="btn" href="#triage">Start review</a></div>
+      <div class="need warn"><div class="ico">⏸</div><div><h3>3 stations paused since Jun 10, backlog still growing</h3><p class="soft small">WPFW, KPFT and KPFA keep ingesting while paused: 1,493 episodes are waiting. WBAI isn't set up.</p></div><a class="btn" href="#stations">See stations</a></div>
+      <div class="need warn"><div class="ico">◔</div><div><h3>Q1 and Q2 are only partly processed</h3><p class="soft small">1,302 KPFK episodes that aired before July are stuck. Q1 is 36% processed and Q2 is 69%. Q2 was finalized anyway.</p></div><button class="btn" data-toast="Would start a windowed backfill for Q1–Q2 (est. $160 in transcription)">Catch up Q1–Q2</button></div>
+      <div class="need info"><div class="ico">$</div><div><h3>Transcription has been paying full price</h3><p class="soft small">The cheaper Whisper model has been the saved setting since March, but the workers ignored it until today's code change. October's ~865 audio hours cost ~$96; at the cheaper rate, ~$35. Check that next week's transcripts use it.</p></div><a class="btn" href="#money">Check spend</a></div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="card kpi"><span class="eyebrow">Q4 processed</span><b>783 / 783</b><div class="bar"><span style="width:100%"></span></div><span class="small muted">every KPFK episode since Oct 1</span></div>
+    <div class="card kpi"><span class="eyebrow">Q4 flags to hear</span><b>43</b><span class="small muted">of 549 total · 0 reviewed</span></div>
+    <div class="card kpi"><span class="eyebrow">October spend</span><b>$97.81</b><span class="small muted">Sep $112.89 · Aug $95.93</span></div>
+    <div class="card kpi"><span class="eyebrow">Last filing on record</span><b>Q2 2026</b><span class="small muted">v2, finalized Jul 4</span></div>
+  </div>
+
+  <div class="card" id="stations">
+    <div class="pad spread" style="border-bottom:1px solid var(--line)"><div><h2>Stations</h2><p class="small muted">One row per Pacifica station. A paused station shows how long it's been paused and what has piled up.</p></div></div>
+    <div class="st-table scroll-x"><table>
+      <thead><tr><th>Station</th><th>Pipeline</th><th>Waiting</th><th>This quarter</th><th>Last filing</th><th>Flags to hear</th><th>Spend (Oct)</th></tr></thead>
+      <tbody>
+        <tr><td><b>KPFK</b> <span class="muted">Los Angeles</span></td><td><span class="pill ok"><span class="dot"></span>Running</span></td><td class="num">1,302 <span class="muted small">all aired before Jul 1</span></td><td class="num">783 of 783</td><td>Q2 2026 <span class="pill crit">Q3 not recorded</span></td><td class="num">43</td><td class="num">$97.81</td></tr>
+        <tr><td><b>WPFW</b> <span class="muted">Washington</span></td><td><span class="pill warn"><span class="dot"></span>Paused 147 days</span></td><td class="num">794 <span class="muted small">+784 since pause</span></td><td class="muted">not processing</td><td class="muted">never</td><td class="muted">—</td><td class="num">$0 <span class="muted small">cap $2</span></td></tr>
+        <tr><td><b>KPFT</b> <span class="muted">Houston</span></td><td><span class="pill warn"><span class="dot"></span>Paused 147 days</span></td><td class="num">438 <span class="muted small">+437 since pause</span></td><td class="muted">not processing</td><td class="muted">never</td><td class="muted">—</td><td class="num">$0 <span class="muted small">cap $2</span></td></tr>
+        <tr><td><b>KPFA</b> <span class="muted">Berkeley</span></td><td><span class="pill warn"><span class="dot"></span>Paused 147 days</span></td><td class="num">307 <span class="muted small">+272 since pause</span></td><td class="muted">not processing</td><td class="muted">never</td><td class="muted">—</td><td class="num">$0</td></tr>
+        <tr><td><b>WBAI</b> <span class="muted">New York</span></td><td><span class="pill">Not set up</span></td><td class="muted">—</td><td class="muted">archive URL unknown</td><td class="muted">never</td><td class="muted">—</td><td class="muted">—</td></tr>
+      </tbody></table></div>
+    <div class="st-cards pad">
+      <div class="card pad"><div class="spread"><b>KPFK</b><span class="pill ok">Running</span></div><p class="small soft">783 of 783 this quarter · 43 flags to hear · Q3 filing not recorded</p></div>
+      <div class="card pad"><div class="spread"><b>WPFW</b><span class="pill warn">Paused 147 days</span></div><p class="small soft">794 waiting (+784 since pause) · never filed</p></div>
+      <div class="card pad"><div class="spread"><b>KPFT</b><span class="pill warn">Paused 147 days</span></div><p class="small soft">438 waiting (+437 since pause) · never filed</p></div>
+      <div class="card pad"><div class="spread"><b>KPFA</b><span class="pill warn">Paused 147 days</span></div><p class="small soft">307 waiting (+272 since pause) · never filed</p></div>
+      <div class="card pad"><div class="spread"><b>WBAI</b><span class="pill">Not set up</span></div></div>
+    </div>
+    <div class="pad small muted" style="border-top:1px solid var(--line)">Proposal: paused stations stop ingesting too (or show "ingest only"), so a pause doesn't quietly build a 784-episode bill.</div>
+  </div>
+
+  <div class="card pad" id="money">
+    <div class="spread"><div><h2>Spend by month</h2><p class="small muted">KPFK unless noted. Transcription is 97% of the total.</p></div><span class="pill info">≈ $0.13 per episode</span></div>
+    <svg class="spark" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Monthly spend, March to October 2026" style="height:120px;margin-top:10px">
+      <g stroke="var(--line)" stroke-width="1"><line x1="0" y1="20" x2="600" y2="20"/><line x1="0" y1="60" x2="600" y2="60"/><line x1="0" y1="100" x2="600" y2="100"/></g>
+      <polygon fill="var(--red-soft)" points="0,100 0,56 120,82 200,72 300,37 400,30 500,23 600,30 600,100"/>
+      <polyline fill="none" stroke="var(--red)" stroke-width="2.5" points="0,56 120,82 200,72 300,37 400,30 500,23 600,30"/>
+      <circle cx="600" cy="30" r="4" fill="var(--red)"/>
+    </svg>
+    <div class="row small muted" style="justify-content:space-between"><span>Mar $56</span><span>May $22</span><span>Jun $83*</span><span>Jul $81</span><span>Aug $96</span><span>Sep $113</span><span>Oct $98</span></div>
+    <p class="small muted" style="margin-top:8px">*June includes $55 of test runs at the other stations. No usage was logged in Jan, Feb or Apr. The chart's top line is $125.</p>
+  </div>
+</section>
+
+<!-- ================= 2. TRIAGE ================= -->
+<section class="view" id="v-triage" data-view="triage" hidden>
+  <div class="spread">
+    <div><p class="eyebrow">KPFK · Q4 2026 · Oct 1–Nov 4</p><h1>Flag triage</h1><p class="soft small" style="margin-top:4px">Start with what the FCC could fine. Everything else closes by rule.</p></div>
+    <div class="progress card pad" style="min-width:260px"><span class="small"><b id="done-n">0</b> of <b>43</b> fineable reviewed</span><div class="bar"><span id="done-bar" style="width:0%;background:var(--red)"></span></div></div>
+  </div>
+
+  <div class="tiers" role="group" aria-label="Triage tiers">
+    <button class="tier" data-tier="A" aria-pressed="true"><span class="eyebrow" style="color:var(--crit)">A · Listen now</span><b>43</b><small>6am–10pm, high-risk word</small></button>
+    <button class="tier" data-tier="B" aria-pressed="false"><span class="eyebrow" style="color:var(--warn)">B · Glance</span><b>43</b><small>6am–10pm, other listed words</small></button>
+    <button class="tier" data-tier="C" aria-pressed="false"><span class="eyebrow">C · Safe harbor</span><b>187</b><small>10pm–6am, acknowledge in bulk</small></button>
+    <button class="tier" data-tier="D" aria-pressed="false"><span class="eyebrow">D · Retire</span><b>276</b><small>checks now off, or already fixed</small></button>
+  </div>
+
+  <div class="callout" style="border-left-color:var(--crit);background:var(--crit-soft)"><b>Indecency: not checked.</b> The AI pass only looks for sponsor and payola problems, so 0 indecency flags means "never checked", not "clean". Safe harbor covers indecent and profane speech, not obscene speech.</div>
+  <div class="tri">
+    <div class="card">
+      <div class="pad spread" style="border-bottom:1px solid var(--line)">
+        <h2 id="list-title">A · Listen now</h2>
+        <span class="small muted"><kbd>J</kbd>/<kbd>K</kbd> move · <kbd>1</kbd>–<kbd>4</kbd> decide</span>
+      </div>
+      <div class="flist" id="flist" role="listbox" aria-label="Flags"></div>
+      <div class="pad small muted" style="border-top:1px solid var(--line)" id="list-foot"></div>
+    </div>
+
+    <div class="card pad detail" id="detail"></div>
+  </div>
+
+  <div class="card pad" id="signoff">
+    <div class="spread"><div><h2>Quarter sign-off</h2><p class="small soft">When tiers A and B are empty, the reviewer signs the quarter. The sign-off goes into the Q4 filing record and the audit log.</p></div>
+      <button class="btn" id="sign-btn" disabled style="opacity:.5">Sign Q4 review</button></div>
+  </div>
+</section>
+
+<!-- ================= 3. FILING ================= -->
+<section class="view" id="v-filing" data-view="filing" hidden>
+  <div class="spread">
+    <div><p class="eyebrow">KPFK · Quarterly Issues Reports</p><h1>Filing record</h1><p class="soft small" style="margin-top:4px">One place that says what went into the public file, when, and by whom.</p></div>
+  </div>
+  <div class="qtabs" role="group" aria-label="Quarter">
+    <button class="qtab" data-q="q4" aria-pressed="false"><b>Q4 2026</b><span class="pill info">In progress · due Jan 10</span></button>
+    <button class="qtab" data-q="q3" aria-pressed="true"><b>Q3 2026</b><span class="pill crit" id="q3-pill">Not recorded · was due Oct 10</span></button>
+    <button class="qtab" data-q="q2" aria-pressed="false"><b>Q2 2026</b><span class="pill ok">Final v2 · Jul 4</span></button>
+    <button class="qtab" data-q="q1" aria-pressed="false"><b>Q1 2026</b><span class="pill warn">5 drafts · none final</span></button>
+  </div>
+  <div id="qbody"></div>
+</section>
+
+<!-- ================= 4. EPISODE ================= -->
+<section class="view" id="v-episode" data-view="episode" hidden>
+  <div class="card pad ep-head">
+    <div><p class="eyebrow">BradCast w/ Brad Friedman · Fri Oct 30, 2026 · 3:00–3:58 pm</p>
+      <h1 id="ep-headline" contenteditable="true" spellcheck="true" style="outline:none;border-bottom:1px dashed var(--line-2)">Alex Burness on Virginia voting rights amendment</h1>
+      <p class="small muted" style="margin-top:6px">The headline can be edited here. Today it can't be edited anywhere.</p></div>
+    <div class="row" style="align-content:start"><span class="pill ok">Processed</span><span class="pill gold">Rerun of Oct 20</span></div>
+  </div>
+
+  <div class="card">
+    <div class="pad spread" style="border-bottom:1px solid var(--line)"><div><h2>What goes in the report</h2><p class="small soft">The producer's entry (from Confessor) and the AI's reading of the transcript, side by side. Pick one per field, or type your own.</p></div></div>
+    <div class="cmp" id="cmp"></div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card inqir"><h2>In the Q4 report?</h2>
+      <p class="soft small"><span class="pill info">Candidate</span> Not in a draft yet (Q4 has no draft). It qualifies as public affairs, with Civil Rights as its issue. Last quarter, 6 BradCast episodes made the report.</p>
+      <p class="small muted">If it's left out, this card will say why: duplicate airing, held by an unreviewed flag, or not chosen by curation.</p></div>
+    <div class="card inqir"><h2>Transcript</h2>
+      <div class="tx">
+        <div class="cue"><span class="t">04:12</span><span><span class="spk">Brad</span>Joining us now, Alex Burness of Bolts Mag. Alex, explain what's on Virginia's ballot.</span></div>
+        <div class="cue"><span class="t">04:21</span><span><span class="spk">Alex</span>Ballot question three would restore voting rights to people with felony convictions as soon as they leave prison…</span></div>
+      </div>
+      <div class="row small"><button class="btn sm" data-toast="Copied link: qir.kpfk.org/…/10390?seek=252">Copy link at 04:12</button><button class="btn sm" data-toast="Would open the spelling fix: “Burness” for every episode at KPFK">Fix a spelling</button></div>
+      <p class="small muted">Times come from the captions, so search results and links jump to the moment in the audio.</p>
+    </div>
+  </div>
+
+  <div class="savebar"><span class="small" id="save-msg">No unsaved changes</span><div class="row"><button class="btn sm" style="background:transparent;color:#fff;border-color:#5C574F" id="ep-reset">Undo</button><button class="btn primary sm" id="ep-save">Save episode</button></div></div>
+</section>
+
+<!-- ================= 5. COVERAGE ================= -->
+<section class="view" id="v-coverage" data-view="coverage" hidden>
+  <div class="spread">
+    <div><p class="eyebrow">KPFK · Q3 2026 · Jul 1–Sep 30</p><h1>What we covered</h1><p class="soft small" style="margin-top:4px">For board reports, grant applications and on-air pitches. Built from processed episodes, not the filed report.</p></div>
+    <div class="row"><button class="btn" data-toast="Would copy the paragraph and the table">Copy for a report</button></div>
+  </div>
+  <div class="grid g2">
+    <div class="card pad"><h2>Hours by issue</h2><p class="small muted" style="margin-bottom:12px">2,089 episodes aired · 2,026 processed. Music programs are mostly counted under Arts &amp; Culture.</p>
+      <div class="hbars" id="hbars"></div>
+      <div class="callout" style="margin-top:14px">Immigration got 49 hours in Los Angeles, about 2% of the quarter. Housing isn't one of the issue categories, so "did we cover housing?" can't be answered from these totals yet.</div>
+    </div>
+    <div class="card pad" style="display:grid;gap:14px;align-content:start"><h2>Ready-made paragraph</h2>
+      <div class="copybox">In the third quarter of 2026, KPFK 90.7 FM aired about <b>1,990 hours</b> of programming across <b>more than 200 shows</b>. That included <b>571 hours</b> on government and politics, <b>386 hours</b> on civil rights and social justice, and <b>230 hours</b> on international affairs. Guests included voting-rights journalists, labor economists, and Native Hawaiian land defenders.</div>
+      <h3>Example segments</h3>
+      <div class="quote"><b>Temporary Protected Status for Haitians</b><span class="small muted">Law and Disorder · Jul 8 · Immigration</span></div>
+      <div class="quote"><b>U.S. military presence in Hawaii</b><span class="small muted">Law and Disorder · Jul 2 · Civil Rights</span></div>
+      <div class="quote"><b>National debt and election integrity</b><span class="small muted">BradCast · Sep 3 · Government</span></div>
+      <div class="quote"><b>Taliban's impact on Afghan women's rights</b><span class="small muted">Democracy Now! · Aug 20 · Civil Rights</span></div>
+    </div>
+  </div>
+</section>
+
+</div></main>
+<div class="toast" id="toast" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
+
+<script>
+(function(){
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+let toastT; function toast(msg,undo){const t=$('#toast');$('#toast-msg').textContent=msg;const u=$('#toast-undo');u.hidden=!undo;u.onclick=()=>{undo&&undo();t.hidden=true};t.hidden=false;clearTimeout(toastT);toastT=setTimeout(()=>t.hidden=true,3800)}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-toast]');if(b)toast(b.dataset.toast)});
+
+/* routing */
+const VIEWS=['desk','triage','filing','episode','coverage'];
+function route(){let h=(location.hash||'#desk').slice(1);let anchor=null;
+  if(h==='stations'||h==='money'){anchor=h;h='desk'}
+  if(!VIEWS.includes(h))h='desk';
+  $$('.view').forEach(v=>v.hidden=v.dataset.view!==h);
+  $$('.tabs a').forEach(a=>a.toggleAttribute('aria-current',a.getAttribute('href')==='#'+h)||a.setAttribute('aria-current',a.getAttribute('href')==='#'+h?'page':''));
+  $$('.tabs a').forEach(a=>{if(a.getAttribute('href')==='#'+h)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+  if(anchor){const el=document.getElementById(anchor);el&&el.scrollIntoView({behavior:'smooth'})}else window.scrollTo(0,0)}
+addEventListener('hashchange',route);
+/* phone toggle */
+function setPhone(on){document.body.classList.toggle('phone',on);$('#btn-phone').setAttribute('aria-pressed',on);$('#btn-desktop').setAttribute('aria-pressed',!on);try{localStorage.setItem('qir-mock-phone',on?'1':'0')}catch(e){}}
+$('#btn-phone').onclick=()=>setPhone(true);$('#btn-desktop').onclick=()=>setPhone(false);
+try{if(localStorage.getItem('qir-mock-phone')==='1')setPhone(true)}catch(e){}
+
+/* ---------------- TRIAGE ---------------- */
+const F=[
+ // tier A: restricted hours + high-risk word
+ {id:2717,t:'A',show:'Reggae Central',when:'Sun Nov 1 · 2:44 pm',term:'fuck',music:true,ctx:'Mother of Paul, missing over her son. Holy fuck up a shot on her boy. Lie down that…',off:'44:12'},
+ {id:2716,t:'A',show:'Reggae Central',when:'Sun Nov 1 · 2:05 pm',term:'shit',music:true,ctx:'Hey, watch them burn. In this hour, world war shit. Them all world war shit. They want w…',off:'05:31'},
+ {id:2710,t:'A',show:'Rhapsody In Black',when:'Sat Oct 31 · 2:55 pm',term:'fucking',music:true,ctx:'I need to jump, get up, get up, get up. I can\'t fucking keep up. Again, again I need to g…',off:'55:02'},
+ {id:2691,t:'A',show:'East Side Story Radio',when:'Fri Oct 30 · 9:24 pm',term:'motherfuckers',music:true,ctx:'lemon cherry gelato, and I know these sucker motherfuckers came for it. But it\'s me de…',off:'84:40',group:2},
+ {id:2690,t:'A',show:'East Side Story Radio',when:'Fri Oct 30 · 9:24 pm',term:'fuck',music:true,ctx:'all the top-notch freaks that wanna fuck with us. Anybody got beef? No, they…',off:'84:51',group:2},
+ {id:2689,t:'A',show:'East Side Story Radio',when:'Fri Oct 30 · 8:17 pm',term:'shit',music:true,ctx:'Foxy clothes, the cutest clothes. The movie shit, there\'s nothing fake about you…',off:'17:20',hint:'Probably a mishearing of "the movie star" (1967 soul track). Listen before deciding.'},
+ {id:2679,t:'A',show:'The Aware Show',when:'Thu Oct 29 · 1:25 pm',term:'shit',music:false,ctx:'just so curious, when your book title says shit, what shared journeys to the afterli…',off:'25:08'},
+ {id:2665,t:'A',show:'Global Village – Weds',when:'Wed Oct 28 · 12:23 pm',term:'bullshit',music:true,ctx:'I got knocked on the ground by all this bullshit going down. Time is truly waste…',off:'83:40'},
+ // tier B
+ {id:2734,t:'B',show:'Democracy Now!',when:'Tue Nov 3 · 7:09 am',term:'bitch',music:false,ctx:'referred to Senator Amy Klobuchar as a bitch. One post said that Turning Point USA…',off:'09:18',hint:'Same news story re-aired at 5:14 pm on Special Programming. One decision can cover both.',group:1},
+ {id:2737,t:'B',show:'Special Programming',when:'Tue Nov 3 · 5:14 pm',term:'bitch',music:false,ctx:'referred to Senator Amy Klobuchar as a bitch. One post said that Turning Point USA…',off:'14:19',group:1},
+ {id:2729,t:'B',show:'IMRU – LGBT Issues',when:'Mon Nov 2 · 7:26 pm',term:'faggot',music:false,ctx:'the fact that they had matchbooks that said faggot stay out, but it is F-A-G-O-T-S…',off:'26:53'},
+ {id:2712,t:'B',show:'Canto Tropical',when:'Sat Oct 31 · 9:52 pm',term:'puta',music:true,ctx:'quiere bailar otra vez. Baila la puta al pie y vea que bueno es. Ya yo sé…',off:'52:10'},
+ {id:2670,t:'B',show:'Feminist Magazine',when:'Wed Oct 28 · 7:56 pm',term:'slut',music:false,ctx:'There\'s this new movement called Slut Walk that has now swept 70 differen…',off:'56:30',hint:'Name of a movement, not a slur.'},
+ {id:2715,t:'B',show:'Gospel Classics',when:'Sun Nov 1 · 7:08 am',term:'n****',music:true,w:true,ctx:'Shine my Jesus. Oh, yeah. Oh, time to church, n****. Oh. Serve the Lord…',off:'68:05'},
+ // tier C
+ {id:2723,t:'C',show:'Soundwaves',when:'Mon Nov 2 · 12:06 am',term:'motherfucker',music:true,ctx:'You a fine motherfucker, won\'t you? Yeah. Black box…',off:'06:40'},
+ {id:2722,t:'C',show:'Soundwaves',when:'Mon Nov 2 · 12:06 am',term:'fuck',music:true,ctx:'I\'m out in the beach, fresh air. What the fuck, I look like hangin\' in the street…',off:'06:52'},
+ {id:2721,t:'C',show:'Soundwaves',when:'Mon Nov 2 · 12:09 am',term:'shit',music:true,ctx:'But your fire shit look just like my mama\'s…',off:'09:11'},
+ {id:2694,t:'C',show:'Breakbeats And Rhymes',when:'Fri Oct 30 · 10:15 pm',term:'fuck',music:true,ctx:'I don\'t give a fuck, I robbed a chip too. Creeping on y…',off:'15:44'},
+ // tier D
+ {id:2739,t:'D',show:'Special Programming',when:'Tue Nov 3 · 11:00 pm',term:'sponsor',ai:true,ctx:'Support for KPFK comes from the Patagonia Tango Company, presenting Furia Tanguera…',off:'00:12'},
+ {id:2736,t:'D',show:'Global Village – Tuesday',when:'Tue Nov 3 · 11:37 am',term:'sponsor',ai:true,ctx:'Support for Tuesday\'s Global Village comes in part from the Blue Note Los A…',off:'37:02'},
+ {id:2735,t:'D',show:'Global Village – Tuesday',when:'Tue Nov 3 · 11:00 am',term:'sponsor',ai:true,ctx:'Support for KPFK comes from Live Nation, presenting the Buena Vista Orchestra live at the W…',off:'00:20'},
+];
+const TIERS={A:{title:'A · Listen now',total:43,foot:'Showing 8 of 43. Sorted by air time, newest first. Rebroadcasts of the same moment are grouped.'},
+ B:{title:'B · Glance',total:43,foot:'Showing 6 of 43. Usually a slur quoted in news, a movement\'s name, or a lyric. Decide from the excerpt or listen.'},
+ C:{title:'C · Safe harbor (10pm–6am)',total:187,foot:'Showing 4 of 187. Legal to air. Acknowledge in bulk. They stay in the log for the record.'},
+ D:{title:'D · Retire',total:276,foot:'223 sponsor/payola flags from checks that were turned off on May 31, 33 already fixed by the word-boundary repair, 20 technical.'}};
+const dec={}; let tier='A', sel=null;
+const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function hl(ctx,term){if(term==='sponsor')return esc(ctx).replace(/Support for/,'<mark>Support for</mark>');const i=ctx.toLowerCase().indexOf(term.toLowerCase());if(i<0)return esc(ctx);return esc(ctx.slice(0,i))+'<mark>'+esc(ctx.slice(i,i+term.length))+'</mark>'+esc(ctx.slice(i+term.length))}
+function list(){const rows=F.filter(f=>f.t===tier);$('#list-title').textContent=TIERS[tier].title;$('#list-foot').textContent=TIERS[tier].foot;
+  $('#flist').innerHTML=rows.map(f=>`<button class="frow ${dec[f.id]?'done':''}" role="option" aria-selected="${sel===f.id}" data-id="${f.id}">
+   <span class="term ${f.ai?'ai':f.w?'w':''}">${esc(f.term)}</span>
+   <span style="min-width:0"><span class="row" style="gap:6px"><b style="font-size:13px">${esc(f.show)}</b>${f.music?'<span class="pill" style="font-size:10.5px">music</span>':''}${f.group?'<span class="pill info" style="font-size:10.5px">aired twice</span>':''}</span>
+   <span class="small muted">${f.when}</span><span class="ctx" style="display:block">${hl(f.ctx,f.term)}</span></span>
+   <span class="small">${dec[f.id]?'<span class="pill ok">'+dec[f.id]+'</span>':''}</span></button>`).join('');
+  $$('#flist .frow').forEach(b=>b.onclick=()=>{sel=+b.dataset.id;render()});}
+function detail(){const d=$('#detail');
+  if(tier==='C'||tier==='D'){const c=tier==='C';d.innerHTML=`<h2>${c?'Acknowledge safe-harbor flags':'Retire flags from checks that are off'}</h2>
+   <p class="small soft" style="margin:6px 0 14px">${c?'187 flags aired between 10pm and 6am, when the FCC allows this language. Acknowledging keeps them in the record and takes them off the to-do list.':'Sponsor and payola checks were turned off on May 31 because they flagged correct underwriting credits ("Support for KPFK comes from…"). Their 223 leftover flags, plus 33 fixed by the word-boundary repair and 20 technical notices, are still in the queue.'}</p>
+   <div class="scope"><label><input type="checkbox" checked> ${c?'Also acknowledge future safe-harbor flags automatically':'Hide new flags from checks that are turned off'}</label></div>
+   <div class="row" style="margin-top:14px"><button class="btn primary" id="bulk">${c?'Acknowledge 187':'Retire 276'}</button><span class="small muted">Undo for 10 seconds; the audit log keeps every row</span></div>`;
+   $('#bulk').onclick=()=>{F.filter(f=>f.t===tier).forEach(f=>dec[f.id]=c?'acknowledged':'retired');const n=$(`.tier[data-tier="${tier}"] b`);const old=n.textContent;n.textContent='0';list();toast(`${c?'Acknowledged':'Retired'} ${old} flags`,()=>{F.filter(f=>f.t===tier).forEach(f=>delete dec[f.id]);n.textContent=old;list()})};return}
+  const f=F.find(x=>x.id===sel)||F.find(x=>x.t===tier);sel=f.id;
+  const twin=f.group?F.filter(x=>x.group===f.group&&x.id!==f.id):[];
+  const same=F.filter(x=>x.show===f.show&&x.id!==f.id&&x.t===f.t&&!x.group);
+  d.innerHTML=`<div class="spread"><div><p class="eyebrow">${esc(f.when)}</p><h2>${esc(f.show)}</h2></div><span class="pill ${f.t==='A'?'crit':'warn'}">${f.t==='A'?'Outside safe harbor · high-risk word':'Outside safe harbor'}</span></div>
+   <div class="player" style="margin-top:12px"><div class="row"><button class="btn sm" id="play" aria-label="Play">▶ Play 15s before</button><span class="mono small muted">${f.off} into the episode</span></div>
+   <div class="wave" aria-hidden="true">${Array.from({length:64},(_,i)=>`<i class="${i===30||i===31?'hit':''}" style="height:${18+Math.round(18*Math.abs(Math.sin(i*1.7+f.id)))}px"></i>`).join('')}</div>
+   <p class="ctx">${hl(f.ctx,f.term)}</p></div>
+   ${f.hint?`<div class="callout" style="margin-top:10px">${esc(f.hint)}</div>`:''}
+   <h3 style="margin:16px 0 8px">Decision</h3>
+   <div class="decide">
+    <button data-d="cleared · not on air"><span><kbd>1</kbd> Not what aired</span><small>Mishearing, or bleeped</small></button>
+    <button data-d="cleared · quoted"><span><kbd>2</kbd> Newsworthy or quoted</span><small>Reporting, a title, a name</small></button>
+    <button data-d="cleared · ok"><span><kbd>3</kbd> Fine in context</span><small>Add a note if needed</small></button>
+    <button class="v" data-d="violation"><span><kbd>4</kbd> Violation</span><small>Log it and tell the GM</small></button>
+   </div>
+   <h3 style="margin:16px 0 8px">Apply to</h3>
+   <div class="scope">
+    <label><input type="radio" name="scope" checked> This flag only</label>
+    ${twin.length?`<label><input type="radio" name="scope"> This flag and the rebroadcast (${esc(twin[0].show)}, ${esc(twin[0].when.split('·')[1].trim())})</label>`:''}
+    ${same.length?`<label><input type="radio" name="scope"> All "${esc(f.term)}" on ${esc(f.show)} this quarter (${same.filter(s=>s.term===f.term).length+1})</label>`:''}
+    <label><input type="radio" name="scope"> This song from now on <span class="muted small">(rule: same lyric, same show)</span></label>
+   </div>`;
+  $('#play').onclick=()=>{const w=$$('#detail .wave i');let k=0;const iv=setInterval(()=>{if(k>=w.length)return clearInterval(iv);w[k].classList.add('played');k++},45);toast('Playing 15 seconds before the flagged word')};
+  $$('#detail .decide button').forEach(b=>b.onclick=()=>decide(b.dataset.d));
+}
+function decide(d){const f=F.find(x=>x.id===sel);if(!f)return;const ids=[f.id];
+  const sc=[...document.querySelectorAll('input[name=scope]')].findIndex(r=>r.checked);
+  if(sc===1&&f.group)F.filter(x=>x.group===f.group).forEach(x=>ids.push(x.id));
+  ids.forEach(i=>dec[i]=d==='violation'?'violation':'cleared');
+  if(tier==='A')bump();
+  const next=F.find(x=>x.t===tier&&!dec[x.id]);if(next)sel=next.id;render();
+  toast(`${ids.length>1?ids.length+' flags':'Flag'} marked ${d==='violation'?'violation':'cleared ('+d.split('· ')[1]+')'}`,()=>{ids.forEach(i=>delete dec[i]);if(tier==='A')bump();sel=f.id;render()})}
+function bump(){const n=F.filter(x=>x.t==='A'&&dec[x.id]).length;$('#done-n').textContent=n;$('#done-bar').style.width=(n/43*100)+'%';
+  const allA=F.filter(x=>x.t==='A').every(x=>dec[x.id]);const sb=$('#sign-btn');sb.disabled=!allA;sb.style.opacity=allA?1:.5;if(allA)sb.classList.add('primary')}
+$('#sign-btn').onclick=()=>toast('In the real app: enabled once all 86 A and B flags are done. Signed by the reviewer, with a date.');
+function render(){list();detail()}
+$$('.tier').forEach(b=>b.onclick=()=>{tier=b.dataset.tier;$$('.tier').forEach(x=>x.setAttribute('aria-pressed',x===b));sel=null;render()});
+document.addEventListener('keydown',e=>{if($('#v-triage').hidden||e.target.isContentEditable||/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
+  const rows=F.filter(f=>f.t===tier);const i=rows.findIndex(f=>f.id===sel);
+  if(e.key==='j'){sel=rows[Math.min(i+1,rows.length-1)].id;render()}else if(e.key==='k'){sel=rows[Math.max(i-1,0)].id;render()}
+  else if('1234'.includes(e.key)&&(tier==='A'||tier==='B')){const b=$$('#detail .decide button')[+e.key-1];b&&b.click()}});
+render();
+
+/* ---------------- FILING ---------------- */
+let q3filed=null; let q='q3';
+const Q={
+ q3:()=>{const rec=q3filed;return `
+ ${rec?`<div class="receipt"><div class="spread"><h2>Filed: Q3 2026, version 3</h2><span class="pill ok">In the public file</span></div>
+   <dl><dt>Stated filing date</dt><dd>${rec.date}</dd><dt>Recorded</dt><dd>Nov 4, 2026 by ${rec.by}</dd><dt>Where</dt><dd>${rec.where}</dd><dt>Copy on record</dt><dd class="mono small">QIR-KPFK-2026-Q3-v3.pdf · 27 entries · frozen</dd><dt>Public page</dt><dd class="mono small">qir.kpfk.org/kpfk/2026/q3</dd></dl>
+   <p class="small soft">Version 3 is now locked. Changes go into a new version marked "amendment".</p></div>`
+ :`<div class="card pad" style="border-color:var(--crit)"><div class="spread"><div><h2>No filing on record for Q3</h2><p class="small soft" style="margin-top:4px">The report was due Oct 10. Version 3 was exported as text twice on Oct 5, which usually means it was uploaded by hand. If that's what you filed, record it here so the app and the public page match.</p></div><button class="btn primary" id="rec">Record a filing</button></div></div>`}
+ <div class="grid g2">
+  <div class="card pad"><h2>Versions</h2><div class="timeline" style="margin-top:6px">
+   <div class="ver ${rec?'filed':'cand'}"><span class="node"></span><div><b>Version 3</b> <span class="muted small">Oct 5</span><p class="small soft">27 entries · July 10, Aug 8, Sep 9 · no blank guests</p><p class="small muted">Exported as text twice, Oct 5</p></div><div class="row">${rec?'<span class="pill ok">Filed</span>':'<span class="pill gold">Exported · likely filed</span>'}</div></div>
+   <div class="ver"><span class="node"></span><div><b>Version 2</b> <span class="muted small">Oct 5</span><p class="small soft">40 entries · all from July · 5 blank guests</p><p class="small" style="color:var(--warn)">Looks capped at the first 1,000 episodes, so Aug–Sep are missing</p></div><div class="row"><button class="btn sm ghost" data-toast="Would show v2 vs v3 side by side">Compare with v3</button></div></div>
+   <div class="ver"><span class="node"></span><div><b>Version 1</b> <span class="muted small">Sep 26</span><p class="small soft">29 entries · all from July · 6 blank guests</p><p class="small" style="color:var(--warn)">Same apparent 1,000-episode cap</p></div><div class="row"><button class="btn sm ghost" data-toast="Would show v1 vs v3 side by side">Compare</button></div></div>
+  </div></div>
+  <div class="card pad"><h2>Readiness check for version 3</h2><p class="small muted" style="margin-bottom:6px">Run automatically before anything is marked filed.</p>
+   <div class="check ok"><span class="m">✓</span><span>Every month of the quarter is represented</span><span class="small muted">10 · 8 · 9</span></div>
+   <div class="check ok"><span class="m">✓</span><span>Episodes processed</span><span class="small muted num">2,026 of 2,089 (97%)</span></div>
+   <div class="check warn"><span class="m">!</span><span>58 episodes failed and were never retried <span class="small muted">(Jul 21–Aug 11, audio conversion)</span></span><button class="btn sm" data-toast="Would retry 58 failed episodes">Retry</button></div>
+   <div class="check warn"><span class="m">!</span><span>148 critical flags never reviewed <span class="small muted">(blocking is off, so they didn't hold anything back)</span></span><a class="btn sm" href="#triage">Review</a></div>
+   <div class="check warn"><span class="m">!</span><span>27 entries; the curation guidance asks for about 70</span><span class="small muted">—</span></div>
+   <div class="check ok"><span class="m">✓</span><span>Every entry names a guest</span><span class="small muted">27 / 27</span></div>
+  </div>
+ </div>`},
+ q2:()=>`<div class="receipt" style="border-color:var(--warn);background:var(--warn-soft)"><div class="spread"><h2>Q2 2026: version 2 is marked final</h2><span class="pill warn">Filing details missing</span></div>
+   <dl><dt>Marked final</dt><dd>Jul 4, 2026</dd><dt>Placed in file</dt><dd class="muted">not recorded</dd><dt>Entries</dt><dd>48 (32 April · 14 May · 2 June)</dd></dl>
+   <p class="small soft">Version 5 was generated on Aug 13, after the report was finalized. Only 69% of Q2's episodes were processed when it was finalized.</p>
+   <div class="row"><button class="btn" data-toast="Would open the record form for v2">Add filing details</button></div></div>`,
+ q1:()=>`<div class="card pad"><div class="spread"><div><h2>Q1 2026: five drafts, none final</h2><p class="small soft" style="margin-top:4px">Entry counts were 18, 61, 50, 52 and 16. Only 36% of Q1's episodes are processed, and 631 are still waiting. If Q1 was filed outside the app, record it. If not, catch up the backlog and finalize.</p></div><div class="row"><button class="btn" data-toast="Would open the record form">Record a filing</button><button class="btn" data-toast="Would start a Q1 backfill">Catch up Q1</button></div></div></div>`,
+ q4:()=>`<div class="card pad"><div class="spread"><div><h2>Q4 2026: 67 days to the deadline</h2><p class="small soft">Oct 1–Dec 31 · must be in the public file by Jan 10, 2027</p></div><span class="pill info">No draft yet</span></div>
+   <div style="margin-top:12px"><div class="check ok"><span class="m">✓</span><span>Episodes processed so far</span><span class="small muted">783 of 783</span></div>
+   <div class="check warn"><span class="m">!</span><span>43 fineable flags to hear</span><a class="btn sm" href="#triage">Review</a></div>
+   <div class="check"><span class="m muted">○</span><span>Draft the report after Dec 31. Reminders go out Dec 31, Jan 5 and Jan 8.</span><span class="small muted">—</span></div></div></div>`};
+function renderQ(){$('#qbody').innerHTML=Q[q]();$('#qbody').style.display='grid';$('#qbody').style.gap='14px';const r=$('#rec');if(r)r.onclick=openRec}
+$$('.qtab').forEach(b=>b.onclick=()=>{q=b.dataset.q;$$('.qtab').forEach(x=>x.setAttribute('aria-pressed',x===b));renderQ()});
+function openRec(){const bg=document.createElement('div');bg.className='modal-bg';bg.innerHTML=`<form class="modal" id="recf"><h2>Record the Q3 2026 filing</h2>
+  <label class="field">Version filed<select id="rv"><option>Version 3 · Oct 5 · 27 entries</option><option>Version 2 · Oct 5 · 40 entries</option><option>Version 1 · Sep 26 · 29 entries</option></select></label>
+  <label class="field">Date it was placed in the public file (as you recall or as the FCC site shows)<input id="rd" type="date" value="2026-10-08"></label>
+  <label class="field">Link to the document in the FCC public file<input id="rl" placeholder="https://publicfiles.fcc.gov/…"></label>
+  <label class="field">Where<select id="rw"><option>FCC Online Public Inspection File</option><option>Station paper file</option></select></label>
+  <label class="field">Recorded by<input id="rb" value="Ace (General Manager)"></label>
+  <p class="small muted">This is recorded today, Nov 4, with the date you give as the stated filing date. Nothing is backdated. It locks the version, publishes it at the public link, and writes to the audit log. Later changes go into an amendment.</p>
+  <div class="row" style="justify-content:flex-end"><button type="button" class="btn" id="rc">Cancel</button><button class="btn primary" type="submit">Record filing</button></div></form>`;
+  document.body.appendChild(bg);$('#rc').onclick=()=>bg.remove();bg.addEventListener('click',e=>{if(e.target===bg)bg.remove()});
+  $('#recf').addEventListener('submit',e=>{e.preventDefault();const dd=new Date($('#rd').value+'T12:00');q3filed={date:dd.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),by:$('#rb').value,where:$('#rw').value};bg.remove();
+   $('#q3-pill').className='pill ok';$('#q3-pill').textContent='Filed v3 · '+q3filed.date;renderQ();toast('Q3 filing recorded')})}
+renderQ();
+
+/* ---------------- EPISODE ---------------- */
+const FIELDS=[
+ {k:'Guest',h:'Alex Burness, voting rights journalist, Bolts Mag',a:'Alex Burness',on:'h'},
+ {k:'Host',h:null,a:'Brad Friedman',on:'a'},
+ {k:'Issue',h:null,a:'Civil Rights / Social Justice',on:'a'},
+ {k:'Summary',h:'Alex Burness, voting rights journalist, Bolts Mag — DOJ election interference; Voting rights: <span class="lint" title="Rerun note: will be removed from the report">Original airdate 10-20-2026.</span> Donald Trump/GOP approval ratings continue to plummet, despite the GOP billionaires\' money bomb. The Trump Justice Department\'s cruel arrests of alleged noncitizen voters violate DOJ policy…',a:'Alex Burness discusses Virginia\'s ballot question three, which would restore voting rights to people with felony convictions as soon as they leave prison. He outlines the history of Virginia\'s disenfranchisement laws and their origins in white supremacy…',on:'h',warn:'The producer\'s summary includes a rerun note and promo copy. The AI version reads more like an FCC entry.'},
+];
+const orig=FIELDS.map(f=>f.on); let dirty=false;
+function cmp(){$('#cmp').innerHTML='<div class="hd">Field</div><div class="hd opt">Producer (Confessor)</div><div class="hd opt">AI from transcript</div>'+FIELDS.map((f,i)=>`
+ <div class="lab">${f.k}${f.h&&f.a&&f.h!==f.a?'<br><span class="pill warn" style="margin-top:4px">differ</span>':''}</div>
+ <div class="opt ${f.on==='h'?'on':''}" data-src="Producer (Confessor)">${f.h?`<span class="small">${f.h}</span>`:'<span class="small muted">Not entered</span>'}${f.h?`<button class="btn sm" data-i="${i}" data-s="h">${f.on==='h'?'✓ Using this':'Use this'}</button>`:''}</div>
+ <div class="opt ${f.on==='a'?'on':''}" data-src="AI from transcript"><span class="small">${f.a}</span><button class="btn sm" data-i="${i}" data-s="a">${f.on==='a'?'✓ Using this':'Use this'}</button>${f.warn?`<span class="small" style="color:var(--warn)">${f.warn}</span>`:''}</div>`).join('');
+ $$('#cmp button').forEach(b=>b.onclick=()=>{FIELDS[+b.dataset.i].on=b.dataset.s;mark();cmp()})}
+function mark(){dirty=FIELDS.some((f,i)=>f.on!==orig[i]);$('#save-msg').textContent=dirty?'Unsaved changes. Your choice will hold through re-processing.':'No unsaved changes'}
+$('#ep-headline').addEventListener('input',()=>{dirty=true;$('#save-msg').textContent='Unsaved changes. Your choice will hold through re-processing.'});
+$('#ep-save').onclick=()=>{if(!dirty){toast('Nothing to save');return}FIELDS.forEach((f,i)=>orig[i]=f.on);dirty=false;$('#save-msg').textContent='Saved just now';toast('Saved. These choices hold through re-processing.')};
+$('#ep-reset').onclick=()=>{FIELDS.forEach((f,i)=>f.on=orig[i]);mark();cmp()};
+cmp();
+
+/* ---------------- COVERAGE ---------------- */
+const H=[['Government / Politics',571],['Arts & Culture',524],['Civil Rights / Social Justice',386],['International Affairs / War & Peace',230],['Economy / Labor',83],['Health',76],['Environment / Climate',70],['Immigration',49],['Education',2]];
+$('#hbars').innerHTML=H.map(([k,v])=>`<div class="hb"><span>${k}</span><div class="track"><span class="${v<100?'thin':''}" style="width:${v/571*100}%"></span></div><span class="num" style="text-align:right">${v} h</span></div>`).join('')+'<p class="small muted">167 more hours were tagged "skip" (not public affairs).</p>';
+
+route();
+})();
+</script>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
-import { invalidateSetting } from '@/lib/settings'
+import { invalidateSetting, SUPER_ADMIN_STATION_KEYS } from '@/lib/settings'
 import { bumpCacheVersion } from '@/lib/api-cache'
 import { providerConfigStatus } from '@/lib/transcription'
 
@@ -124,6 +124,14 @@ export async function PUT(request: NextRequest) {
       }
       invalidateSetting(key)
       return NextResponse.json({ ok: true, scope: 'global' })
+    }
+
+    // Spend caps are budget controls a super-admin sets in Master Control; a
+    // station editor must not lift them. The pause flag isn't a generic setting
+    // either: a station editor pauses/resumes their own station from the Jobs
+    // page (api/jobs → lib/pipeline-control). RLS enforces the same — migration 054.
+    if (SUPER_ADMIN_STATION_KEYS.has(key) && !result.context.isSuperAdmin) {
+      return stationErrorResponse({ status: 403, error: 'Pause and spend limits can only be changed by a super-admin' })
     }
 
     // Settings edits are saved as per-station overrides in station_settings;

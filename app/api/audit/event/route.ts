@@ -34,17 +34,29 @@ async function resolveAccessibleStationId(userId: string, slug: string): Promise
 // actions in CLIENT_AUDIT_EVENTS are accepted; anything else is rejected so a
 // client can't forge arbitrary audit rows. Most actions require a valid session;
 // `login_failed` is the one anonymous-permitted event (there's no session yet).
+const MAX_CLIENT_METADATA_CHARS = 2000
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}))
     const action = typeof body.action === 'string' ? body.action : ''
-    const spec = CLIENT_AUDIT_EVENTS[action]
+    // Own-property lookup: a bare index resolved "constructor"/"__proto__" to
+    // a truthy prototype member and let it through the allowlist.
+    const spec = Object.prototype.hasOwnProperty.call(CLIENT_AUDIT_EVENTS, action)
+      ? CLIENT_AUDIT_EVENTS[action]
+      : undefined
     if (!spec) {
       return NextResponse.json({ error: 'Unknown or disallowed audit action' }, { status: 400 })
     }
 
+    // Client-supplied (and, for login_failed, anonymous) metadata lands in a
+    // permanent table, so bound it: oversize payloads are replaced by a marker,
+    // matching the trigger-side <redacted: N chars> convention.
+    const rawMetadata: Record<string, unknown> =
+      body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata) ? body.metadata : {}
+    const metadataSize = JSON.stringify(rawMetadata).length
     const metadata: Record<string, unknown> =
-      body.metadata && typeof body.metadata === 'object' ? body.metadata : {}
+      metadataSize > MAX_CLIENT_METADATA_CHARS ? { redacted: `<redacted: ${metadataSize} chars>` } : rawMetadata
     const stationSlug = typeof body.stationSlug === 'string' ? body.stationSlug : null
     const { ip, userAgent } = requestMeta(request)
 

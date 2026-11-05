@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import OpenAI from 'openai'
-import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { bumpCacheVersion } from '@/lib/api-cache'
-
-const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
-const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
+import { logTranslationUsage } from '@/lib/usage'
 
 export async function POST(
   request: NextRequest,
@@ -14,6 +12,12 @@ export async function POST(
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
     const { supabase, stationId } = result.context
+
+    // Calls the (paid) translation model and writes the transcript row —
+    // editors and up only. Viewers still see an existing translation: it
+    // comes back with the episode GET, no POST needed.
+    const denied = requireRole(result.context, 'editor')
+    if (denied) return stationErrorResponse(denied)
 
     const episodeId = parseInt(params.id)
     const openaiKey = process.env.OPENAI_API_KEY
@@ -140,21 +144,8 @@ export async function POST(
     const totalOutput = (transcriptUsage?.completion_tokens ?? 0) + (vttUsage?.completion_tokens ?? 0)
 
     if (totalInput > 0) {
-      const estimatedCost =
-        totalInput * OPENAI_INPUT_COST_PER_TOKEN +
-        totalOutput * OPENAI_OUTPUT_COST_PER_TOKEN
-
-      await supabase.from('usage_log').insert({
-        station_id: stationId,
-        episode_id: episodeId,
-        service: 'openai',
-        model: 'gpt-4o-mini',
-        operation: 'summarize', // reuse existing operation type for cost tracking
-        input_tokens: totalInput,
-        output_tokens: totalOutput,
-        duration_seconds: null,
-        estimated_cost: estimatedCost,
-        metadata: { task: 'translate', language: transcript.language ?? 'es' },
+      await logTranslationUsage(stationId, episodeId, totalInput, totalOutput, 'gpt-4o-mini', {
+        language: transcript.language ?? 'es',
       })
     }
 

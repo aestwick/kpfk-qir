@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { toCsv } from '@/lib/csv'
+import { formatCuratedReport, type QirEntry } from '@/lib/qir-format'
+import { getStation } from '@/lib/stations'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,10 +73,9 @@ export async function GET(request: NextRequest) {
         'Description',
       ]
 
-      const csvLines = [
-        headers.join(','),
-        ...entries.map((e) =>
-          [
+      const csv = toCsv(
+        headers,
+        entries.map((e) => [
             e.issue_category,
             e.show_name,
             e.host,
@@ -83,27 +85,35 @@ export async function GET(request: NextRequest) {
             e.headline,
             e.guest,
             e.summary,
-          ]
-            .map((val) => {
-              const s = String(val ?? '')
-              return s.includes(',') || s.includes('"') || s.includes('\n')
-                ? `"${s.replace(/"/g, '""')}"`
-                : s
-            })
-            .join(',')
-        ),
-      ]
+        ])
+      )
 
-      return new Response(csvLines.join('\n'), {
+      return new Response(csv, {
         headers: {
-          'Content-Type': 'text/csv',
+          'Content-Type': 'text/csv; charset=utf-8',
           'Content-Disposition': `attachment; filename="QIR_Q${draft.quarter}_${draft.year}_v${draft.version}.csv"`,
         },
       })
     }
 
     if (format === 'text') {
-      const text = draft.curated_text ?? draft.full_text ?? ''
+      // Rebuild from curated_entries (what the CSV and the public page show).
+      // curated_text is written once at generation and never refreshed when an
+      // editor removes or rewrites an entry, so serving it verbatim exported a
+      // stale report. Same formatter generate-qir used, so an unedited draft is
+      // byte-identical.
+      let text: string
+      if (Array.isArray(draft.curated_entries) && draft.curated_entries.length) {
+        const station = await getStation(stationId)
+        text = formatCuratedReport(
+          draft.curated_entries as QirEntry[],
+          draft.year,
+          draft.quarter,
+          station?.name ?? result.context.stationSlug.toUpperCase()
+        )
+      } else {
+        text = draft.curated_text ?? draft.full_text ?? ''
+      }
       return new Response(text, {
         headers: {
           'Content-Type': 'text/plain',

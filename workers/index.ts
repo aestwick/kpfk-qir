@@ -6,8 +6,10 @@ import { processCompliance } from './compliance'
 import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
 import { processDiscoverSync } from './discover-sync'
+import { processCorrections } from './corrections'
 import { isPipelinePaused } from '../lib/settings'
 import { jobPriority } from '../lib/tier'
+import { continuationData, ZERO_PROGRESS_BACKOFF_MS } from '../lib/job-chain'
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379'
 
@@ -121,9 +123,9 @@ transcribeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[transcribe] zero progress with remaining episodes — backing off 5 minutes')
-      await transcribeQueue.add('transcribe-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
+      await transcribeQueue.add('transcribe-backoff', continuationData(job.data), { delay: ZERO_PROGRESS_BACKOFF_MS, priority })
     } else {
-      await transcribeQueue.add('transcribe-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
+      await transcribeQueue.add('transcribe-continue', continuationData(job.data), { priority })
     }
   }
   // Auto-chain to summarize when part of a cascade (audit or pipeline chain).
@@ -157,9 +159,9 @@ summarizeWorker.on('completed', async (job) => {
   if (remaining) {
     if (count === 0) {
       console.warn('[summarize] zero progress with remaining episodes — backing off 5 minutes')
-      await summarizeQueue.add('summarize-backoff', { stationId, ...window }, { delay: 5 * 60 * 1000, priority })
+      await summarizeQueue.add('summarize-backoff', continuationData(job.data), { delay: ZERO_PROGRESS_BACKOFF_MS, priority })
     } else {
-      await summarizeQueue.add('summarize-continue', { stationId, ...window, ...(job.data?.chain ? { source: job.data.source, chain: true } : {}) }, { priority })
+      await summarizeQueue.add('summarize-continue', continuationData(job.data), { priority })
     }
   }
   // Auto-chain to compliance/QIR when part of a cascade (audit or pipeline chain).
@@ -187,8 +189,16 @@ complianceWorker.on('completed', async (job) => {
   const remaining = job.returnvalue?.remaining ?? false
   console.log(`[compliance] completed — ${count} episodes checked${remaining ? ' (more remaining)' : ''}`)
   if (remaining) {
-    const window = job.data?.window ? { window: job.data.window } : {}
-    await complianceQueue.add('compliance-continue', { stationId: job.data?.stationId, ...window }, { priority: await jobPriority(job.data?.stationId) })
+    const priority = await jobPriority(job.data?.stationId)
+    if (count === 0) {
+      // A batch where every episode failed (they stay `summarized` and are
+      // re-selected first) used to re-run immediately, forever, re-paying the
+      // AI pass each time. Back off like transcribe/summarize do.
+      console.warn('[compliance] zero progress with remaining episodes — backing off 5 minutes')
+      await complianceQueue.add('compliance-backoff', continuationData(job.data), { delay: ZERO_PROGRESS_BACKOFF_MS, priority })
+    } else {
+      await complianceQueue.add('compliance-continue', continuationData(job.data), { priority })
+    }
   }
 })
 complianceWorker.on('failed', (job, err) => {
@@ -245,6 +255,28 @@ discoverSyncWorker.on('failed', (job, err) => {
   console.error(`[discover-sync] failed:`, err.message)
 })
 
+// -- Corrections Worker --
+// Re-applies correction rules to stored transcripts (text only — no audio) and,
+// nightly, syncs website hosts into the name list and mines suggested
+// corrections for human approval. Per-station pause is enforced in the processor.
+const correctionsQueue = new Queue('corrections', {
+  connection,
+  defaultJobOptions: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 },
+})
+const correctionsWorker = new Worker('corrections', processCorrections, {
+  connection,
+  concurrency: 1,
+})
+correctionsWorker.on('completed', (job) => {
+  const r = (job.returnvalue ?? {}) as { dispatched?: number; task?: string; changedEpisodes?: number; rulesBackfilled?: number; skipped?: string }
+  if (r.dispatched != null) console.log(`[corrections] dispatched ${r.task} to ${r.dispatched} station(s)`)
+  else if (r.skipped) console.log(`[corrections] ${r.task} skipped (${r.skipped})`)
+  else console.log(`[corrections] ${r.task} — ${r.changedEpisodes ?? 0} transcripts fixed, ${r.rulesBackfilled ?? 0} rules backfilled`)
+})
+correctionsWorker.on('failed', (job, err) => {
+  console.error(`[corrections] failed:`, err.message)
+})
+
 // -- Cron Schedules --
 async function setupCron() {
   // Remove any existing repeatable jobs first
@@ -255,6 +287,9 @@ async function setupCron() {
   const existingRetry = await autoRetryQueue.getRepeatableJobs()
   for (const job of existingRetry) {
     await autoRetryQueue.removeRepeatableByKey(job.key)
+  }
+  for (const job of await correctionsQueue.getRepeatableJobs()) {
+    await correctionsQueue.removeRepeatableByKey(job.key)
   }
   const existingDiscover = await discoverSyncQueue.getRepeatableJobs()
   for (const job of existingDiscover) {
@@ -285,9 +320,18 @@ async function setupCron() {
     }
   )
 
+  await correctionsQueue.add(
+    'corrections-nightly-cron',
+    { task: 'nightly' },
+    {
+      repeat: { pattern: '47 3 * * *' }, // daily at 03:47 — after the evening shows land
+    }
+  )
+
   console.log('[cron] hourly ingest scheduled at minute :02')
   console.log('[cron] auto-retry scheduled every 4 hours at minute :17')
   console.log('[cron] archive discovery sync scheduled daily at 06:37')
+  console.log('[cron] transcript-name upkeep scheduled daily at 03:47')
 }
 
 setupCron().catch(console.error)
@@ -372,3 +416,10 @@ async function shutdown() {
 
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
+
+// Name upkeep on startup: sync website hosts into the name list, mine
+// suggestions, and re-apply any rules not yet applied to stored transcripts —
+// on the first start after migration 047 that is the existing rules' backfill.
+correctionsQueue.add('corrections-startup', { task: 'nightly' }).then(() => {
+  console.log('[workers] startup corrections backfill queued')
+}).catch(console.error)
