@@ -6,36 +6,18 @@ import * as path from 'path'
 import * as os from 'os'
 import { supabaseAdmin } from '../lib/supabase'
 import { logTranscriptionUsage } from '../lib/usage'
-import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused, isDiarizationEnabled, getGroqModel } from '../lib/settings'
+import { getExcludedCategories, getTranscribeBatchSize, isPipelinePaused, isDiarizationEnabled, getGroqModel, isVocabularyHintEnabled } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { getProcessingWindowBounds } from '../lib/quarters'
-import { parseVtt } from '../lib/vtt'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
 import { resolveProviderPlan, runTranscription, AudioUnavailableError } from '../lib/transcription'
-import { applyCorrections, buildVtt, correctionsForEpisode } from '../lib/transcription/vtt'
+import { buildVtt } from '../lib/transcription/vtt'
+import { applyCorrections, correctionsForEpisode } from '../lib/transcription/corrections'
+import { replaceEpisodeCues } from '../lib/transcription/cues'
+import { loadCorrectionRules, loadShowGroups, loadVocabulary, episodeHumanNames } from '../lib/transcription/store'
+import { buildVocabularyPrompt, shouldUseVocabularyHint } from '../lib/transcription/vocabulary'
 import { bumpCacheVersion } from '../lib/api-cache'
-
-// Replace an episode's timed search cues from its freshly-built VTT. Auxiliary
-// to the transcript itself: a failure here must never fail the episode (search
-// degrades to the runtime VTT aligner), so callers swallow errors.
-async function populateCues(episodeId: number, vtt: string): Promise<void> {
-  const cues = parseVtt(vtt)
-  // Idempotent per episode: clear then re-insert so re-transcribes don't dup.
-  await supabaseAdmin.from('transcript_cues').delete().eq('episode_id', episodeId)
-  if (!cues.length) return
-  const rows = cues.map((c) => ({
-    episode_id: episodeId,
-    cue_idx: c.index,
-    start_ms: c.startMs,
-    end_ms: c.endMs,
-    text: c.text,
-  }))
-  for (let k = 0; k < rows.length; k += 500) {
-    const { error } = await supabaseAdmin.from('transcript_cues').insert(rows.slice(k, k + 500))
-    if (error) throw new Error(error.message)
-  }
-}
 
 const execFileAsync = promisify(execFile)
 
@@ -53,24 +35,6 @@ function resolveWindow(job: Job): { start: string; end: string } {
   const w = job.data?.window as { start?: string; end?: string } | undefined
   if (w?.start && w?.end) return { start: w.start, end: w.end }
   return getProcessingWindowBounds()
-}
-
-async function loadCorrections(stationId: string): Promise<
-  Array<{ wrong: string; correct: string; caseSensitive: boolean; isRegex: boolean; episodeId: number | null }>
-> {
-  const { data } = await supabaseAdmin
-    .from('transcript_corrections')
-    .select('wrong, correct, case_sensitive, is_regex, episode_id')
-    .eq('station_id', stationId)
-    .eq('active', true)
-
-  return (data ?? []).map((c) => ({
-    wrong: c.wrong,
-    correct: c.correct,
-    caseSensitive: c.case_sensitive,
-    isRegex: c.is_regex,
-    episodeId: c.episode_id,
-  }))
 }
 
 // Lazily produce 15-min M4A chunk paths for the Groq path. Memoized per episode
@@ -222,7 +186,13 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   }
 
   const filteredEpisodes = episodes
-  const corrections = await loadCorrections(stationId)
+  const corrections = await loadCorrectionRules(supabaseAdmin, stationId)
+  const { groupOf } = await loadShowGroups(supabaseAdmin, stationId)
+  // Vocabulary hint (off unless the station turned it on): the show's known
+  // names, as a short comma list, sent to Groq to bias spelling. Talk only.
+  const vocabulary = (await isVocabularyHintEnabled(stationId))
+    ? await loadVocabulary(supabaseAdmin, stationId, groupOf)
+    : null
   let transcribed = 0
 
   for (let i = 0; i < filteredEpisodes.length; i++) {
@@ -237,6 +207,14 @@ async function runTranscribeBatch(job: Job, stationId: string) {
       // Run the provider plan (priority order, automatic fallback). Groq pulls the
       // ffmpeg chunks via getLocalChunks; Deepgram/AssemblyAI fetch the mp3_url
       // directly, so the chunk loader only runs if a chunk-based provider is used.
+      const vocabularyPrompt =
+        vocabulary && shouldUseVocabularyHint(episode.category)
+          ? buildVocabularyPrompt({
+              stationTerms: vocabulary.stationTerms,
+              showNames: vocabulary.namesForShow(episode.show_key),
+              episodeNames: episodeHumanNames(episode.field_sources),
+            })
+          : ''
       const result = await runTranscription(
         {
           episodeId: episode.id,
@@ -245,14 +223,16 @@ async function runTranscribeBatch(job: Job, stationId: string) {
           chunkDurationSec: CHUNK_DURATION_SECONDS,
           getLocalChunks: makeChunkLoader(episode.mp3_url, tmpDir),
           model: groqModel,
+          ...(vocabularyPrompt ? { prompt: vocabularyPrompt } : {}),
         },
         providerPlan,
       )
 
       // Stitch and apply corrections — station-wide rules plus any scoped to THIS
-      // episode only (episode_id). Speaker labels (when diarized) go into the
-      // VTT as voice spans; the plain transcript stays speaker-free for summarize.
-      const episodeCorrections = correctionsForEpisode(corrections, episode.id)
+      // episode (episode_id) or THIS show (show_key, any feed of its group).
+      // Speaker labels (when diarized) go into the VTT as voice spans; the plain
+      // transcript stays speaker-free for summarize.
+      const episodeCorrections = correctionsForEpisode(corrections, episode.id, episode.show_key, groupOf)
       const correctedTranscript = applyCorrections(result.text, episodeCorrections)
       const vtt = buildVtt(result.segments, episodeCorrections, result.diarized)
       const totalDuration = result.durationSec
@@ -314,7 +294,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
       // Populate timed search cues from the VTT (best-effort — never fail the
       // episode over auxiliary search data).
       try {
-        await populateCues(episode.id, vtt)
+        await replaceEpisodeCues(supabaseAdmin, episode.id, vtt)
       } catch (cueErr) {
         console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
       }

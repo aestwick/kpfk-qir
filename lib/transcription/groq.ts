@@ -13,6 +13,7 @@ import type {
   NormalizedSegment,
 } from './types'
 import { resolveGroqModel } from '../groq-models'
+import { dropPromptEchoSegments } from './vocabulary'
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/audio/transcriptions'
 const INTER_CHUNK_DELAY_MS = 1500
@@ -29,7 +30,12 @@ interface WhisperResponse {
   language?: string
 }
 
-async function transcribeChunk(chunkPath: string, model: string): Promise<WhisperResponse> {
+// Groq rejects an oversized/invalid prompt with a 400 rather than trimming it.
+// That must cost us the hint, never the transcript (a throw here would fail the
+// whole Groq attempt over to the next provider).
+class PromptRejectedError extends Error {}
+
+async function transcribeChunk(chunkPath: string, model: string, prompt?: string): Promise<WhisperResponse> {
   const groqKey = process.env.GROQ_API_KEY
   if (!groqKey) throw new Error('GROQ_API_KEY not set')
 
@@ -38,6 +44,7 @@ async function transcribeChunk(chunkPath: string, model: string): Promise<Whispe
   formData.append('file', new Blob([fileData]), path.basename(chunkPath))
   formData.append('model', model)
   formData.append('response_format', 'verbose_json')
+  if (prompt) formData.append('prompt', prompt)
 
   let lastError: Error | null = null
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -59,6 +66,9 @@ async function transcribeChunk(chunkPath: string, model: string): Promise<Whispe
     }
 
     const body = await response.text()
+    if (prompt && response.status === 400 && /prompt/i.test(body)) {
+      throw new PromptRejectedError(`Groq rejected the vocabulary prompt: ${body.slice(0, 200)}`)
+    }
     throw new Error(`Groq API error ${response.status}: ${body}`)
   }
 
@@ -83,12 +93,36 @@ export const groqProvider: TranscriptionProvider = {
 
     for (let i = 0; i < chunkPaths.length; i++) {
       console.log(`[transcribe:groq] ep ${ctx.episodeId} chunk ${i + 1}/${chunkPaths.length}`)
-      const result = await transcribeChunk(chunkPaths[i], model)
-      texts.push(result.text)
-      const offset = i * ctx.chunkDurationSec
-      for (const seg of result.segments ?? []) {
-        segments.push({ startSec: seg.start + offset, endSec: seg.end + offset, text: seg.text })
+      let result: WhisperResponse
+      let promptUsed = !!ctx.prompt
+      try {
+        result = await transcribeChunk(chunkPaths[i], model, ctx.prompt)
+      } catch (err) {
+        if (!(err instanceof PromptRejectedError)) throw err
+        console.warn(`[transcribe:groq] ep ${ctx.episodeId} ${err.message} — retrying chunk without it`)
+        promptUsed = false
+        result = await transcribeChunk(chunkPaths[i], model)
       }
+      const offset = i * ctx.chunkDurationSec
+      let chunkSegments: NormalizedSegment[] = (result.segments ?? []).map((seg) => ({
+        startSec: seg.start + offset,
+        endSec: seg.end + offset,
+        text: seg.text,
+      }))
+      if (promptUsed && ctx.prompt) {
+        // A prompted run can read the name list back as if spoken — drop it.
+        const kept = dropPromptEchoSegments(chunkSegments, ctx.prompt)
+        if (kept.length !== chunkSegments.length) {
+          console.log(`[transcribe:groq] ep ${ctx.episodeId} chunk ${i + 1}: dropped ${chunkSegments.length - kept.length} prompt-echo segment(s)`)
+          chunkSegments = kept
+          texts.push(kept.map((sg) => sg.text.trim()).filter(Boolean).join(' '))
+        } else {
+          texts.push(result.text)
+        }
+      } else {
+        texts.push(result.text)
+      }
+      segments.push(...chunkSegments)
       durationSec += result.duration ?? ctx.chunkDurationSec
       if (i === 0 && result.language) language = result.language
       if (i < chunkPaths.length - 1) {

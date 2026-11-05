@@ -7,48 +7,12 @@
 
 import type { NormalizedSegment } from './types'
 
-interface Correction {
-  wrong: string
-  correct: string
-  caseSensitive: boolean
-  isRegex: boolean
-  /** When set, the correction applies ONLY to this episode (migration 006). */
-  episodeId?: number | null
-}
-
-/**
- * Narrow a station's correction list to the ones that apply to a given episode:
- * station-wide rules (no episodeId) plus rules scoped to exactly this episode.
- * An episode-scoped rule must never leak onto other episodes — a single-letter
- * fix meant for one show would silently corrupt every transcript after it.
- */
-export function correctionsForEpisode<T extends Correction>(
-  corrections: T[],
-  episodeId: number,
-): T[] {
-  return corrections.filter((c) => c.episodeId == null || c.episodeId === episodeId)
-}
-
-export function applyCorrections(text: string, corrections: Correction[]): string {
-  let result = text
-  for (const c of corrections) {
-    const flags = c.caseSensitive ? 'g' : 'gi'
-    if (c.isRegex) {
-      try {
-        result = result.replace(new RegExp(c.wrong, flags), c.correct)
-      } catch (err) {
-        console.warn(
-          `[transcribe] Skipping invalid regex correction "${c.wrong}":`,
-          err instanceof Error ? err.message : err,
-        )
-      }
-    } else {
-      const escaped = c.wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      result = result.replace(new RegExp(escaped, flags), c.correct)
-    }
-  }
-  return result
-}
+// Correction rules live in ./corrections (shared with the corrections worker and
+// the Settings test box); re-exported here for existing importers.
+import { applyCorrections } from './corrections'
+import type { Correction } from './corrections'
+export { applyCorrections, correctionsForEpisode } from './corrections'
+export type { Correction } from './corrections'
 
 function pad(n: number): string {
   return n.toString().padStart(2, '0')

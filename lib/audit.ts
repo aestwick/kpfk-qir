@@ -84,6 +84,10 @@ export const AUDIT_ACTIONS = {
   // Broadcast-week verification run (scripts/verify-week.ts): bulk transcript
   // read + report file export, plus the optional AI content-check pass.
   VERIFY_WEEK_COMPLETE: 'verify.week.complete',
+  // Transcript names (workers/corrections.ts): correction rules re-applied to
+  // STORED transcripts, and the nightly CMS-host sync + suggestion miner.
+  CORRECTIONS_BACKFILL: 'corrections.backfill',
+  CORRECTIONS_NIGHTLY: 'corrections.nightly',
 } as const
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
 
