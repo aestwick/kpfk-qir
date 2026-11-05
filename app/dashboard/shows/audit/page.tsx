@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import { useNavAccess } from '@/app/components/nav-access'
+import { roleAllows } from '@/lib/nav'
 import { isActiveReviewStatus } from '@/lib/compliance-status'
 import { episodeHref } from '@/lib/nav'
 
@@ -99,6 +101,9 @@ type Step = 'select' | 'review' | 'report'
 
 export default function ShowAuditPage() {
   const [step, setStep] = useState<Step>('select')
+  // "Prioritize & Complete" queues paid AI work; the API requires editor.
+  const { role } = useNavAccess()
+  const canProcess = roleAllows(role, 'editor')
 
   // Step 1: Selection
   const [shows, setShows] = useState<Show[]>([])
@@ -583,13 +588,19 @@ export default function ShowAuditPage() {
                       : `${episodesNeedingWork} episode${episodesNeedingWork !== 1 ? 's' : ''} to process`}
                   </span>
                 </div>
-                <button
-                  onClick={handleProcessEpisodes}
-                  disabled={processing}
-                  className="px-5 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
-                >
-                  {processing ? 'Queuing...' : 'Prioritize & Complete'}
-                </button>
+                {canProcess ? (
+                  <button
+                    onClick={handleProcessEpisodes}
+                    disabled={processing}
+                    className="px-5 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                  >
+                    {processing ? 'Queuing...' : 'Prioritize & Complete'}
+                  </button>
+                ) : (
+                  <span className="text-xs text-amber-700 dark:text-amber-400">
+                    An editor or admin can queue these for processing.
+                  </span>
+                )}
               </div>
               {processMessage && (
                 <p className="mt-2 text-sm text-amber-700 dark:text-amber-400">{processMessage}</p>

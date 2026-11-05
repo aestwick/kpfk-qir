@@ -11,10 +11,13 @@ export async function POST(
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
-    // Writes the transcript and spends OpenAI money — editor, like other edits.
+    const { supabase, stationId } = result.context
+
+    // Calls the (paid) translation model and writes the transcript row —
+    // editors and up only. Viewers still see an existing translation: it
+    // comes back with the episode GET, no POST needed.
     const denied = requireRole(result.context, 'editor')
     if (denied) return stationErrorResponse(denied)
-    const { supabase, stationId } = result.context
 
     const episodeId = parseInt(params.id)
     const openaiKey = process.env.OPENAI_API_KEY

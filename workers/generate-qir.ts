@@ -10,12 +10,15 @@ import {
   formatFullReport,
   formatCuratedReport,
   getQuarterDateRange,
+  QIR_CANDIDATE_STATUSES,
+  quarterEpisodeOrFilter,
   spreadCandidates,
   summarizeDateSpread,
   type QirEntry,
 } from '../lib/qir-format'
 import type { EpisodeLog } from '../lib/types'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { fetchBlockingFlags } from '../lib/compliance-blocking'
 
 export interface GenerateQirOptions {
   year: number
@@ -71,8 +74,8 @@ export async function processGenerateQir(job: Job) {
       .from('episode_log')
       .select('*')
       .eq('station_id', stationId)
-      .in('status', ['summarized', 'compliance_checked'])
-      .or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+      .in('status', [...QIR_CANDIDATE_STATUSES])
+      .or(quarterEpisodeOrFilter(start, end))
       .order('air_date', { ascending: true })
       .order('id', { ascending: true })
       .range(from, from + PAGE - 1)
@@ -93,19 +96,9 @@ export async function processGenerateQir(job: Job) {
   let blockedCount = 0
   let gatedEpisodes = episodes
   if (await isComplianceBlocking()) {
-    // Chunked: ~2000 ids in one `in.(…)` overflows the request URL.
-    const blocked = new Set<number>()
-    const ids = episodes.map((e) => e.id)
-    for (let i = 0; i < ids.length; i += 200) {
-      const { data: criticalFlags, error: flagErr } = await supabaseAdmin
-        .from('compliance_flags')
-        .select('episode_id')
-        .in('episode_id', ids.slice(i, i + 200))
-        .eq('severity', 'critical')
-        .neq('review_status', 'dismissed')
-      if (flagErr) throw new Error(`Failed to fetch compliance flags: ${flagErr.message}`)
-      for (const f of criticalFlags ?? []) blocked.add(f.episode_id)
-    }
+    // Same query the report page uses to show what's held out (lib/compliance-blocking.ts).
+    const criticalFlags = await fetchBlockingFlags(supabaseAdmin, episodes.map((e) => e.id))
+    const blocked = new Set<number>(criticalFlags.map((f) => f.episode_id))
     if (blocked.size) {
       blockedCount = blocked.size
       gatedEpisodes = episodes.filter((e) => !blocked.has(e.id))

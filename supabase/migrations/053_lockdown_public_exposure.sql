@@ -1,4 +1,4 @@
--- 046_lockdown_public_exposure.sql
+-- 053_lockdown_public_exposure.sql
 --
 -- Close what the public ("anon") browser key could reach in the shared
 -- Supabase project (docs/bug-sweep-2026-11.md §1; the kpfk-web handoff

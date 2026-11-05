@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { fetchAllRows } from '@/lib/fetch-all'
 import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
+import { setGlobalPaused, setStationPaused, sweepFailedJobs } from '@/lib/pipeline-control'
 import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isStationOverBudget, isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
@@ -328,11 +329,7 @@ export async function POST(request: NextRequest) {
     // -- Global master pause (every station) --
     if (action === 'pause_all' || action === 'resume_all') {
       const paused = action === 'pause_all'
-      const { error } = await supabaseAdmin
-        .from('qir_settings')
-        .upsert({ key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() }, { onConflict: 'key' })
-      if (error) throw error
-      invalidateSetting('pipeline_paused')
+      await setGlobalPaused(paused)
       return NextResponse.json({ ok: true, message: paused ? 'All stations paused' : 'All stations resumed', paused })
     }
 
@@ -406,14 +403,7 @@ export async function POST(request: NextRequest) {
       const station = await resolveStation()
       if (!station) return NextResponse.json({ error: 'Unknown or missing stationId' }, { status: 400 })
       const paused = action === 'pause_station'
-      const { error } = await supabaseAdmin
-        .from('station_settings')
-        .upsert(
-          { station_id: station.id, key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() },
-          { onConflict: 'station_id,key' }
-        )
-      if (error) throw error
-      invalidateSetting('pipeline_paused')
+      await setStationPaused(station.id, paused)
       return NextResponse.json({ ok: true, message: `${station.slug} ${paused ? 'paused' : 'resumed'}`, paused })
     }
 
@@ -491,20 +481,11 @@ export async function POST(request: NextRequest) {
       const targets: QueueName[] = only ? [only] : (Object.keys(QUEUES) as QueueName[])
       const stationId = body.stationId as string | undefined
 
-      let count = 0
-      for (const name of targets) {
-        const failed = await QUEUES[name].getFailed(0, 1000)
-        const scoped = stationId ? failed.filter((j: any) => j.data?.stationId === stationId) : failed
-        for (const job of scoped) {
-          try {
-            if (action === 'retry_failed') await job.retry()
-            else await job.remove()
-            count++
-          } catch {
-            // Job may have been removed or already retried — skip.
-          }
-        }
-      }
+      const count = await sweepFailedJobs({
+        action: action === 'retry_failed' ? 'retry' : 'clear',
+        queues: targets,
+        stationId,
+      })
       const verb = action === 'retry_failed' ? 'Retried' : 'Cleared'
       const scope = stationId ? ' for station' : ''
       const where = only ? ` ${only}` : ''

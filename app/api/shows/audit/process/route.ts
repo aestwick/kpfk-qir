@@ -24,11 +24,11 @@ export async function POST(request: NextRequest) {
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
-    // Re-queues episodes (spends transcription/AI money) — editor, like every
-    // other pipeline action. Viewers had no guard here.
+    const { supabase, stationId } = result.context
+
+    // Queues paid transcription/summarization — editors and up only.
     const denied = requireRole(result.context, 'editor')
     if (denied) return stationErrorResponse(denied)
-    const { supabase, stationId } = result.context
 
     const body = await request.json()
     const { episode_ids } = body as { episode_ids: number[] }

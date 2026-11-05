@@ -1,4 +1,4 @@
--- 047_role_aware_write_policies.sql
+-- 054_role_aware_write_policies.sql
 --
 -- Make the database enforce the same roles the app does
 -- (docs/bug-sweep-2026-11.md §2). Until now every *_write policy checked only
@@ -11,8 +11,10 @@
 -- After this migration:
 --   * writes to station content need EDITOR (or admin / super-admin), matching
 --     every API route's requireRole(…, 'editor');
---   * the per-station pause flag and spend caps in station_settings are
---     super-admin only (Master Control already writes them via the service role);
+--   * spend caps in station_settings are super-admin only, and the pause flag
+--     can't be written directly: station editors pause/resume their own station
+--     through api/jobs, super-admins through Master Control — both write via the
+--     service role (lib/pipeline-control.ts), which bypasses RLS;
 --   * usage_log is written only by the service role (lib/usage.ts).
 -- Reads are unchanged (the *_select policies stay membership-scoped).
 --
@@ -70,6 +72,23 @@ create policy wordlist_write_station on public.compliance_wordlist for all
   using (station_id is not null and public.user_has_station_role(station_id, 'editor'))
   with check (station_id is not null and public.user_has_station_role(station_id, 'editor'));
 
+-- Names/vocabulary tables (migration 047_transcript_names). Guarded so this
+-- file still applies if those tables are ever renamed; their routes already
+-- requireRole(…, 'editor').
+do $$
+declare t text;
+begin
+  foreach t in array array['transcript_vocabulary', 'transcript_correction_suggestions'] loop
+    if to_regclass('public.' || t) is not null then
+      execute format('drop policy if exists %I on public.%I',
+        case t when 'transcript_vocabulary' then 'vocabulary_write' else 'correction_suggestions_write' end, t);
+      execute format(
+        'create policy %I on public.%I for all using (public.user_has_station_role(station_id, %L)) with check (public.user_has_station_role(station_id, %L))',
+        case t when 'transcript_vocabulary' then 'vocabulary_write' else 'correction_suggestions_write' end, t, 'editor', 'editor');
+    end if;
+  end loop;
+end $$;
+
 -- ── Tables scoped through their episode: editor on the episode's station.
 drop policy if exists compliance_flags_write on public.compliance_flags;
 create policy compliance_flags_write on public.compliance_flags for all
@@ -113,9 +132,10 @@ begin
   end if;
 end $$;
 
--- ── station_settings: editor for ordinary overrides (prompts, batch sizes, …);
---    the per-station pause flag and spend caps are super-admin only. A station
---    editor could otherwise un-park a paused station or lift its cap.
+-- ── station_settings: editor for ordinary overrides (prompts, batch sizes, …).
+--    Spend caps and the pause flag only via super-admin here; otherwise a member
+--    could lift a cap (or flip the pause) straight through PostgREST, bypassing
+--    the app's checks and its audit events.
 drop policy if exists station_settings_write on public.station_settings;
 create policy station_settings_write on public.station_settings for all
   using (

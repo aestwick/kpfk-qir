@@ -173,6 +173,14 @@ export async function isDiarizationEnabled(stationId: string): Promise<boolean> 
   return (await getSetting<boolean>('diarization_enabled', stationId)) ?? true
 }
 
+// Whisper vocabulary hint (lib/transcription/vocabulary.ts): send each talk
+// episode's show names to Groq as a spelling `prompt`. OFF by default — turned
+// on per station after the names benchmark (scripts/benchmark-names.ts) shows
+// it helps talk shows and leaves music untouched. Never applied to Music.
+export async function isVocabularyHintEnabled(stationId: string): Promise<boolean> {
+  return (await getSetting<boolean>('vocabulary_hint_enabled', stationId)) ?? false
+}
+
 export async function getSummarizeBatchSize(stationId: string): Promise<number> {
   return (await getSetting<number>('summarize_batch_size', stationId)) ?? 10
 }
@@ -274,9 +282,11 @@ export async function isStationPaused(stationId: string): Promise<boolean> {
 }
 
 /**
- * station_settings keys only a super-admin may write: the per-station pause
- * flag and spend caps (budget controls set in Master Control). Mirrored in the
- * station_settings_write RLS policy (migration 047).
+ * station_settings keys no station user may write as a generic setting: spend
+ * caps (super-admin, Master Control) and the pause flag (only through the
+ * dedicated pause actions — api/jobs for the station's editors, Master Control
+ * for super-admins — which write via the service role). Mirrored in the
+ * station_settings_write RLS policy (migration 054).
  */
 export const SUPER_ADMIN_STATION_KEYS: ReadonlySet<string> = new Set([
   'pipeline_paused',

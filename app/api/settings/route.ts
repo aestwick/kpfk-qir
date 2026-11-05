@@ -126,9 +126,10 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ ok: true, scope: 'global' })
     }
 
-    // The per-station pause flag and spend caps are budget controls a super-admin
-    // sets in Master Control; a station editor must not lift them (RLS enforces
-    // the same rule — migration 047).
+    // Spend caps are budget controls a super-admin sets in Master Control; a
+    // station editor must not lift them. The pause flag isn't a generic setting
+    // either: a station editor pauses/resumes their own station from the Jobs
+    // page (api/jobs → lib/pipeline-control). RLS enforces the same — migration 054.
     if (SUPER_ADMIN_STATION_KEYS.has(key) && !result.context.isSuperAdmin) {
       return stationErrorResponse({ status: 403, error: 'Pause and spend limits can only be changed by a super-admin' })
     }
