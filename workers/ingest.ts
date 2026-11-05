@@ -9,6 +9,7 @@ import { ingestQueue } from '../lib/queue'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { fetchConfessorEpisodes, normalizeConfessorMp3Url, projectPubfile } from '../lib/confessor'
 import { buildHumanFieldSources } from '../lib/field-sources'
+import { stationWallClock, stationEndClock, stationTimeZone } from '../lib/station-time'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -16,53 +17,6 @@ const parser = new XMLParser({
   cdataPropName: '__cdata',
   isArray: (name) => name === 'item',
 })
-
-function toPacificDate(utcDateStr: string): {
-  date: string
-  airDate: string
-  startTime: string
-  endTime: string
-  airStart: string
-  airEnd: string
-} {
-  const d = new Date(utcDateStr)
-  const pacific = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(d)
-
-  const timeFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Los_Angeles',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  })
-  const startTime = timeFormatter.format(d)
-
-  const airDateFmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Los_Angeles',
-  }).format(d) // YYYY-MM-DD
-
-  const time24 = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'America/Los_Angeles',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(d)
-
-  return {
-    date: pacific,
-    airDate: airDateFmt,
-    startTime,
-    endTime: '', // will be calculated from duration if available
-    airStart: time24,
-    airEnd: '',
-  }
-}
 
 /** Has this station already ingested an episode with this MP3 URL? (cross-source dedupe key) */
 async function episodeExists(stationId: string, mp3Url: string): Promise<boolean> {
@@ -75,21 +29,6 @@ async function episodeExists(stationId: string, mp3Url: string): Promise<boolean
   return !!data?.length
 }
 
-const PACIFIC = 'America/Los_Angeles'
-
-/** Pacific-time wall-clock for an end instant derived from start + duration. */
-function computeEnd(startMs: number, durationMinutes: number | null): { endTime: string; airEnd: string } {
-  if (!durationMinutes) return { endTime: '', airEnd: '' }
-  const end = new Date(startMs + durationMinutes * 60 * 1000)
-  const endTime = new Intl.DateTimeFormat('en-US', {
-    timeZone: PACIFIC, hour: 'numeric', minute: '2-digit', hour12: true,
-  }).format(end)
-  const airEnd = new Intl.DateTimeFormat('en-GB', {
-    timeZone: PACIFIC, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).format(end)
-  return { endTime, airEnd }
-}
-
 /**
  * Pull a show's recent episodes from the Confessor API (`?req=fil`), preserving
  * the human-entered pubfile metadata. Returns { count, ok }: ok=false signals a
@@ -98,7 +37,7 @@ function computeEnd(startMs: number, durationMinutes: number | null): { endTime:
  */
 async function processShowConfessor(
   show: { key: string; show_name: string; category: string },
-  station: { id: string; confessorBase: string; archiveBase: string },
+  station: { id: string; confessorBase: string; archiveBase: string; timeZone: string },
   num: number
 ): Promise<{ count: number; ok: boolean }> {
   let rows
@@ -120,8 +59,9 @@ async function processShowConfessor(
     const durationMinutes = row.lsecs ? Math.round(row.lsecs / 60) : null
     // def_time is the airing's unix timestamp (seconds) — ground truth.
     const startMs = row.def_time ? row.def_time * 1000 : null
-    const startStr = startMs != null ? toPacificDate(new Date(startMs).toISOString()) : null
-    const end = startMs != null ? computeEnd(startMs, durationMinutes) : { endTime: '', airEnd: '' }
+    // Rendered in the STATION's zone (was hard-coded Pacific).
+    const startStr = startMs != null ? stationWallClock(startMs, station.timeZone) : null
+    const end = startMs != null ? stationEndClock(startMs, durationMinutes, station.timeZone) : { endTime: '', airEnd: '' }
 
     const proj = projectPubfile(row.pubfile)
     // Seed the per-field provenance with the human copies. The summarizer fills
@@ -185,7 +125,7 @@ async function processShowConfessor(
 
 async function processShow(
   show: { key: string; show_name: string; category: string; feed_name?: string | null },
-  station: { id: string; rssBaseUrl: string; mp3Prefix: string }
+  station: { id: string; rssBaseUrl: string; mp3Prefix: string; timeZone: string }
 ): Promise<number> {
   let newCount = 0
   // No RSS feed configured for this station — nothing to pull (used as the
@@ -262,34 +202,18 @@ async function processShow(
       const urlParsed = parseMp3Url(mp3Url, station.mp3Prefix)
 
       if (pubDate) {
-        const p = toPacificDate(pubDate)
+        // Fallback when the filename doesn't parse: the pubDate instant in the
+        // STATION's zone (was hard-coded Pacific — KPFT logged 2h early).
+        const startMs = new Date(pubDate).getTime()
+        const p = stationWallClock(startMs, station.timeZone)
+        const end = stationEndClock(startMs, durationMinutes, station.timeZone)
         dateInfo = {
           date: p.date,
           airDate: p.airDate,
           startTime: p.startTime,
-          endTime: p.endTime,
+          endTime: end.endTime,
           airStart: p.airStart,
-          airEnd: p.airEnd,
-        }
-
-        // Calculate end time from duration
-        if (durationMinutes && pubDate) {
-          const endDate = new Date(new Date(pubDate).getTime() + durationMinutes * 60 * 1000)
-          const endTimeFmt = new Intl.DateTimeFormat('en-US', {
-            timeZone: 'America/Los_Angeles',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-          }).format(endDate)
-          const endTime24 = new Intl.DateTimeFormat('en-GB', {
-            timeZone: 'America/Los_Angeles',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-          }).format(endDate)
-          dateInfo.endTime = endTimeFmt
-          dateInfo.airEnd = endTime24
+          airEnd: end.airEnd,
         }
       }
 
@@ -392,11 +316,13 @@ export async function processIngest(job: Job) {
     id: station.id,
     rssBaseUrl: station.rss_base_url ?? '',
     mp3Prefix: station.mp3_filename_prefix ?? 'kpfk',
+    timeZone: stationTimeZone(station.timezone),
   }
   const confessorCtx = {
     id: station.id,
     confessorBase: station.confessor_base_url ?? '',
     archiveBase: station.rss_base_url ?? '',
+    timeZone: stationTimeZone(station.timezone),
   }
   // How many recent episodes to request per show from Confessor (matches the
   // RSS feed depth roughly; archive only returns non-expired rows anyway).
