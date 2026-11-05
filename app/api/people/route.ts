@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { mergePeople, samePerson, type PersonRow } from '@/lib/people'
+import { loadShowCatalog, catalogName } from '@/lib/show-catalog'
+
+export const dynamic = 'force-dynamic'
+
+// GET /api/people?q=<name>   — hosts/guests matching a (possibly misspelled)
+//                              name, spelling variants merged into one person.
+// GET /api/people?name=<name> — one person's appearances (every spelling),
+//                              newest first.
+// Backed by search_people()/person_appearances() (migration 046): SECURITY
+// DEFINER with an explicit station-membership check, plus our station_id arg.
+export async function GET(request: NextRequest) {
+  try {
+    const result = await getStationContext(request)
+    if (result.error) return stationErrorResponse(result.error)
+    const { supabase, stationId } = result.context
+
+    const sp = new URL(request.url).searchParams
+    const name = (sp.get('name') ?? '').trim()
+    const q = (sp.get('q') ?? name).trim()
+    if (q.length < 2) return NextResponse.json({ people: [] })
+
+    const { data, error } = await supabase.rpc('search_people', { p_station_id: stationId, p_query: q, p_limit: 40 })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const people = mergePeople((data ?? []) as PersonRow[])
+
+    if (!name) return NextResponse.json({ people: people.slice(0, 20) })
+
+    // Detail: the merged person whose spellings best match the requested name.
+    const person = people.find((p) => samePerson(p.name, name) || p.variants.some((v) => samePerson(v, name))) ?? people[0]
+    if (!person) return NextResponse.json({ person: null, appearances: [] })
+
+    const [{ data: apps, error: e2 }, catalog] = await Promise.all([
+      supabase.rpc('person_appearances', { p_station_id: stationId, p_folded: person.spellings }),
+      loadShowCatalog(supabase, stationId),
+    ])
+    if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
+
+    // One row per episode: an episode can list the person as host AND guest.
+    const byEpisode = new Map<number, Record<string, unknown>>()
+    for (const a of (apps ?? []) as Record<string, any>[]) {
+      const id = Number(a.episode_id)
+      const prev = byEpisode.get(id)
+      if (prev) {
+        ;(prev.roles as string[]).push(a.role)
+        continue
+      }
+      byEpisode.set(id, {
+        episodeId: id,
+        roles: [a.role],
+        spelledAs: a.name,
+        airDate: a.air_date,
+        airStart: a.air_start,
+        showKey: a.show_key,
+        showName: catalogName(catalog, a.show_key, a.show_name),
+        headline: a.headline,
+        issueCategory: a.issue_category,
+        status: a.status,
+      })
+    }
+    const appearances = Array.from(byEpisode.values()).sort(
+      (a, b) => String(b.airDate ?? '').localeCompare(String(a.airDate ?? '')) || String(b.airStart ?? '').localeCompare(String(a.airStart ?? ''))
+    )
+    return NextResponse.json({ person, appearances, others: people.filter((p) => p !== person).slice(0, 8) })
+  } catch (err) {
+    console.error('GET /api/people failed:', err)
+    return NextResponse.json({ error: 'Failed to search people' }, { status: 500 })
+  }
+}

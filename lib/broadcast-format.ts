@@ -71,10 +71,10 @@ export function formatOffset(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`
 }
 
-/** Duration in seconds → "1h", "58m", "1h 30m". */
-export function formatDurationShort(seconds: number | null | undefined): string {
-  if (!seconds || seconds <= 0) return '—'
-  const mins = Math.round(seconds / 60)
+/** Duration in minutes (episode_log.duration) → "1h", "58m", "1h 30m". */
+export function formatMinutes(minutes: number | null | undefined): string {
+  if (!minutes || minutes <= 0) return '—'
+  const mins = Math.round(minutes)
   const h = Math.floor(mins / 60)
   const m = mins % 60
   if (!h) return `${m}m`

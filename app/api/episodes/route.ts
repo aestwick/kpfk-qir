@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
+import { getQuarterDateRange } from '@/lib/qir-format'
+import { isIsoDate } from '@/lib/broadcast-format'
+
+// Columns the list may be sorted by (the value reaches .order() verbatim).
+const SORTABLE = new Set(['created_at', 'updated_at', 'air_date', 'show_name', 'status', 'duration', 'issue_category', 'id'])
 
 export const dynamic = 'force-dynamic'
 
@@ -17,8 +22,9 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category')
     const programCategory = searchParams.get('program_category') // genre: episode_log.category
     const quarter = searchParams.get('quarter') // e.g. "2025-Q1"
-    const sort = searchParams.get('sort') ?? 'created_at'
-    const order = searchParams.get('order') ?? 'desc'
+    const sortParam = searchParams.get('sort') ?? 'created_at'
+    const sort = SORTABLE.has(sortParam) ? sortParam : 'created_at'
+    const order = searchParams.get('order') === 'asc' ? 'asc' : 'desc'
     const page = parseInt(searchParams.get('page') ?? '1')
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '50') || 50, 500)
     const offset = (page - 1) * limit
@@ -29,7 +35,9 @@ export async function GET(request: NextRequest) {
       .select('*', { count: 'exact' })
       .eq('station_id', stationId)
       .order(sort, { ascending: order === 'asc' })
-      .range(offset, offset + limit - 1)
+    // Within one air date, list in air-time order (what a broadcast log reads like).
+    if (sort === 'air_date') query = query.order('air_start', { ascending: order === 'asc', nullsFirst: false })
+    query = query.range(offset, offset + limit - 1)
 
     // Hide the PRA archive (status 'archived') by default. An explicit status
     // filter — including selecting 'archived' — overrides this.
@@ -41,14 +49,25 @@ export async function GET(request: NextRequest) {
     if (category) query = query.eq('issue_category', category)
     if (programCategory) query = query.eq('category', programCategory)
 
-    if (quarter) {
-      const [year, q] = quarter.split('-Q')
-      const qNum = parseInt(q)
-      const startMonth = (qNum - 1) * 3
-      const start = new Date(parseInt(year), startMonth, 1).toISOString().slice(0, 10)
-      const end = new Date(parseInt(year), startMonth + 3, 0).toISOString().slice(0, 10)
+    const quarterMatch = quarter?.match(/^(\d{4})-Q([1-4])$/)
+    if (quarterMatch) {
+      const { start, end } = getQuarterDateRange(parseInt(quarterMatch[1], 10), parseInt(quarterMatch[2], 10))
       // Match episodes by air_date, or by created_at for episodes with null air_date
       query = query.or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+    }
+
+    // Explicit air-date range (station-local dates), e.g. one day: from=to.
+    const from = searchParams.get('from')
+    const to = searchParams.get('to')
+    if (from && isIsoDate(from)) query = query.gte('air_date', from)
+    if (to && isIsoDate(to)) query = query.lte('air_date', to)
+
+    // Free text over the fields a person remembers: show, headline, host, guest.
+    // PostgREST or() syntax treats , ( ) as separators, so strip them first.
+    const text = (searchParams.get('q') ?? '').replace(/[,()*%\\]/g, ' ').trim().slice(0, 80)
+    if (text) {
+      const like = `%${text}%`
+      query = query.or(`show_name.ilike.${like},headline.ilike.${like},title.ilike.${like},host.ilike.${like},guest.ilike.${like}`)
     }
 
     const since = searchParams.get('since')
@@ -81,7 +100,7 @@ export async function GET(request: NextRequest) {
         actorId: result.context.userId,
         stationId,
         resourceType: 'episode',
-        metadata: { format: 'csv', count: rows.length, filters: { status, show, category, quarter } },
+        metadata: { format: 'csv', count: rows.length, filters: { status, show, category, quarter, from, to, q: text } },
         ip: meta.ip,
         userAgent: meta.userAgent,
       })
