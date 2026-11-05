@@ -91,6 +91,10 @@ lib/
   ratelimit.ts      — Redis sliding-window rate limiter (per key)
   api-cache.ts      — Redis response cache with versioned invalidation
   api-handler.ts    — withApiKey() wrapper: auth → scope → rate-limit → cache → ETag
+  compliance-tier.ts — Pure triage tiers for compliance flags (high-risk words,
+                      safe harbor at the moment it aired); used by /api/compliance/triage
+  fetch-all.ts      — fetchAllRows(): pages past PostgREST's 1000-row cap. Use it for
+                      any read that can exceed 1000 rows (it silently truncates otherwise)
   episode-feed.ts   — Pure logic behind GET /api/v1/episodes: the published-status
                       contract, field allowlist, param parsing/validation, keyset
                       cursor codec, response envelopes, public_id ref resolution
@@ -143,7 +147,11 @@ app/dashboard/              (menu label in quotes — the menu itself is lib/nav
   shows/audit/page.tsx      — "Show check-up": per-show completeness + issues report
   search/page.tsx           — "Search transcripts"
   generate/page.tsx         — "Quarterly report": QIR draft builder (?quarter=YYYY-Qn)
-  compliance/page.tsx       — "Review flags"; compliance/grid — "Flags by time slot"
+  compliance/triage/page.tsx — "Review flags": triage by tier (lib/compliance-tier.ts) —
+                              A listen-now / B glance / C safe harbor / D other checks;
+                              inline audio, 1–5 keys to decide, bulk close for C and
+                              switched-off checks; data from GET /api/compliance/triage
+  compliance/page.tsx       — "All flags" (the filterable table); compliance/grid — "Flags by time slot"
   settings/page.tsx         — "Settings" (tabs addressable: ?tab=shows|members|…)
   api-keys/page.tsx         — "API keys" (station admin)
   jobs/page.tsx             — "Processing queue" (active station)
@@ -174,7 +182,10 @@ quarter's unreviewed critical compliance flags. Rationale:
 ```
 app/
   page.tsx                  — Redirects to /dashboard
-  login/page.tsx            — Supabase email/password auth
+  login/page.tsx            — Supabase email/password auth (honours a same-origin ?next=)
+  compliance-report/page.tsx — Printable compliance report. Staff-only: the server renders
+                              a shell; flags load client-side through the authenticated
+                              /api/compliance/report (never read with the service role here)
   [station]/[year]/q[quarter]/page.tsx — Public finalized QIR (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
 ```
 

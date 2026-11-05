@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import Link from 'next/link'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
@@ -681,7 +682,7 @@ export default function CompliancePage() {
     <div className="space-y-6">
       <Breadcrumbs />
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">All flags</h1>
         <div className="flex items-center gap-2">
           <a
             href="/dashboard/compliance/grid"
@@ -722,15 +723,15 @@ export default function CompliancePage() {
         </div>
       )}
       {stats.pendingTriage > 0 && (
-        <button
-          onClick={() => { setFilterStatus('suggested'); setPage(1) }}
+        <Link
+          href="/dashboard/compliance/triage"
           className="w-full text-left bg-gray-50 border rounded-xl px-4 py-3 flex items-center justify-between hover:bg-gray-100 dark:bg-warm-800 dark:border-warm-700 dark:hover:bg-warm-700/50"
         >
           <span className="text-sm text-gray-700 dark:text-warm-200">
             <span className="font-semibold">{stats.pendingTriage}</span> suggested flag{stats.pendingTriage !== 1 ? 's' : ''} awaiting review
           </span>
-          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Review &rarr;</span>
-        </button>
+          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Review, most urgent first &rarr;</span>
+        </Link>
       )}
 
       {/* Summary Stats Strip — active offenses (investigating + violation) by type */}
