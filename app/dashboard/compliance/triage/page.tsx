@@ -132,16 +132,22 @@ export default function TriagePage() {
     router.replace(`${pathname}?${p.toString()}`, { scroll: false })
   }, [pathname, router, searchParams])
 
+  // The quarter on screen. A slower response for a quarter you've already
+  // switched away from must not replace the one you're now deciding on.
+  const activeQuarter = useRef(quarter)
+  activeQuarter.current = quarter
+
   const load = useCallback(async () => {
     try {
       const res = await authedFetch(`/api/compliance/triage?quarter=${quarter}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const d = (await res.json()) as TriageData
       dataCache.set(quarter, d)
+      if (activeQuarter.current !== quarter) return
       setData(d)
       setError(null)
     } catch {
-      setError('The flags could not be loaded. Refresh to try again.')
+      if (activeQuarter.current === quarter) setError('The flags could not be loaded. Refresh to try again.')
     }
   }, [quarter])
 
@@ -206,14 +212,19 @@ export default function TriagePage() {
   }, [selected?.id])
 
   /* ─── writes ─── */
-  const patch = useCallback(async (ids: number[], status: ReviewStatus, notes: string | null) => {
+  // Writes in chunks of 100. Each chunk commits on its own, so `saved` (when
+  // given) collects the ids that made it — a failure partway through leaves
+  // those saved, and the caller has to say so rather than pretend nothing was.
+  const patch = useCallback(async (ids: number[], status: ReviewStatus, notes: string | null, saved?: number[]) => {
     for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100)
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: ids.slice(i, i + 100), review_status: status, resolved_notes: notes }),
+        body: JSON.stringify({ ids: chunk, review_status: status, resolved_notes: notes }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      saved?.push(...chunk)
     }
   }, [])
 
@@ -250,33 +261,40 @@ export default function TriagePage() {
       ?? list.find((f) => !ids.has(f.id) && OPEN_STATUSES.has(f.review_status))
     applyLocal(after)
     if (status !== 'investigating' && OPEN_STATUSES.has(targets[0].review_status)) setSelectedId(nextOpen?.id ?? null)
-    try {
-      await patch(targets.map((t) => t.id), status, notes)
-      toast('success', `${targets.length === 1 ? 'Flag' : `${targets.length} flags`}: ${label}`, {
-        label: 'Undo',
-        onClick: async () => {
-          applyLocal(before)
-          setSelectedId(targets[0].id)
-          // Restore each original status (grouped, so it's one write per status).
-          const groups = new Map<string, number[]>()
-          before.forEach((v, id) => {
-            const k = JSON.stringify([v.review_status, v.resolved_notes])
-            groups.set(k, [...(groups.get(k) ?? []), id])
-          })
-          try {
-            for (const [k, gids] of Array.from(groups)) {
-              const [st, n] = JSON.parse(k)
-              await patch(gids, st, n)
-            }
-          } catch {
-            toast('error', 'Undo failed. Refresh and check those flags.')
-          }
-        },
-      })
-    } catch {
-      applyLocal(before)
+    // Undo for the flags whose new status was saved: put back what they were.
+    const undoFor = (ids: number[]) => async () => {
+      const prev = new Map(ids.map((id) => [id, before.get(id)!]))
+      applyLocal(prev)
       setSelectedId(targets[0].id)
-      toast('error', 'That decision was not saved. Check your connection and try again.')
+      // One write per original status.
+      const groups = new Map<string, number[]>()
+      prev.forEach((v, id) => {
+        const k = JSON.stringify([v.review_status, v.resolved_notes])
+        groups.set(k, [...(groups.get(k) ?? []), id])
+      })
+      try {
+        for (const [k, gids] of Array.from(groups)) {
+          const [st, n] = JSON.parse(k)
+          await patch(gids, st, n)
+        }
+      } catch {
+        toast('error', 'Undo failed. Refresh and check those flags.')
+      }
+    }
+    const saved: number[] = []
+    try {
+      await patch(targets.map((t) => t.id), status, notes, saved)
+      toast('success', `${targets.length === 1 ? 'Flag' : `${targets.length} flags`}: ${label}`, { label: 'Undo', onClick: undoFor(saved) })
+    } catch {
+      // Roll back on screen only what didn't reach the database.
+      const savedSet = new Set(saved)
+      applyLocal(new Map(Array.from(before).filter(([id]) => !savedSet.has(id))))
+      setSelectedId(targets[0].id)
+      if (saved.length === 0) {
+        toast('error', 'That decision was not saved. Check your connection and try again.')
+      } else {
+        toast('error', `Saved ${saved.length} of ${targets.length}; the other ${targets.length - saved.length} were not saved. Try again for the rest.`, { label: 'Undo the saved ones', onClick: undoFor(saved) })
+      }
     } finally {
       setBusy(false)
     }
