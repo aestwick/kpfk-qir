@@ -12,6 +12,8 @@ They are ranked by who gets hurt: the FCC public file and the GM first, then the
 
 ## 1. CRITICAL: parts of the database are writable by anyone holding the public key
 
+> **Status (2026-11-05): fix written: migration `053_lockdown_public_exposure.sql`. Not yet applied; it applies at the next deploy.** A dependency check against live query stats found two legitimate public-key readers on the public website: the episode player (`aestwick/cms` `snippets/886_episode-player.html`, ~41k calls) and the show-tag chips (`snippets/891_show-tags`). Both are kept working. The player now sees only *published* episodes and only the 6 columns it asks for. The ownership note below is corrected: `contacts`, `tags` and the rest belong to neither QIR nor the current CMS code; the public site's snippets are their only users.
+
 **What's wrong.** The site ships a public "anon" Supabase key to every browser, which is normal; Supabase relies on row-level security (RLS) to make that safe. Live, the following are unsafe:
 
 - **`qir_settings` has RLS turned off**, and the anon role has full INSERT/UPDATE/DELETE/TRUNCATE. This table holds every station's default prompts (summarization, curation, compliance), `compliance_blocking`, `pipeline_paused`, and the spend ceilings. Anyone who copies the key out of the site's JavaScript could:
@@ -40,6 +42,10 @@ They are ranked by who gets hurt: the FCC public file and the GM first, then the
 Before step 3, confirm that no CMS or podcast code reads `episode_log` with the anon key. **Effort:** about an hour plus that check. **Recommend applying this week.**
 
 ## 2. HIGH: role checks exist only in the app; the database lets any member write
+
+> **Status (2026-11-05): fix written.**
+> - Migration `054_role_aware_write_policies.sql` requires editor to write; spend caps are super-admin only and the station pause flag can't be written directly (station editors pause/resume their own station from the Jobs page, per #171); `usage_log` is service-role only.
+> - App guards: the Jobs-page and route fixes landed in #171 (station-scoped pause, a super-admin pause-all, station-scoped clear/retry and job list, editor on translate and audit-reprocess); this PR adds the settings 403 for pause and cap keys.
 
 **What's wrong.** The app enforces viewer/editor/admin in `lib/auth.ts#requireRole`. The RLS write policies only check *membership*: `episode_log_write`, `qir_drafts_write`, `compliance_flags_write`, `transcripts_write`, `station_settings_write`, `usage_log_write`, `wordlist_write_station` and `show_keys_write`. A **viewer** (there are 2 live) can call PostgREST directly with their own login token and:
 - set a draft to `status='final'` or rewrite its entries. It then shows on the public FCC page through `qir_drafts_public_final`.

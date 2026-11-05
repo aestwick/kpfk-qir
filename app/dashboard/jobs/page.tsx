@@ -5,6 +5,9 @@ import { authedFetch } from '@/lib/api-client'
 import { SkeletonCard } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
+import { useNavAccess } from '@/app/components/nav-access'
+import { roleAllows } from '@/lib/nav'
+import { describePause } from '@/lib/job-actions'
 import { useQueueSSE, EpisodeBacklog, EpisodeCounts, ActiveJobInfo } from '@/lib/use-sse'
 
 interface FailedJob {
@@ -120,7 +123,13 @@ export default function JobsPage() {
   const queues = useQueueSSE()
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [pipelineMode, setPipelineMode] = useState<PipelineMode>('steady')
-  const [pipelinePaused, setPipelinePaused] = useState(false)
+  // Two independent flags: the all-stations kill switch (super-admin) and
+  // this station's own pause (any editor). Either one stops this station.
+  const [pausedGlobal, setPausedGlobal] = useState(false)
+  const [pausedStation, setPausedStation] = useState(false)
+  const pipelinePaused = pausedGlobal || pausedStation
+  const { role, isSuperAdmin } = useNavAccess()
+  const canEdit = roleAllows(role, 'editor')
   const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> & { backlog?: EpisodeBacklog } | null>(null)
   const [confirmClear, setConfirmClear] = useState<string | null>(null)
   const [sseTimedOut, setSseTimedOut] = useState(false)
@@ -158,8 +167,12 @@ export default function JobsPage() {
       if (jobsRes.ok) {
         const data = await jobsRes.json()
         setFailedDetails(data)
-        if (typeof data.pipeline_paused === 'boolean') {
-          setPipelinePaused(data.pipeline_paused)
+        if (typeof data.pipeline_paused_global === 'boolean') {
+          setPausedGlobal(data.pipeline_paused_global)
+          setPausedStation(!!data.pipeline_paused_station)
+        } else if (typeof data.pipeline_paused === 'boolean') {
+          setPausedGlobal(false)
+          setPausedStation(data.pipeline_paused)
         }
       }
       if (settingsRes.ok) {
@@ -261,7 +274,8 @@ export default function JobsPage() {
         body: JSON.stringify({ action: 'clear_failed', queue: queueName }),
       })
       if (res.ok) {
-        toast('success', `Cleared failed jobs from ${queueName}`)
+        const data = await res.json().catch(() => ({} as { message?: string }))
+        toast('success', data.message ?? `Cleared failed jobs from ${queueName}`)
         await fetchDetails()
       } else {
         const data = await res.json().catch(() => ({}))
@@ -422,21 +436,28 @@ export default function JobsPage() {
 
   const totalCurrentJobs = activeJobsFromSSE.length + waitingJobs.length
 
-  async function togglePause() {
-    const action = pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
-    setActionLoading('pause')
+  // scope 'station' → this station's own flag; 'all' → every station (super-admin).
+  async function togglePause(scope: 'station' | 'all') {
+    const currentlyPaused = scope === 'all' ? pausedGlobal : pausedStation
+    if (scope === 'all' && !currentlyPaused && !confirm('Pause processing for EVERY station?')) return
+    const action = scope === 'all'
+      ? (currentlyPaused ? 'resume_all' : 'pause_all')
+      : (currentlyPaused ? 'resume_pipeline' : 'pause_pipeline')
+    setActionLoading(scope === 'all' ? 'pause-all' : 'pause')
     try {
       const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
+      const body = await res.json().catch(() => ({} as { error?: string; message?: string }))
       if (!res.ok) {
-        toast('error', 'Failed to toggle pipeline')
+        toast('error', body.error ?? 'Failed to change pause state')
         return
       }
-      setPipelinePaused(!pipelinePaused)
-      toast('success', pipelinePaused ? 'Pipeline resumed' : 'Pipeline paused')
+      if (scope === 'all') setPausedGlobal(!currentlyPaused)
+      else setPausedStation(!currentlyPaused)
+      toast('success', body.message ?? 'Updated')
       setTimeout(fetchDetails, 1000)
     } catch {
       toast('error', 'Network error')
@@ -445,43 +466,69 @@ export default function JobsPage() {
     }
   }
 
+  const pause = describePause({ global: pausedGlobal, station: pausedStation })
+
   return (
     <div className="space-y-6">
       {pipelinePaused && (
-        <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/40 px-5 py-3.5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <span className="inline-flex rounded-full h-3 w-3 bg-red-500" />
-            <span className="text-sm font-semibold text-red-700 dark:text-red-300">Pipeline is paused</span>
-            <span className="text-xs text-red-500 dark:text-red-400">No jobs will run until resumed. Cron jobs will be skipped.</span>
+        <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800/40 px-5 py-3.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="inline-flex rounded-full h-3 w-3 bg-red-500 shrink-0" />
+            <span className="text-sm font-semibold text-red-700 dark:text-red-300">{pause.headline}</span>
+            <span className="text-xs text-red-500 dark:text-red-400">{pause.detail}</span>
           </div>
-          <button
-            onClick={togglePause}
-            disabled={anyLoading}
-            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50 transition-colors"
-          >
-            {actionLoading === 'pause' ? '...' : 'Resume Pipeline'}
-          </button>
+          <div className="flex items-center gap-2">
+            {pausedStation && canEdit && (
+              <button
+                onClick={() => togglePause('station')}
+                disabled={anyLoading}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50 transition-colors"
+              >
+                {actionLoading === 'pause' ? '...' : 'Resume this station'}
+              </button>
+            )}
+            {pausedGlobal && isSuperAdmin && (
+              <button
+                onClick={() => togglePause('all')}
+                disabled={anyLoading}
+                className="text-xs font-medium px-3 py-1.5 rounded-lg bg-emerald-100 border border-emerald-300 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50 transition-colors"
+              >
+                {actionLoading === 'pause-all' ? '...' : 'Resume all stations'}
+              </button>
+            )}
+          </div>
         </div>
       )}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h2 className="text-2xl font-bold">Processing queue</h2>
-        <div className="flex items-center gap-2">
-          {!pipelinePaused && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {!pausedStation && canEdit && (
             <button
-              onClick={togglePause}
+              onClick={() => togglePause('station')}
               disabled={anyLoading}
               className="px-4 py-2.5 text-sm font-medium bg-red-100 text-red-700 border border-red-300 rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
             >
-              {actionLoading === 'pause' ? '...' : 'Pause Pipeline'}
+              {actionLoading === 'pause' ? '...' : 'Pause this station'}
             </button>
           )}
-          <button
-            onClick={advancePipeline}
-            disabled={anyLoading || pipelinePaused}
-            className="px-5 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
-          >
-            {actionLoading === 'advance-pipeline' ? 'Starting...' : totalBacklog > 0 ? `Advance Pipeline (${totalBacklog} episodes)` : 'Advance Pipeline'}
-          </button>
+          {!pausedGlobal && isSuperAdmin && (
+            <button
+              onClick={() => togglePause('all')}
+              disabled={anyLoading}
+              className="px-4 py-2.5 text-sm font-medium bg-white text-red-700 border border-red-300 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors dark:bg-transparent dark:text-red-300 dark:border-red-700"
+            >
+              {actionLoading === 'pause-all' ? '...' : 'Pause all stations'}
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={advancePipeline}
+              disabled={anyLoading || pipelinePaused}
+              className="px-5 py-2.5 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm"
+            >
+              {actionLoading === 'advance-pipeline' ? 'Starting...' : totalBacklog > 0 ? `Advance Pipeline (${totalBacklog} episodes)` : 'Advance Pipeline'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -685,13 +732,18 @@ export default function JobsPage() {
       {/* Failed Jobs — collapsible */}
       {anyQueueHasFailed && (
         <CollapsibleSection
-          title="Failed Jobs"
-          badge={`${totalFailedJobs > 0 ? totalFailedJobs : '...'}`}
+          title="Failed Jobs (this station)"
+          badge={`${failedDetails ? totalFailedJobs : '...'}`}
           badgeColor="red"
           expanded={failedExpanded}
           onToggle={() => setFailedExpanded(!failedExpanded)}
         >
           <div className="space-y-4">
+            {failedDetails && totalFailedJobs === 0 && (
+              <p className="text-sm text-gray-500 dark:text-warm-400">
+                None of the failed jobs in the shared queues belong to this station.
+              </p>
+            )}
             {queueNames.map((name) => {
               const q = failedDetails?.[name]
               const jobs = q?.failedJobs ?? []
@@ -702,7 +754,7 @@ export default function JobsPage() {
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-warm-300">
                       {queueLabels[name]} <span className="text-red-500 font-normal">({jobs.length} failed)</span>
                     </h4>
-                    <div className="flex gap-2">
+                    {canEdit && <div className="flex gap-2">
                       <button
                         onClick={() => retryFailed(name)}
                         disabled={anyLoading}
@@ -717,7 +769,7 @@ export default function JobsPage() {
                       >
                         {actionLoading === `clear-${name}` ? 'Clearing...' : 'Clear Failed'}
                       </button>
-                    </div>
+                    </div>}
                   </div>
                   <div className="space-y-1">
                     {jobs.map((job) => (
@@ -770,13 +822,19 @@ export default function JobsPage() {
               {pipelineMode === 'steady' ? 'Steady' : 'Catch-up'}
             </span>
           </div>
+          {isSuperAdmin ? (
           <button
             onClick={togglePipelineMode}
             disabled={anyLoading}
             className="mt-3 px-3 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100 disabled:opacity-50 transition-colors"
           >
-            {actionLoading === 'pipeline-mode' ? 'Switching...' : `Switch to ${pipelineMode === 'steady' ? 'Catch-up' : 'Steady'}`}
+            {actionLoading === 'pipeline-mode' ? 'Switching...' : `Switch to ${pipelineMode === 'steady' ? 'Catch-up' : 'Steady'} (all stations)`}
           </button>
+          ) : (
+            <p className="mt-3 text-xs text-gray-500 dark:text-warm-400">
+              Shared by every station — only a super-admin can change it.
+            </p>
+          )}
         </div>
 
         {/* Cron Schedule Reference */}
@@ -799,7 +857,7 @@ export default function JobsPage() {
       <ConfirmDialog
         open={confirmClear !== null}
         title="Clear Failed Jobs"
-        message={`Permanently remove all failed jobs from the ${confirmClear} queue? This clears them from BullMQ but does not change episode statuses.`}
+        message={`Permanently remove this station's failed jobs from the ${confirmClear} queue? Other stations' jobs are not touched. This clears them from BullMQ but does not change episode statuses.`}
         confirmLabel="Clear Failed"
         confirmVariant="danger"
         onConfirm={() => {

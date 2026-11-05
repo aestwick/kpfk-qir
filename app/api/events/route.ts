@@ -5,7 +5,10 @@ import { getStationContext, stationErrorResponse } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-async function getQueueCounts(queue: typeof ingestQueue) {
+// The queues are shared by every station: counts stay platform-wide, but the
+// per-job details (name, progress — which carries show names) are only sent
+// for the caller's station unless they're a super-admin.
+async function getQueueCounts(queue: typeof ingestQueue, visible: (job: any) => boolean) {
   const [counts, activeJobs] = await Promise.all([
     queue.getJobCounts(),
     queue.getActive(0, 5),
@@ -15,7 +18,7 @@ async function getQueueCounts(queue: typeof ingestQueue) {
     waiting: counts.waiting ?? 0,
     completed: counts.completed ?? 0,
     failed: counts.failed ?? 0,
-    activeJobs: activeJobs.map((j: any) => ({
+    activeJobs: activeJobs.filter(visible).map((j: any) => ({
       id: j.id,
       name: j.name,
       progress: j.progress ?? null,
@@ -76,7 +79,8 @@ export async function GET(request: NextRequest) {
   // stream via fetch() (not EventSource), so it can send a Bearer token.
   const result = await getStationContext(request)
   if (result.error) return stationErrorResponse(result.error)
-  const { supabase, stationId } = result.context
+  const { supabase, stationId, isSuperAdmin } = result.context
+  const visible = (job: any) => isSuperAdmin || job.data?.stationId === stationId
 
   const encoder = new TextEncoder()
 
@@ -95,10 +99,10 @@ export async function GET(request: NextRequest) {
           // these depths are network-wide, not per-station. Only `backlog` is
           // station-scoped. Acceptable for a single-operator Pacifica network.
           const [ingest, transcribe, summarize, compliance, backlog] = await Promise.all([
-            getQueueCounts(ingestQueue),
-            getQueueCounts(transcribeQueue),
-            getQueueCounts(summarizeQueue),
-            getQueueCounts(complianceQueue),
+            getQueueCounts(ingestQueue, visible),
+            getQueueCounts(transcribeQueue, visible),
+            getQueueCounts(summarizeQueue, visible),
+            getQueueCounts(complianceQueue, visible),
             getEpisodeBacklog(supabase, stationId),
           ])
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { isIsoDate, formatAirDate, formatAirTime, broadcastDayHref } from '@/lib/broadcast-format'
 import { authedFetch } from '@/lib/api-client'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { SkeletonTableRows } from '@/app/components/skeleton'
@@ -15,7 +16,10 @@ interface Episode {
   category: string | null
   status: string
   air_date: string | null
+  air_start: string | null
   start_time: string | null
+  host: string | null
+  guest: string | null
   duration: number | null
   headline: string | null
   issue_category: string | null
@@ -65,6 +69,9 @@ export default function EpisodesPage() {
   const showFilterParam = searchParams.get('show') ?? ''
   const categoryFilterParam = searchParams.get('category') ?? ''
   const programCategoryFilter = searchParams.get('program_category') ?? ''
+  // One air date (station-local) and free text over show/host/guest/headline.
+  const dayFilter = isIsoDate(searchParams.get('day')) ? searchParams.get('day')! : ''
+  const textFilterParam = searchParams.get('q') ?? ''
   const sort = searchParams.get('sort') ?? 'created_at'
   const order = searchParams.get('order') ?? 'desc'
   const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
@@ -103,6 +110,19 @@ export default function EpisodesPage() {
   function setCategoryFilterValue(v: string) { updateParams({ category: v, page: '' }) }
   function setProgramCategoryFilter(v: string) { updateParams({ program_category: v, page: '' }) }
   function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
+  // Picking a day sorts the list in air order (a broadcast log) by default.
+  function setDayFilter(v: string) {
+    updateParams(v ? { day: v, sort: 'air_date', order: 'asc', page: '' } : { day: '', page: '' })
+  }
+
+  const [textFilterLocal, setTextFilterLocal] = useState(textFilterParam)
+  useEffect(() => setTextFilterLocal(textFilterParam), [textFilterParam])
+  const textDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  function setTextFilter(v: string) {
+    setTextFilterLocal(v)
+    clearTimeout(textDebounceRef.current)
+    textDebounceRef.current = setTimeout(() => updateParams({ q: v.trim(), page: '' }), 350)
+  }
 
   // Debounce text filter updates to URL
   const showDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -162,14 +182,25 @@ export default function EpisodesPage() {
     fetchProgramCategories()
   }, [])
 
-  const fetchEpisodes = useCallback(async () => {
-    setLoading(true)
-    const params = new URLSearchParams({ page: String(page), limit: String(limit), sort, order })
+  // One place that turns the URL filters into API params (list + CSV export).
+  const filterParams = useCallback((base: Record<string, string>) => {
+    const params = new URLSearchParams(base)
     if (statusFilter) params.set('status', statusFilter)
-    if (quarterApiValue) params.set('quarter', quarterApiValue)
+    // A specific day overrides the quarter filter.
+    if (dayFilter) {
+      params.set('from', dayFilter)
+      params.set('to', dayFilter)
+    } else if (quarterApiValue) params.set('quarter', quarterApiValue)
     if (showFilter) params.set('show', showFilter)
+    if (textFilterParam) params.set('q', textFilterParam)
     if (categoryFilter) params.set('category', categoryFilter)
     if (programCategoryFilter) params.set('program_category', programCategoryFilter)
+    return params
+  }, [statusFilter, dayFilter, quarterApiValue, showFilter, textFilterParam, categoryFilter, programCategoryFilter])
+
+  const fetchEpisodes = useCallback(async () => {
+    setLoading(true)
+    const params = filterParams({ page: String(page), limit: String(limit), sort, order })
 
     const res = await authedFetch(`/api/episodes?${params}`)
     if (res.ok) {
@@ -178,7 +209,7 @@ export default function EpisodesPage() {
       setTotal(data.total ?? 0)
     }
     setLoading(false)
-  }, [page, statusFilter, quarterApiValue, showFilter, categoryFilter, programCategoryFilter, sort, order])
+  }, [page, filterParams, sort, order])
 
   useEffect(() => { fetchEpisodes() }, [fetchEpisodes])
 
@@ -210,12 +241,7 @@ export default function EpisodesPage() {
   }
 
   function handleExportCSV() {
-    const params = new URLSearchParams({ format: 'csv', limit: '10000', page: '1', sort, order })
-    if (statusFilter) params.set('status', statusFilter)
-    if (quarterApiValue) params.set('quarter', quarterApiValue)
-    if (showFilter) params.set('show', showFilter)
-    if (categoryFilter) params.set('category', categoryFilter)
-    if (programCategoryFilter) params.set('program_category', programCategoryFilter)
+    const params = filterParams({ format: 'csv', limit: '10000', page: '1', sort, order })
     window.open(`/api/episodes?${params}`, '_blank')
   }
 
@@ -301,7 +327,7 @@ export default function EpisodesPage() {
 
   const SortIcon = ({ col }: { col: string }) => {
     if (sort !== col) return <span className="text-gray-300 dark:text-warm-600 ml-1">&#8597;</span>
-    return <span className="ml-1">{order === 'asc' ? '&#8593;' : '&#8595;'}</span>
+    return <span className="ml-1">{order === 'asc' ? '↑' : '↓'}</span>
   }
 
   return (
@@ -333,7 +359,15 @@ export default function EpisodesPage() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <select value={quarterFilter} onChange={(e) => setQuarterFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
+        <input
+          type="date"
+          aria-label="Air date"
+          title="Show one air date (station time)"
+          value={dayFilter}
+          onChange={(e) => setDayFilter(isIsoDate(e.target.value) ? e.target.value : '')}
+          className="border rounded px-2 py-1.5 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+        />
+        <select value={quarterFilter} disabled={!!dayFilter} onChange={(e) => setQuarterFilter(e.target.value)} className="border rounded px-2 py-1.5 text-sm disabled:opacity-50 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100">
           <option value="all">All Quarters</option>
           {quarterOptions.map((q) => (
             <option key={q.value} value={q.value}>{q.label}</option>
@@ -345,7 +379,15 @@ export default function EpisodesPage() {
           placeholder="Filter by show name... (press /)"
           value={showFilterLocal}
           onChange={(e) => setShowFilter(e.target.value)}
-          className="border rounded px-2 py-1.5 text-sm w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+          className="border rounded px-2 py-1.5 text-sm w-full sm:w-48 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
+        />
+        <input
+          type="search"
+          aria-label="Host, guest or headline"
+          placeholder="Host, guest or headline…"
+          value={textFilterLocal}
+          onChange={(e) => setTextFilter(e.target.value)}
+          className="border rounded px-2 py-1.5 text-sm w-full sm:w-56 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
         />
         <select
           value={categoryFilter}
@@ -370,6 +412,14 @@ export default function EpisodesPage() {
           ))}
         </select>
       </div>
+
+      {dayFilter && (
+        <p className="text-sm">
+          <a href={broadcastDayHref(dayFilter)} className="text-blue-700 dark:text-blue-400 hover:underline">
+            See {formatAirDate(dayFilter)} as a broadcast log →
+          </a>
+        </p>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-lg shadow overflow-x-auto dark:bg-surface-raised dark:shadow-card-dark">
@@ -417,7 +467,10 @@ export default function EpisodesPage() {
                     {ep.show_name ?? ep.id}
                   </a>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap">{ep.air_date ?? '—'}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {ep.air_date ?? '—'}
+                  {ep.air_start && <span className="ml-1 text-xs text-gray-500 dark:text-warm-400">{formatAirTime(ep.air_start)}</span>}
+                </td>
                 <td className="px-4 py-3 whitespace-nowrap">{ep.duration ? `${ep.duration}m` : '—'}</td>
                 <td className="px-4 py-3">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[ep.status] ?? 'bg-gray-100 dark:bg-warm-700'}`}>{ep.status}</span>

@@ -1,318 +1,314 @@
 'use client'
 
-// Grid-wide transcript search (Phase 1 of ideas/TRANSCRIPT_SEARCH_SPEC.md §9.2):
-// "anywhere, any show, any time frame". Searches inside transcript text, ranks
-// episodes, and deep-links each hit to the audio at the matched cue timestamp.
-// Pre-fill ?show_key / ?quarter to land scoped to one show (the "within a show"
-// entry point linked from the episodes page).
+// Search — "where was this said?" A quote, a name or a topic → the episodes
+// that contain it, each opening the audio at the moment it was said.
+//
+// Forgiving by default: accents ("movilizacion"), plurals, and likely
+// misspellings ("Hartmann" also finds Whisper's "Hartman") are matched, and the
+// page says which spellings it added. "By meaning" also finds episodes about
+// the topic when the exact words weren't used. Every filter lives in the URL.
 
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { authedFetch } from '@/lib/api-client'
-import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { SkeletonTableRows } from '@/app/components/skeleton'
-import { getQuarterOptions, getCurrentQuarter } from '@/lib/quarters'
-import { withFrom, locationFrom } from '@/lib/nav'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
+import { useSearchParams, usePathname } from 'next/navigation'
+import { getQuarterOptions } from '@/lib/quarters'
+import { locationFrom } from '@/lib/nav'
+import {
+  formatAirDate,
+  formatAirTime,
+  formatOffset,
+  formatMomentClock,
+  episodeMomentHref,
+  broadcastDayHref,
+  timeToMinutes,
+} from '@/lib/broadcast-format'
+import type { TranscriptSearchResult } from '@/lib/types'
+import { useApiJson, useUrlUpdater, Highlighted, ErrorPanel, FindSwitcher, RowsSkeleton, StatusBadge, CARD, INPUT, BUTTON } from '@/app/components/browse-ui'
 
-interface SearchResult {
-  episodeId: number
-  showKey: string
-  showName: string | null
-  airDate: string | null
-  status: string
-  rank: number
-  snippet: string
-  startMs: number | null
-  matchType?: 'lexical' | 'semantic'
+interface SearchResponse {
+  results: TranscriptSearchResult[]
+  total: number
+  alsoMatched: string[]
+  relaxed: boolean
+  degraded?: boolean
+  mode: 'lexical' | 'semantic'
 }
 
-interface ShowOption {
+interface ShowRow {
   key: string
-  show_name: string
+  display: string
+  group: string
 }
 
-// The RPC wraps matches in private-use sentinels ( / ) so the
-// snippet can be HTML-escaped here and then have only the marks reintroduced —
-// a transcript can never inject markup. Mirror the sentinels in migration 022.
-const HL_START = ''
-const HL_STOP = ''
-
-function renderSnippet(snippet: string): { __html: string } {
-  const escaped = snippet
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-  const marked = escaped
-    .split(HL_START).join('<mark class="bg-yellow-200 dark:bg-yellow-500/40 rounded px-0.5">')
-    .split(HL_STOP).join('</mark>')
-  return { __html: marked }
-}
-
-function formatSeek(ms: number): string {
-  const total = Math.floor(ms / 1000)
-  const h = Math.floor(total / 3600)
-  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
-  const s = String(total % 60).padStart(2, '0')
-  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`
-}
+const LIMIT = 20
+/** Matches beyond this are counted but only the most recent are ranked (048). */
+const RANK_WINDOW = 200
 
 export default function SearchPage() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const pathname = usePathname()
 
-  const qParam = searchParams.get('q') ?? ''
-  const showKeyParam = searchParams.get('show_key') ?? ''
-  // Defaults to the current quarter; the explicit `all` sentinel (distinct from
-  // an absent param) means "search every quarter" and survives updateParams.
-  const quarterParam = searchParams.get('quarter') ?? `${getCurrentQuarter().year}-Q${getCurrentQuarter().quarter}`
-  const quarterApiValue = quarterParam === 'all' ? '' : quarterParam
-  const modeParam = searchParams.get('mode') === 'semantic' ? 'semantic' : 'lexical'
-  const page = parseInt(searchParams.get('page') ?? '1', 10) || 1
-  const limit = 20
+  const relaxedParam = searchParams.get('relaxed') === '1'
+  const q = searchParams.get('q') ?? ''
+  const showKey = searchParams.get('show_key') ?? ''
+  const quarter = searchParams.get('quarter') ?? ''
+  const mode = searchParams.get('mode') === 'semantic' ? 'semantic' : 'lexical'
+  const page = Math.max(parseInt(searchParams.get('page') ?? '1', 10) || 1, 1)
 
-  const [queryLocal, setQueryLocal] = useState(qParam)
-  const [results, setResults] = useState<SearchResult[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false)
-  const [degraded, setDegraded] = useState(false)
-  const [shows, setShows] = useState<ShowOption[]>([])
+  const [draft, setDraft] = useState(q)
+  useEffect(() => setDraft(q), [q])
 
-  useEffect(() => { setQueryLocal(qParam) }, [qParam])
+  const setUrl = useUrlUpdater()
+  // Any change other than paging starts a fresh (strict) search.
+  const update = (updates: Record<string, string>) => setUrl({ relaxed: '', ...updates })
 
-  const updateParamsRef = useRef(searchParams)
-  updateParamsRef.current = searchParams
-
-  const updateParams = useCallback((updates: Record<string, string>) => {
-    const params = new URLSearchParams(updateParamsRef.current.toString())
-    for (const [key, value] of Object.entries(updates)) {
-      if (value) params.set(key, value)
-      else params.delete(key)
-    }
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
-  }, [router, pathname])
-
-  // Debounce the query input to the URL (350ms — same as the episodes page).
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  function setQuery(v: string) {
-    setQueryLocal(v)
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => updateParams({ q: v, page: '' }), 350)
+  // Typing updates the URL after a pause; Enter searches immediately.
+  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  function onType(v: string) {
+    setDraft(v)
+    clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => update({ q: v.trim(), page: '' }), 450)
   }
 
-  // Load shows for the Show filter dropdown.
-  useEffect(() => {
-    async function fetchShows() {
-      try {
-        const res = await authedFetch('/api/shows')
-        if (res.ok) {
-          const data = await res.json()
-          if (Array.isArray(data.shows)) {
-            setShows(
-              data.shows
-                .map((s: { key: string; show_name: string }) => ({ key: s.key, show_name: s.show_name }))
-                .sort((a: ShowOption, b: ShowOption) => a.show_name.localeCompare(b.show_name))
-            )
-          }
-        }
-      } catch {
-        // dropdown just stays empty
-      }
-    }
-    fetchShows()
-  }, [])
+  const shows = useApiJson<{ shows: ShowRow[] }>('/api/shows')
+  const showOptions = useMemo(() => {
+    const seen = new Map<string, { key: string; label: string }>()
+    for (const s of shows.data?.shows ?? []) if (!seen.has(s.group.toLowerCase())) seen.set(s.group.toLowerCase(), { key: s.key, label: s.display })
+    return Array.from(seen.values()).sort((a, b) => a.label.localeCompare(b.label))
+  }, [shows.data])
 
-  const runSearch = useCallback(async () => {
-    if (qParam.trim().length < 2) {
-      setResults([])
-      setTotal(0)
-      setSearched(false)
-      return
-    }
-    setLoading(true)
-    const params = new URLSearchParams({ q: qParam, page: String(page), limit: String(limit) })
-    if (showKeyParam) params.set('show_key', showKeyParam)
-    if (quarterApiValue) params.set('quarter', quarterApiValue)
-    if (modeParam === 'semantic') params.set('mode', 'semantic')
-    const res = await authedFetch(`/api/transcript-search?${params}`)
-    if (res.ok) {
-      const data = await res.json()
-      setResults(data.results ?? [])
-      setTotal(data.total ?? 0)
-      setDegraded(Boolean(data.degraded))
-    } else {
-      setResults([])
-      setTotal(0)
-      setDegraded(false)
-    }
-    setSearched(true)
-    setLoading(false)
-  }, [qParam, showKeyParam, quarterApiValue, modeParam, page])
+  const apiUrl = useMemo(() => {
+    if (q.trim().length < 2) return null
+    const p = new URLSearchParams({ q, page: String(page), limit: String(LIMIT) })
+    if (showKey) p.set('show_key', showKey)
+    if (quarter) p.set('quarter', quarter)
+    if (mode === 'semantic') p.set('mode', 'semantic')
+    if (relaxedParam && page > 1) p.set('relaxed', '1')
+    return `/api/transcript-search?${p}`
+  }, [q, page, showKey, quarter, mode, relaxedParam])
+  const { data, error, loading, reload } = useApiJson<SearchResponse>(apiUrl)
 
-  useEffect(() => { runSearch() }, [runSearch])
-
-  function setPage(p: number) { updateParams({ page: p <= 1 ? '' : String(p) }) }
-
-  const totalPages = Math.ceil(total / limit)
-
-  // Quarter options (current quarter back two years, never future), matching
-  // the episodes page.
-  const quarterOptions = getQuarterOptions().map((o) => ({
-    label: o.label,
-    value: `${o.year}-Q${o.quarter}`,
-  }))
-
-  const episodeCount = new Set(results.map((r) => r.episodeId)).size
+  const from = locationFrom(pathname, searchParams.toString())
+  const quarterOptions = getQuarterOptions(6).map((o) => ({ label: o.label, value: `${o.year}-Q${o.quarter}` }))
+  // Exact-word results are ranked within the RANK_WINDOW most recent matches.
+  const ranked = mode === 'lexical' || data?.degraded
+  const totalPages = data ? Math.ceil(Math.min(data.total, ranked ? RANK_WINDOW : data.total) / LIMIT) : 0
+  // Paging keeps a relaxed result set relaxed (page 1 decided it).
+  const goPage = (n: number) => setUrl({ page: n <= 1 ? '' : String(n), relaxed: data?.relaxed && n > 1 ? '1' : '' })
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 max-w-4xl">
+      <FindSwitcher active="/dashboard/search" />
       <div>
-        <h2 className="text-2xl font-bold">Search Transcripts</h2>
-        <p className="text-sm text-gray-500 dark:text-warm-400">
-          {modeParam === 'semantic'
-            ? 'Smart search finds passages by meaning — even when the exact words weren’t said — and still deep-links to the audio.'
-            : 'Find where a word or phrase was said across every show’s transcript.'}
-          {' Try '}
-          <code className="mx-1 px-1 bg-gray-100 dark:bg-warm-700 rounded">&quot;measles outbreak&quot;</code>
-          {' or '}
-          <code className="mx-1 px-1 bg-gray-100 dark:bg-warm-700 rounded">{modeParam === 'semantic' ? 'vaccine hesitancy' : 'housing -rent'}</code>.
+        <h2 className="text-2xl font-bold">What was said</h2>
+        <p className="text-sm text-warm-500 dark:text-warm-400">
+          Type a quote, a name or a topic. Each result opens the audio at the moment it was said.
         </p>
       </div>
 
-      {/* Search bar + filters */}
-      <div className="flex gap-3 flex-wrap items-center">
-        <input
-          type="text"
-          autoFocus
-          placeholder="Search every transcript…"
-          value={queryLocal}
-          onChange={(e) => setQuery(e.target.value)}
-          className="border rounded px-3 py-2 text-sm w-80 dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
-        />
-        <select
-          value={showKeyParam}
-          onChange={(e) => updateParams({ show_key: e.target.value, page: '' })}
-          className="border rounded px-2 py-2 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
-        >
-          <option value="">All Shows</option>
-          {shows.map((s) => (
-            <option key={s.key} value={s.key}>{s.show_name}</option>
-          ))}
-        </select>
-        <select
-          value={quarterParam}
-          onChange={(e) => updateParams({ quarter: e.target.value, page: '' })}
-          className="border rounded px-2 py-2 text-sm dark:bg-warm-800 dark:border-warm-600 dark:text-warm-100"
-        >
-          <option value="all">All Quarters</option>
-          {quarterOptions.map((q) => (
-            <option key={q.value} value={q.value}>{q.label}</option>
-          ))}
-        </select>
-
-        {/* Exact (lexical, free) vs Smart (hybrid FTS + vector). Exact is the
-            default — deterministic and the most trustworthy for an FCC proof. */}
-        <div className="inline-flex rounded border overflow-hidden text-sm dark:border-warm-600">
-          {(['lexical', 'semantic'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => updateParams({ mode: m === 'semantic' ? 'semantic' : '', page: '' })}
-              className={
-                (modeParam === m
-                  ? 'bg-blue-600 text-white dark:bg-blue-700'
-                  : 'bg-white text-gray-700 dark:bg-warm-800 dark:text-warm-300') +
-                ' px-3 py-2'
-              }
-            >
-              {m === 'lexical' ? 'Exact' : 'Smart'}
-            </button>
-          ))}
+      <form
+        className="space-y-2"
+        onSubmit={(e) => {
+          e.preventDefault()
+          clearTimeout(debounce.current)
+          update({ q: draft.trim(), page: '' })
+        }}
+      >
+        <div className="flex gap-2">
+          <input
+            type="search"
+            autoFocus
+            aria-label="Search transcripts"
+            placeholder='e.g. Greg Palast · "war on voting" · vivienda'
+            value={draft}
+            onChange={(e) => onType(e.target.value)}
+            className={`${INPUT} w-full`}
+          />
+          <button type="submit" className={`${BUTTON} shrink-0`}>
+            Search
+          </button>
         </div>
-      </div>
-
-      {degraded && (
-        <p className="text-sm text-amber-700 dark:text-amber-400">
-          Smart search is temporarily unavailable — showing exact matches instead.
-        </p>
-      )}
-
-      {/* Result count */}
-      {searched && !loading && (
-        <p className="text-sm text-gray-500 dark:text-warm-400">
-          {total === 0
-            ? 'No matches.'
-            : `${total} hit${total === 1 ? '' : 's'} across ${episodeCount} episode${episodeCount === 1 ? '' : 's'} on this page.`}
-        </p>
-      )}
-
-      {/* Results */}
-      <div className="bg-white rounded-lg shadow overflow-hidden dark:bg-surface-raised dark:shadow-card-dark">
-        {loading ? (
-          <table className="w-full"><tbody className="divide-y dark:divide-warm-700"><SkeletonTableRows rows={6} /></tbody></table>
-        ) : !searched ? (
-          <p className="px-4 py-10 text-center text-gray-400 dark:text-warm-500 text-sm">
-            Enter at least 2 characters to search.
-          </p>
-        ) : results.length === 0 ? (
-          <p className="px-4 py-10 text-center text-gray-500 dark:text-warm-400 text-sm">
-            No transcripts matched your search.
-          </p>
-        ) : (
-          <ul className="divide-y dark:divide-warm-700">
-            {results.map((r) => {
-              const seek = r.startMs != null ? `?seek=${(r.startMs / 1000).toFixed(1)}` : ''
-              return (
-                <li key={r.episodeId} className="px-4 py-3 hover:bg-gray-50 dark:hover:bg-warm-700/50">
-                  <a href={withFrom(`/dashboard/episodes/${r.episodeId}${seek}`, locationFrom(pathname, searchParams.toString()))} className="block">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="font-medium text-blue-700 dark:text-blue-400">{r.showName ?? `Episode ${r.episodeId}`}</span>
-                      <span className="text-gray-400 dark:text-warm-500">·</span>
-                      <span className="text-gray-500 dark:text-warm-400">{r.airDate ?? '—'}</span>
-                      {r.matchType === 'semantic' && (
-                        <span className="inline-flex items-center text-[10px] font-medium uppercase tracking-wide text-purple-700 bg-purple-100 dark:text-purple-300 dark:bg-purple-500/20 rounded px-1.5 py-0.5" title="Matched by meaning, not exact words">
-                          &asymp; match
-                        </span>
-                      )}
-                      {r.startMs != null && (
-                        <span className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-white bg-blue-600 dark:bg-blue-700 rounded px-2 py-0.5">
-                          <span>&#9654;</span> {formatSeek(r.startMs)}
-                        </span>
-                      )}
-                    </div>
-                    <p
-                      className="text-sm text-gray-700 dark:text-warm-300 mt-1"
-                      dangerouslySetInnerHTML={renderSnippet(r.snippet)}
-                    />
-                  </a>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500 dark:text-warm-400">{total} total hits</p>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 text-sm border rounded disabled:opacity-50 dark:border-warm-600 dark:text-warm-300"
-            >
-              Previous
-            </button>
-            <span className="px-3 py-1.5 text-sm">Page {page} of {totalPages}</span>
-            <button
-              onClick={() => setPage(Math.min(totalPages, page + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 text-sm border rounded disabled:opacity-50 dark:border-warm-600 dark:text-warm-300"
-            >
-              Next
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <select aria-label="Show" value={showKey} onChange={(e) => update({ show_key: e.target.value, page: '' })} className={`${INPUT} max-w-[14rem]`}>
+            <option value="">All shows</option>
+            {showOptions.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <select aria-label="When" value={quarter} onChange={(e) => update({ quarter: e.target.value, page: '' })} className={INPUT}>
+            <option value="">Any time</option>
+            {quarterOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <div className="inline-flex rounded-lg border border-warm-300 dark:border-warm-600 overflow-hidden text-sm" role="group" aria-label="Match">
+            {(['lexical', 'semantic'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={mode === m}
+                onClick={() => update({ mode: m === 'semantic' ? 'semantic' : '', page: '' })}
+                className={`px-3 py-2 ${mode === m ? 'bg-blue-600 text-white' : 'bg-white text-warm-700 dark:bg-warm-800 dark:text-warm-300'}`}
+                title={m === 'lexical' ? 'The words you typed (forgiving of accents and typos)' : 'Also episodes about this topic, even in other words'}
+              >
+                {m === 'lexical' ? 'Exact words' : 'By meaning'}
+              </button>
+            ))}
           </div>
+        </div>
+        <details className="text-xs text-warm-500 dark:text-warm-400">
+          <summary className="cursor-pointer select-none">Search tips</summary>
+          <ul className="mt-1 ml-4 list-disc space-y-0.5">
+            <li>
+              <code>&quot;war on voting&quot;</code> — words in that order
+            </li>
+            <li>
+              <code>housing -rent</code> — leave out episodes that say “rent”
+            </li>
+            <li>
+              <code>eviction OR desalojo</code> — either word
+            </li>
+            <li>Names are matched forgivingly — “Hartmann” also finds “Hartman”.</li>
+          </ul>
+        </details>
+      </form>
+
+      {/* Status line */}
+      {data && !error && (
+        <div className="space-y-1 text-sm text-warm-600 dark:text-warm-400">
+          <p>
+            {data.total === 0 ? (
+              'No episodes matched.'
+            ) : (
+              <>
+                <strong className="text-warm-900 dark:text-warm-100">{data.total.toLocaleString()}</strong> episode{data.total === 1 ? '' : 's'}
+                {ranked && data.total > RANK_WINDOW && ` — showing the best matches from the ${RANK_WINDOW} most recent. Pick a show or a quarter to reach older ones.`}
+              </>
+            )}
+          </p>
+          {data.alsoMatched.length > 0 && (
+            <p className="text-xs">
+              Also matched: {data.alsoMatched.slice(0, 8).map((w) => <code key={w} className="mr-1 rounded bg-warm-100 px-1 dark:bg-warm-700">{w}</code>)}
+            </p>
+          )}
+          {data.relaxed && <p className="text-xs text-amber-700 dark:text-amber-400">No episode has every word — showing the closest matches.</p>}
+          {data.degraded && <p className="text-xs text-amber-700 dark:text-amber-400">Meaning search is unavailable right now — showing exact-word matches.</p>}
+        </div>
+      )}
+
+      {error ? (
+        <ErrorPanel message={error} onRetry={reload} />
+      ) : !apiUrl ? (
+        <div className={`${CARD} px-4 py-10 text-center text-sm text-warm-500 dark:text-warm-400`}>
+          Type at least 2 characters. Looking for what aired at a certain time?{' '}
+          <Link href="/dashboard/day" className="text-blue-700 dark:text-blue-400 underline">
+            Open the day log
+          </Link>
+          .
+        </div>
+      ) : (
+        <div className={CARD}>
+          {loading && !data ? (
+            <RowsSkeleton />
+          ) : data && data.results.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-warm-500 dark:text-warm-400">
+              <p>Nothing matched “{q}”{showKey || quarter ? ' with these filters' : ''}.</p>
+              <p className="mt-1">
+                {showKey || quarter ? 'Try “All shows” / “Any time”, or ' : 'Try '}
+                {mode === 'lexical' ? (
+                  <button className="underline" onClick={() => update({ mode: 'semantic', page: '' })}>
+                    searching by meaning
+                  </button>
+                ) : (
+                  'fewer words'
+                )}
+                .
+              </p>
+            </div>
+          ) : (
+            <ul className={`divide-y divide-warm-100 dark:divide-warm-700 ${loading ? 'opacity-60' : ''}`}>
+              {data?.results.map((r) => {
+                const clock = r.startMs != null ? formatMomentClock(r.airStart, r.startMs) : null
+                const hour = timeToMinutes(r.airStart)
+                return (
+                  <li key={r.episodeId} className="px-4 py-3 space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                      <Link href={episodeMomentHref(r.episodeId, null, from)} className="font-medium text-blue-700 dark:text-blue-400 hover:underline">
+                        {r.showName ?? `Episode ${r.episodeId}`}
+                      </Link>
+                      {r.airDate && (
+                        <Link
+                          href={broadcastDayHref(r.airDate, hour != null ? Math.floor(hour / 60) : null)}
+                          className="text-warm-500 dark:text-warm-400 hover:underline"
+                          title="See the whole day"
+                        >
+                          {formatAirDate(r.airDate)}
+                          {r.airStart && ` · ${formatAirTime(r.airStart)}`}
+                        </Link>
+                      )}
+                      {r.matchType === 'semantic' && (
+                        <span className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300" title="Matched by meaning, not exact words">
+                          ≈ about this
+                        </span>
+                      )}
+                      {r.status !== 'compliance_checked' && r.status !== 'summarized' && <StatusBadge status={r.status} />}
+                    </div>
+
+                    {r.startMs != null ? (
+                      <Link
+                        href={episodeMomentHref(r.episodeId, r.startMs, from)}
+                        className="group flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/60 px-2.5 py-2 hover:bg-blue-50 dark:border-blue-500/20 dark:bg-blue-500/10"
+                      >
+                        <span className="shrink-0 rounded bg-blue-600 px-1.5 py-0.5 text-xs font-semibold text-white tabular-nums">
+                          ▶ {formatOffset(r.startMs)}
+                        </span>
+                        <span className="text-sm text-warm-800 dark:text-warm-200">
+                          {r.momentText ? <Highlighted text={r.momentText} /> : <span className="text-warm-500">Play from here</span>}
+                          {clock && <span className="ml-1 text-xs text-warm-500 dark:text-warm-400">(aired about {clock})</span>}
+                        </span>
+                      </Link>
+                    ) : (
+                      <p className="text-xs text-warm-500 dark:text-warm-400">No timestamp for this one — open the episode to read the transcript.</p>
+                    )}
+
+                    {/* The whole-transcript snippet is a fallback: in long episodes it
+                        can miss the match (word positions clamp past ~16k words),
+                        while the moment line above is always the matching caption. */}
+                    {r.snippet && !r.momentText && (
+                      <p className="text-sm text-warm-600 dark:text-warm-400">
+                        <Highlighted text={r.snippet} />
+                      </p>
+                    )}
+                    {(r.host || r.guest) && (
+                      <p className="text-xs text-warm-500 dark:text-warm-400">
+                        {r.host && <>Host: {r.host}</>}
+                        {r.host && r.guest && ' · '}
+                        {r.guest && <>Guest: {r.guest}</>}
+                      </p>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <button className={BUTTON} disabled={page <= 1} onClick={() => goPage(page - 1)}>
+            ← Previous
+          </button>
+          <span className="text-warm-500">
+            Page {page} of {totalPages}
+          </span>
+          <button className={BUTTON} disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
+            Next →
+          </button>
         </div>
       )}
     </div>

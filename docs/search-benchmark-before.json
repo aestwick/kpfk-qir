@@ -1,0 +1,280 @@
+{
+  "variant": "before",
+  "at": "2026-11-04T10:31:41.697Z",
+  "outcomes": [
+    {
+      "id": "A1",
+      "need": "day",
+      "query": "Oct 9 2026, 7am, 8am, 9am",
+      "supported": false,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 0,
+      "got": [],
+      "note": "no date filter anywhere in the UI"
+    },
+    {
+      "id": "A2",
+      "need": "day",
+      "query": "what was on KPFK Saturday Oct 10 2026 at 9pm",
+      "supported": false,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 0,
+      "got": [],
+      "note": "no date filter anywhere in the UI"
+    },
+    {
+      "id": "A3",
+      "need": "day",
+      "query": "Spanish show Tuesday Oct 13 2026 9pm",
+      "supported": false,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 0,
+      "got": [],
+      "note": "no date filter anywhere in the UI"
+    },
+    {
+      "id": "A4",
+      "need": "day",
+      "query": "Oct 13 2026 8pm",
+      "supported": false,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 0,
+      "got": [],
+      "note": "no date filter anywhere in the UI"
+    },
+    {
+      "id": "B1",
+      "need": "moment",
+      "query": "\"the state of Oregon is going to be getting my ballot around Christmas\"",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 5375,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "B2",
+      "need": "moment",
+      "query": "Hartmann said ICE has gathered around fifty million voter files",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 8970,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "B3",
+      "need": "moment",
+      "query": "Prosegur",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 6020,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "B4",
+      "need": "moment",
+      "query": "Partido de las Cucarachas",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 6162,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "B5",
+      "need": "moment",
+      "query": "nueva movilizacion masiva en India",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 6624,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "B6",
+      "need": "moment",
+      "query": "\"The Hidden History of the War on Voting\"",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 7499,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "B7",
+      "need": "moment",
+      "query": "los musulmanes trajeron universidades y hospitales a España",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 10070,
+      "got": [],
+      "note": "HTTP 500"
+    },
+    {
+      "id": "C1",
+      "need": "show",
+      "query": "Thom Hartmann October 2026",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 1755,
+      "got": [
+        10380,
+        10342,
+        10304,
+        10263,
+        10219,
+        10147,
+        10110,
+        10071,
+        10033,
+        9990,
+        9918,
+        9879
+      ],
+      "note": "episode list only — no topics/guests/issue rollup; month must be eyeballed"
+    },
+    {
+      "id": "C2",
+      "need": "show",
+      "query": "Background Briefing with Ian Masters, October 2026 - topics and guests",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 661,
+      "got": [
+        10355,
+        10315,
+        10277,
+        10233,
+        10191,
+        10122,
+        10082,
+        10044,
+        10004,
+        9962,
+        9892,
+        9847
+      ],
+      "note": "episode list only — no topics/guests/issue rollup; month must be eyeballed"
+    },
+    {
+      "id": "C3",
+      "need": "show",
+      "query": "Sojourner Truth in October",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 328,
+      "got": [
+        10376,
+        10142,
+        9914,
+        9678,
+        9455
+      ],
+      "note": "episode list only — no topics/guests/issue rollup; month must be eyeballed"
+    },
+    {
+      "id": "D1",
+      "need": "people",
+      "query": "Greg Palast",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 5320,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D2",
+      "need": "people",
+      "query": "Greg Palace",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 5792,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D3",
+      "need": "people",
+      "query": "Mark Pokan",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 5739,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D4",
+      "need": "people",
+      "query": "Gerald Horn",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 5855,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D5",
+      "need": "people",
+      "query": "Phil Ittner",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 6165,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D6",
+      "need": "people",
+      "query": "Thom Hartmann",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 6947,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D7",
+      "need": "people",
+      "query": "Sonali Kolhatkar",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 6092,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    },
+    {
+      "id": "D8",
+      "need": "people",
+      "query": "David Corn Mother Jones",
+      "supported": true,
+      "recall": 0,
+      "momentOk": null,
+      "ms": 7883,
+      "got": [],
+      "note": "transcript text only (no guest/host field search)"
+    }
+  ]
+}

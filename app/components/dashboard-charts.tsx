@@ -1,6 +1,6 @@
 'use client'
 
-interface DailyPoint { date: string; groq: number; openai: number; total: number }
+interface DailyPoint { date: string; transcription: number; openai: number; total: number }
 
 function fmt$(n: number) { return '$' + n.toFixed(4) }
 
@@ -11,14 +11,14 @@ export function MiniBar({ data, maxHeight = 48 }: { data: DailyPoint[]; maxHeigh
   return (
     <div className="flex items-end gap-px" style={{ height: maxHeight }}>
       {data.map((d) => {
-        const groqH = (d.groq / max) * maxHeight
+        const transcriptionH = (d.transcription / max) * maxHeight
         const openaiH = (d.openai / max) * maxHeight
         return (
           <div key={d.date} className="flex-1 flex flex-col justify-end group relative min-w-[3px]">
             <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block z-10 bg-warm-900 text-white dark:bg-warm-100 dark:text-warm-900 text-[10px] px-2 py-1 rounded whitespace-nowrap shadow-lg">
               {d.date}: {fmt$(d.total)}
             </div>
-            <div className="bg-sky-400 dark:bg-sky-500 rounded-t-sm" style={{ height: Math.max(groqH, 0.5) }} />
+            <div className="bg-sky-400 dark:bg-sky-500 rounded-t-sm" style={{ height: Math.max(transcriptionH, 0.5) }} />
             <div className="bg-violet-400 dark:bg-violet-500" style={{ height: Math.max(openaiH, 0.5) }} />
           </div>
         )

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, Fragment } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, Fragment } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import dynamic from 'next/dynamic'
 import { SkeletonBlock } from '@/app/components/skeleton'
@@ -9,14 +9,19 @@ import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { DEFAULT_SUMMARIZATION_PROMPT, DEFAULT_CURATION_PROMPT } from '@/lib/settings'
 import { OPENAI_CHAT_MODELS, resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from '@/lib/openai-models'
 import { GROQ_WHISPER_MODELS, resolveGroqModel } from '@/lib/groq-models'
-import { resolveGroupDisplayName, showGroupKey, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
+import { resolveGroupDisplayName, resolveShowDisplayName, showGroupKey, DEFAULT_SHOW_LANGUAGE } from '@/lib/shows'
 import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
 import { episodeHref } from '@/lib/nav'
+import type { CorrectionForm } from '@/app/components/transcript-corrections'
 
 /* ─── lazy-loaded corrections component ─── */
 const TranscriptCorrections = dynamic(() => import('@/app/components/transcript-corrections').then(m => ({ default: m.TranscriptCorrections })), {
   loading: () => <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark"><div className="h-48 bg-gray-100 rounded animate-pulse dark:bg-warm-700" /></div>,
+  ssr: false,
+})
+
+const TranscriptNames = dynamic(() => import('@/app/components/transcript-names').then(m => ({ default: m.TranscriptNames })), {
   ssr: false,
 })
 
@@ -33,6 +38,9 @@ interface Correction {
   active: boolean
   notes: string | null
   created_at: string
+  episode_id: number | null
+  show_key: string | null
+  backfilled_at: string | null
 }
 
 interface ComplianceWord {
@@ -202,6 +210,16 @@ export default function SettingsPage() {
 
   // Shows tab state
   const [shows, setShows] = useState<Show[]>([])
+  // Scope choices for correction rules and the name list: live (non-archived)
+  // shows, labelled by display name + key so feeds of one show are tellable apart.
+  const correctionShowOptions = useMemo(
+    () =>
+      shows
+        .filter((s) => !s.archived_at)
+        .map((s) => ({ key: s.key, label: `${resolveShowDisplayName(s)} (${s.key})` }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [shows],
+  )
   // Per-station prefixes stripped from auto-derived show names (e.g. "KPFK -").
   const [stripPrefixes, setStripPrefixes] = useState<string[] | null>(null)
   const [showSearch, setShowSearch] = useState('')
@@ -638,15 +656,17 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleSaveCorrection(
-    form: { wrong: string; correct: string; case_sensitive: boolean; is_regex: boolean; notes: string },
-    editingId: number | null
-  ) {
+  async function handleSaveCorrection(form: CorrectionForm, editingId: number | null) {
+    const payload = { ...form, show_key: form.show_key || null }
     try {
       const res = editingId
-        ? await authedFetch('/api/corrections', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editingId, ...form }) })
-        : await authedFetch('/api/corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-      if (!res.ok) { toast('error', 'Failed to save correction'); return }
+        ? await authedFetch('/api/corrections', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: editingId, ...payload }) })
+        : await authedFetch('/api/corrections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast('error', data.error ?? 'Failed to save correction')
+        return
+      }
     } catch { toast('error', 'Network error'); return }
     fetchAll()
   }
@@ -2050,12 +2070,19 @@ export default function SettingsPage() {
               {csvImporting ? 'Importing...' : 'Import CSV'}
             </button>
             <span className="text-xs text-gray-400 dark:text-warm-500">
-              CSV format: wrong, correct, case_sensitive, is_regex, notes
+              CSV format: wrong, correct, case_sensitive, is_regex, notes, episode_id, show_key
             </span>
           </div>
 
+          <TranscriptNames
+            shows={correctionShowOptions}
+            hintEnabled={settings.vocabulary_hint_enabled === true}
+            onSaved={fetchAll}
+          />
+
           <TranscriptCorrections
             corrections={corrections}
+            shows={correctionShowOptions}
             onSaveCorrection={handleSaveCorrection}
             onToggleCorrection={handleToggleCorrection}
             onDeleteCorrection={handleDeleteCorrection}
