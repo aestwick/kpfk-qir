@@ -111,6 +111,18 @@ Before step 3, confirm that no CMS or podcast code reads `episode_log` with the 
 
 **Proposed fix.** Use the model for *selection and headline only* and keep the full DB summary as the filed description, or send the whole summary. **Effort:** S. This changes report logic, so it's your call.
 
+> **Status (2026-11-05): fixed** (`lib/qir-curation.ts`, `workers/generate-qir.ts`). Selection still uses short snippets, but each selected entry is now rewritten **on its own**, from its full summary plus host, under the same curation prompt. A rewrite is accepted only under that entry's own id; otherwise the full stored summary is filed.
+>
+> **Found while fixing: some descriptions were attached to the wrong episode.** Writing ~100 descriptions from ~60 snippets per category, the model sometimes put one episode's description on another.
+> - **v3 (latest), 2 entries:**
+>   - Ep 9142 (Alex Cranor on banking) was filed as "a federal judge blocked Trump's ban on CNN… Maria Ressa".
+>   - Ep 9150 (Nancy Lieberman) was filed as "Kamone Felix… Let the Poets Govern".
+> - **v2, 5 entries:** 6364, 6754, 6769, 6844, 6879.
+> - **v1, 2 entries:** 6842, 6888.
+> - **Q2 final (draft 13):** clean.
+>
+> Checked on live data: the new pass rewrote 9142 correctly, and 6162 now names all three guests. It costs about 2¢ per report. **If the Q3 report filed outside the app used these drafts' text, check those entries.**
+
 ## 6. HIGH (compliance): word-list flags can be timed at the wrong moment, which can also flip safe harbor
 
 **What's wrong.** PR #166 made word *matching* accent-safe, but the *timestamp* still comes from a plain substring search (`findTimestampForText`, `workers/compliance.ts:103,181`, `cue.text.includes(word)`). As of #166, that timestamp also decides safe harbor.
