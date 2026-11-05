@@ -3,7 +3,9 @@ import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue, discover
 import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
-import { isPipelinePaused, invalidateSetting } from '@/lib/settings'
+import { isPipelinePaused, isStationPaused, invalidateSetting } from '@/lib/settings'
+import { jobActionAccess } from '@/lib/job-actions'
+import { setGlobalPaused, setStationPaused, sweepFailedJobs, isPipelineQueueName } from '@/lib/pipeline-control'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,18 +21,42 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { action } = body
 
-    // Pipeline pause/resume (qir_settings is global config — left unscoped)
-    if (action === 'pause_pipeline' || action === 'resume_pipeline') {
-      const paused = action === 'pause_pipeline'
-      const { error } = await supabaseAdmin
-        .from('qir_settings')
-        .upsert({ key: 'pipeline_paused', value: JSON.stringify(paused), updated_at: new Date().toISOString() }, { onConflict: 'key' })
-      if (error) throw error
-      invalidateSetting('pipeline_paused') // reflect immediately, don't wait for cache TTL
-      return NextResponse.json({ ok: true, message: paused ? 'Pipeline paused' : 'Pipeline resumed', paused })
+    // Platform-wide controls (the all-stations kill switch, the shared worker
+    // concurrency mode) are super-admin only; everything else here acts on the
+    // active station alone. See lib/job-actions.ts for the table.
+    if (jobActionAccess(action) === 'super' && !ctx.context.isSuperAdmin) {
+      return NextResponse.json(
+        { error: 'Only a super-admin can change settings that affect every station' },
+        { status: 403 }
+      )
     }
 
-    // Pipeline mode toggle
+    // Pause/resume THIS station only (station_settings). Other stations keep
+    // running. The worker reads global OR station, so this is all it takes.
+    if (action === 'pause_pipeline' || action === 'resume_pipeline') {
+      const paused = action === 'pause_pipeline'
+      await setStationPaused(stationId, paused)
+      return NextResponse.json({
+        ok: true,
+        message: paused ? 'This station is paused' : 'This station is resumed',
+        paused,
+        scope: 'station',
+      })
+    }
+
+    // Global kill switch — every station (super-admin, gated above).
+    if (action === 'pause_all' || action === 'resume_all') {
+      const paused = action === 'pause_all'
+      await setGlobalPaused(paused)
+      return NextResponse.json({
+        ok: true,
+        message: paused ? 'All stations paused' : 'All-stations pause lifted',
+        paused,
+        scope: 'all',
+      })
+    }
+
+    // Pipeline mode toggle — shared worker pool, so every station (super-admin).
     if (action === 'set_pipeline_mode') {
       const { mode } = body
       if (mode !== 'steady' && mode !== 'catch-up') {
@@ -44,29 +70,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, message: `Pipeline mode set to ${mode}` })
     }
 
-    // Clear failed jobs from a queue
-    if (action === 'clear_failed') {
-      const queue = getQueue(body.queue)
-      if (!queue) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
-      await queue.clean(0, 0, 'failed')
-      return NextResponse.json({ ok: true, message: `Cleared failed jobs from ${body.queue}` })
-    }
-
-    // Retry all failed jobs in a queue
-    if (action === 'retry_failed') {
-      const queue = getQueue(body.queue)
-      if (!queue) return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
-      const failed = await queue.getFailed(0, 100)
-      let retried = 0
-      for (const job of failed) {
-        try {
-          await job.retry()
-          retried++
-        } catch {
-          // Job may have been removed or already retried — skip
-        }
+    // Retry / clear failed jobs — the BullMQ queues are shared by every
+    // station, so only touch jobs that belong to the active station (same
+    // filter Master Control uses for its per-station sweep).
+    if (action === 'retry_failed' || action === 'clear_failed') {
+      if (body.queue !== undefined && !isPipelineQueueName(body.queue)) {
+        return NextResponse.json({ error: 'Invalid queue name' }, { status: 400 })
       }
-      return NextResponse.json({ ok: true, message: `Retried ${retried} of ${failed.length} failed jobs in ${body.queue}` })
+      const count = await sweepFailedJobs({
+        action: action === 'retry_failed' ? 'retry' : 'clear',
+        queues: body.queue ? [body.queue] : undefined,
+        stationId,
+      })
+      const verb = action === 'retry_failed' ? 'Retried' : 'Cleared'
+      const where = body.queue ? ` ${body.queue}` : ''
+      return NextResponse.json({ ok: true, message: `${verb} ${count} failed${where} job(s) for this station`, count })
     }
 
     // Advance pipeline: check backlog and trigger all stages with pending work
@@ -205,7 +223,8 @@ export async function GET(request: NextRequest) {
               completed: counts.completed ?? 0,
               failed: counts.failed ?? 0,
             },
-            failedJobs: failed.map((job: any) => ({
+            // Only this station's failures: retry/clear act on these alone.
+            failedJobs: failed.filter((job: any) => job.data?.stationId === stationId).map((job: any) => ({
               id: job.id,
               name: job.name,
               data: job.data,
@@ -265,7 +284,12 @@ export async function GET(request: NextRequest) {
 
     const backlog = backlogResult
 
-    const paused = await isPipelinePaused()
+    // Global kill switch and this station's own flag, reported separately so
+    // the UI can say which one is on (effective = either).
+    const [globalPaused, stationPaused] = await Promise.all([
+      isPipelinePaused(),
+      isStationPaused(stationId),
+    ])
 
     const data: Record<string, unknown> = {}
     for (const result of results) {
@@ -276,7 +300,9 @@ export async function GET(request: NextRequest) {
       }
     }
     data.backlog = backlog
-    data.pipeline_paused = paused
+    data.pipeline_paused = globalPaused || stationPaused
+    data.pipeline_paused_global = globalPaused
+    data.pipeline_paused_station = stationPaused
 
     return NextResponse.json(data)
   } catch (err) {
@@ -285,12 +311,3 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function getQueue(name: string) {
-  switch (name) {
-    case 'ingest': return ingestQueue
-    case 'transcribe': return transcribeQueue
-    case 'summarize': return summarizeQueue
-    case 'compliance': return complianceQueue
-    default: return null
-  }
-}

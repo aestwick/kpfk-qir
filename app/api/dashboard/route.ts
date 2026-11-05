@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, getSetting, isPipelinePaused } from '@/lib/settings'
+import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused } from '@/lib/settings'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 import { fetchAllRows } from '@/lib/fetch-all'
@@ -494,6 +494,11 @@ async function buildDashboard(
     qualityFlags,
     lastFiledQir: lastFiled,
     lastCompletedJobs: lastJobTimestamps,
-    pipelinePaused: await isPipelinePaused(),
+    // Effective pause = global kill switch OR this station's own flag; both
+    // are reported so the Home page can say which one is on.
+    ...(await (async () => {
+      const [g, st] = await Promise.all([isPipelinePaused(), isStationPaused(stationId)])
+      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st }
+    })()),
   })
 }

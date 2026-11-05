@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
-import { episodeHref, publicReportHref } from '@/lib/nav'
+import { episodeHref, publicReportHref, roleAllows } from '@/lib/nav'
+import { describePause } from '@/lib/job-actions'
 import { useNavAccess } from '@/app/components/nav-access'
 
 /* ─── types ─── */
@@ -46,7 +47,10 @@ interface DashData {
   qirStatus: { status: string; version: number; entryCount: number } | null
   qualityFlags: QualityFlag[]
   lastFiledQir: { id: number; year: number; quarter: number; version: number; updated_at: string } | null
+  /** Effective: the all-stations switch OR this station's own flag. */
   pipelinePaused: boolean
+  pipelinePausedGlobal?: boolean
+  pipelinePausedStation?: boolean
 }
 
 const BADGE_COLORS: Record<string, string> = {
@@ -156,6 +160,8 @@ export default function DashboardOverview() {
   const [gapsCollapsed, setGapsCollapsed] = useState(false)
   const [nextIngest, setNextIngest] = useState(getNextIngestMinutes())
   const { toast } = useToast()
+  const { role, isSuperAdmin } = useNavAccess()
+  const canEdit = roleAllows(role, 'editor')
 
   const fetchData = useCallback(async () => {
     try {
@@ -186,20 +192,27 @@ export default function DashboardOverview() {
     return () => clearInterval(timer)
   }, [])
 
-  async function togglePause() {
-    const action = data?.pipelinePaused ? 'resume_pipeline' : 'pause_pipeline'
-    setActionLoading('pause')
+  // scope 'station' → this station's own flag (any editor);
+  // scope 'all' → the all-stations kill switch (super-admin only).
+  async function togglePause(scope: 'station' | 'all') {
+    const currentlyPaused = scope === 'all' ? !!data?.pipelinePausedGlobal : !!data?.pipelinePausedStation
+    if (scope === 'all' && !currentlyPaused && !confirm('Pause processing for EVERY station?')) return
+    const action = scope === 'all'
+      ? (currentlyPaused ? 'resume_all' : 'pause_all')
+      : (currentlyPaused ? 'resume_pipeline' : 'pause_pipeline')
+    setActionLoading(scope === 'all' ? 'pause-all' : 'pause')
     try {
       const res = await authedFetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
+      const body = await res.json().catch(() => ({} as { error?: string; message?: string }))
       if (!res.ok) {
-        toast('error', 'Failed to toggle pipeline')
+        toast('error', body.error ?? 'Failed to change pause state')
         return
       }
-      toast('success', action === 'pause_pipeline' ? 'Pipeline paused' : 'Pipeline resumed')
+      toast('success', body.message ?? 'Updated')
       setTimeout(fetchData, 1000)
     } catch {
       toast('error', 'Network error')
@@ -296,6 +309,10 @@ export default function DashboardOverview() {
   )
 
   const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
+  const pausedGlobal = !!data.pipelinePausedGlobal
+  // Older API responses only carried the effective flag; treat that as station.
+  const pausedStation = data.pipelinePausedStation ?? (pipelinePaused && !pausedGlobal)
+  const pause = describePause({ global: pausedGlobal, station: pausedStation })
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -354,8 +371,8 @@ export default function DashboardOverview() {
           {pipelinePaused ? (
             <div className="flex items-center gap-2.5">
               <span className="inline-flex rounded-full h-3 w-3 bg-red-500" />
-              <span className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase tracking-wider">Paused</span>
-              <span className="text-sm text-red-500 dark:text-red-400">Pipeline is stopped — no jobs will run</span>
+              <span className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase tracking-wider">{pause.headline}</span>
+              <span className="text-sm text-red-500 dark:text-red-400">{pause.detail}</span>
             </div>
           ) : anyProcessing ? (
             <>
@@ -388,20 +405,37 @@ export default function DashboardOverview() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={togglePause}
-            disabled={actionLoading !== null}
-            className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
-              pipelinePaused
-                ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
-                : 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300'
-            }`}
-          >
-            {actionLoading === 'pause' ? (
-              <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
-            ) : pipelinePaused ? 'Resume Pipeline' : 'Pause Pipeline'}
-          </button>
-          {!pipelinePaused && (['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
+          {canEdit && (
+            <button
+              onClick={() => togglePause('station')}
+              disabled={actionLoading !== null}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                pausedStation
+                  ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-100 border-red-300 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300'
+              }`}
+            >
+              {actionLoading === 'pause' ? (
+                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+              ) : pausedStation ? 'Resume this station' : 'Pause this station'}
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              onClick={() => togglePause('all')}
+              disabled={actionLoading !== null}
+              className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                pausedGlobal
+                  ? 'bg-emerald-100 border-emerald-300 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-300'
+                  : 'bg-white border-red-300 text-red-700 hover:bg-red-50 dark:bg-transparent dark:border-red-700 dark:text-red-300'
+              }`}
+            >
+              {actionLoading === 'pause-all' ? (
+                <span className="animate-spin h-3 w-3 border-2 border-current border-t-transparent rounded-full inline-block" />
+              ) : pausedGlobal ? 'Resume all stations' : 'Pause all stations'}
+            </button>
+          )}
+          {!pipelinePaused && canEdit && (['ingest', 'transcribe', 'summarize', 'compliance'] as const).map((action) => (
             <button
               key={action}
               onClick={() => triggerAction(action)}
