@@ -2,12 +2,37 @@
 
 import { useState } from 'react'
 import { getQuarterOptions } from '@/lib/quarters'
+import { downloadAuthed } from '@/lib/api-client'
+import { useNavAccess } from '@/app/components/nav-access'
+import { publicReportHref } from '@/lib/nav'
 
 export default function DownloadsPage() {
   // Reach back far enough to export historical-backfill quarters (e.g. WPFW's
   // one-off Q4 2020), not just the last year. The downloads API is quarter-agnostic.
   const quarterOptions = getQuarterOptions(6)
   const [selected, setSelected] = useState(quarterOptions[0])
+  const { active } = useNavAccess()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // The downloads API needs the Bearer token, which a plain <a href> doesn't
+  // send — fetch it and save the blob under the server's filename instead.
+  async function handleDownload(type: string) {
+    setBusy(type)
+    setError(null)
+    try {
+      await downloadAuthed(
+        `/api/downloads?year=${selected.year}&quarter=${selected.quarter}&type=${type}`,
+        `${type}_Q${selected.quarter}_${selected.year}.${type === 'episodes' ? 'csv' : 'txt'}`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const publicHref = active ? publicReportHref(active.slug, selected) : null
 
   const downloads = [
     {
@@ -70,6 +95,9 @@ export default function DownloadsPage() {
             Batch Downloads — {selected.label}
           </h3>
         </div>
+        {error && (
+          <p role="alert" className="px-4 pt-3 text-sm text-red-600 dark:text-red-400">{error}</p>
+        )}
         <div className="divide-y dark:divide-warm-700">
           {downloads.map((dl) => (
             <div
@@ -80,12 +108,14 @@ export default function DownloadsPage() {
                 <p className="text-sm font-medium">{dl.label}</p>
                 <p className="text-xs text-gray-500 dark:text-warm-400">{dl.description}</p>
               </div>
-              <a
-                href={`/api/downloads?year=${selected.year}&quarter=${selected.quarter}&type=${dl.type}`}
-                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
+              <button
+                type="button"
+                onClick={() => handleDownload(dl.type)}
+                disabled={busy !== null}
+                className="px-4 py-2 bg-gray-900 text-white text-sm rounded hover:bg-gray-800 disabled:opacity-50 dark:bg-warm-200 dark:text-warm-900 dark:hover:bg-warm-100"
               >
-                Download
-              </a>
+                {busy === dl.type ? 'Preparing…' : 'Download'}
+              </button>
             </div>
           ))}
         </div>
@@ -131,14 +161,18 @@ export default function DownloadsPage() {
         <p className="text-sm text-gray-600 dark:text-warm-400 mb-2">
           Finalized QIR reports are published at:
         </p>
-        <a
-          href={`/${selected.year}/q${selected.quarter}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-        >
-          /{selected.year}/q{selected.quarter}
-        </a>
+        {publicHref ? (
+          <a
+            href={publicHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            {publicHref}
+          </a>
+        ) : (
+          <span className="text-sm text-gray-400 dark:text-warm-500">Choose a station to see its public link.</span>
+        )}
       </div>
     </div>
   )

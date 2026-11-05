@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
 import { useToast } from '@/app/components/toast'
-import { episodeHref } from '@/lib/nav'
+import { episodeHref, publicReportHref } from '@/lib/nav'
+import { useNavAccess } from '@/app/components/nav-access'
 
 /* ─── types ─── */
 interface JobCounts { active: number; waiting: number; completed: number; failed: number }
@@ -807,6 +808,10 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
   const transcribeInfo = staleness(lastTranscribe)
   const summarizeInfo = staleness(lastSummarize)
 
+  // Public reports are per station (/<slug>/<year>/q<n>); the legacy
+  // /<year>/q<n> form redirects to KPFK's, whatever station is active.
+  const stationSlug = useNavAccess().active?.slug
+
   const workersRunning = queues.ingest.active + queues.transcribe.active + queues.summarize.active + queues.compliance.active > 0
   const workerColor = workersRunning ? 'text-emerald-600' : 'text-red-600'
 
@@ -817,8 +822,8 @@ function SystemHealthFooter({ queues, activity, lastFiled, paused }: { queues: D
       <span>Last ingest: <span className={`font-medium ${ingestInfo.color}`}>{ingestInfo.label}</span></span>
       <span>Last transcription: <span className={`font-medium ${transcribeInfo.color}`}>{transcribeInfo.label}</span></span>
       <span>Last summarization: <span className={`font-medium ${summarizeInfo.color}`}>{summarizeInfo.label}</span></span>
-      {lastFiled && (
-        <span>Last QIR filed: <a href={`/${lastFiled.year}/q${lastFiled.quarter}`} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
+      {lastFiled && stationSlug && (
+        <span>Last QIR filed: <a href={publicReportHref(stationSlug, lastFiled)} className="font-medium text-kpfk-red hover:underline">Q{lastFiled.quarter} {lastFiled.year}</a></span>
       )}
     </div>
   )
