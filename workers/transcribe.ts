@@ -15,6 +15,7 @@ import { resolveProviderPlan, runTranscription, AudioUnavailableError } from '..
 import { buildVtt } from '../lib/transcription/vtt'
 import { applyCorrections, correctionsForEpisode } from '../lib/transcription/corrections'
 import { replaceEpisodeCues } from '../lib/transcription/cues'
+import { CHUNK_DURATION_SECONDS, CHUNK_ENCODE_ARGS } from '../lib/transcription/chunking'
 import { loadCorrectionRules, loadShowGroups, loadVocabulary, episodeHumanNames } from '../lib/transcription/store'
 import { buildVocabularyPrompt, shouldUseVocabularyHint } from '../lib/transcription/vocabulary'
 import { bumpCacheVersion } from '../lib/api-cache'
@@ -22,7 +23,6 @@ import { bumpCacheVersion } from '../lib/api-cache'
 const execFileAsync = promisify(execFile)
 
 const MAX_CHUNK_SIZE_BYTES = 25 * 1024 * 1024 // 25MB
-const CHUNK_DURATION_SECONDS = 900 // 15 minutes
 
 /**
  * Date window for candidate selection. Defaults to the current quarter (steady
@@ -53,8 +53,7 @@ function makeChunkLoader(mp3Url: string, tmpDir: string): () => Promise<string[]
         '-f', 'segment',
         '-segment_time', String(CHUNK_DURATION_SECONDS),
         '-reset_timestamps', '1',
-        '-vn', '-ac', '1', '-ar', '16000',
-        '-c:a', 'aac', '-b:a', '64k',
+        ...CHUNK_ENCODE_ARGS,
         chunkPattern,
       ], { timeout: 600_000 }) // 10 min timeout
     } catch (ffErr: unknown) {
