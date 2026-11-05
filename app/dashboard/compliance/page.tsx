@@ -370,7 +370,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, review_status: prevStatus, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ id, review_status: prevStatus }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast('success', `Reverted to ${REVIEW_STATUS_LABELS[prevStatus]}`)
@@ -395,7 +395,7 @@ export default function CompliancePage() {
         const res = await authedFetch('/api/compliance', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids, review_status: st, resolved_by: 'dashboard' }),
+          body: JSON.stringify({ ids, review_status: st }),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
       }
@@ -417,7 +417,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ id, review_status: status, resolved_notes: notes }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast(
@@ -451,7 +451,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, review_status: status, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ ids, review_status: status, resolved_notes: bulkNotes }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast(

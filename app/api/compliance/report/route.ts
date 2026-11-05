@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES, isReviewStatus } from '@/lib/compliance-status'
+import { fetchAllRows } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,32 +25,32 @@ export async function GET(request: NextRequest) {
     if (unresolvedOnly) statusFilter.push(...ACTIVE_REVIEW_STATUSES)
     const show = searchParams.get('show')
 
-    // Build query (scoped to station via the inner episode_log join)
-    let query = supabase
-      .from('compliance_flags')
-      .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host, status, station_id, mp3_url)')
-      .eq('episode_log.station_id', stationId)
-      .order('created_at', { ascending: false })
+    // Paged (PostgREST caps a response at 1000 rows; a quarter has more flags
+    // than that). Ordered newest first, with id as a tiebreak for stable pages.
+    const flags = await fetchAllRows<any>('compliance report', (from, to) => {
+      let query = supabase
+        .from('compliance_flags')
+        .select('*, episode_log!inner(show_name, show_key, air_date, air_start, duration, headline, host, status, station_id, mp3_url)')
+        .eq('episode_log.station_id', stationId)
 
-    if (flagType) query = query.eq('flag_type', flagType)
-    if (severity) query = query.eq('severity', severity)
-    if (statusFilter.length) query = query.in('review_status', Array.from(new Set(statusFilter)))
-    if (show) query = query.ilike('episode_log.show_name', `%${show}%`)
+      if (flagType) query = query.eq('flag_type', flagType)
+      if (severity) query = query.eq('severity', severity)
+      if (statusFilter.length) query = query.in('review_status', Array.from(new Set(statusFilter)))
+      if (show) query = query.ilike('episode_log.show_name', `%${show}%`)
 
-    // Filter by quarter via the joined episode_log
-    if (quarter) {
-      const [y, q] = quarter.split('-')
-      const qNum = parseInt(q)
-      const yNum = parseInt(y)
-      if (!isNaN(qNum) && !isNaN(yNum)) {
-        const start = new Date(yNum, (qNum - 1) * 3, 1).toISOString().slice(0, 10)
-        const end = new Date(yNum, qNum * 3, 0).toISOString().slice(0, 10)
-        query = query.gte('episode_log.air_date', start).lte('episode_log.air_date', end)
+      // Filter by quarter via the joined episode_log
+      if (quarter) {
+        const [y, q] = quarter.split('-')
+        const qNum = parseInt(q)
+        const yNum = parseInt(y)
+        if (!isNaN(qNum) && !isNaN(yNum)) {
+          const start = new Date(yNum, (qNum - 1) * 3, 1).toISOString().slice(0, 10)
+          const end = new Date(yNum, qNum * 3, 0).toISOString().slice(0, 10)
+          query = query.gte('episode_log.air_date', start).lte('episode_log.air_date', end)
+        }
       }
-    }
-
-    const { data: flags, error } = await query
-    if (error) throw error
+      return query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to)
+    })
 
     // Group: show_key → episodes → flags
     interface EpisodeInfo {

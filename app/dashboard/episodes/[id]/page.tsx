@@ -587,7 +587,7 @@ export default function EpisodeDetailPage() {
     await authedFetch('/api/compliance', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: flagId, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
+      body: JSON.stringify({ id: flagId, review_status: status, resolved_notes: notes }),
     })
     setResolvingFlag(null)
     setResolveNotes('')
