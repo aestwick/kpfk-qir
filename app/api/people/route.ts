@@ -5,6 +5,9 @@ import { loadShowCatalog, catalogName } from '@/lib/show-catalog'
 
 export const dynamic = 'force-dynamic'
 
+const PAGE = 1000
+const MAX_APPEARANCE_ROWS = 10_000
+
 // GET /api/people?q=<name>   — hosts/guests matching a (possibly misspelled)
 //                              name, spelling variants merged into one person.
 // GET /api/people?name=<name> — one person's appearances (every spelling),
@@ -51,15 +54,25 @@ export async function GET(request: NextRequest) {
     const person = people.find((p) => samePerson(p.name, name) || p.variants.some((v) => samePerson(v, name))) ?? people[0]
     if (!person) return NextResponse.json({ person: null, appearances: [] })
 
-    const [{ data: apps, error: e2 }, catalog] = await Promise.all([
-      supabase.rpc('person_appearances', { p_station_id: stationId, p_folded: person.spellings }),
-      loadShowCatalog(supabase, stationId),
-    ])
-    if (e2) return NextResponse.json({ error: e2.message }, { status: 500 })
+    // Page the appearances: PostgREST caps one response at 1,000 rows, and a
+    // long-running host can exceed that (MAX_APPEARANCE_ROWS bounds a runaway).
+    const loadAppearances = async () => {
+      const rows: Record<string, any>[] = []
+      for (let from = 0; from < MAX_APPEARANCE_ROWS; from += PAGE) {
+        const { data, error } = await supabase
+          .rpc('person_appearances', { p_station_id: stationId, p_folded: person.spellings })
+          .range(from, from + PAGE - 1)
+        if (error) throw new Error(error.message)
+        rows.push(...((data ?? []) as Record<string, any>[]))
+        if (!data || data.length < PAGE) return { rows, truncated: false }
+      }
+      return { rows, truncated: true }
+    }
+    const [{ rows: apps, truncated }, catalog] = await Promise.all([loadAppearances(), loadShowCatalog(supabase, stationId)])
 
     // One row per episode: an episode can list the person as host AND guest.
     const byEpisode = new Map<number, Record<string, unknown>>()
-    for (const a of (apps ?? []) as Record<string, any>[]) {
+    for (const a of apps) {
       const id = Number(a.episode_id)
       const prev = byEpisode.get(id)
       if (prev) {
@@ -82,7 +95,7 @@ export async function GET(request: NextRequest) {
     const appearances = Array.from(byEpisode.values()).sort(
       (a, b) => String(b.airDate ?? '').localeCompare(String(a.airDate ?? '')) || String(b.airStart ?? '').localeCompare(String(a.airStart ?? ''))
     )
-    return NextResponse.json({ person, appearances, others: people.filter((p) => p !== person).slice(0, 8) })
+    return NextResponse.json({ person, appearances, truncated, others: people.filter((p) => p !== person).slice(0, 8) })
   } catch (err) {
     console.error('GET /api/people failed:', err)
     return NextResponse.json({ error: 'Failed to search people' }, { status: 500 })
