@@ -4,6 +4,7 @@ import {
   parseSearchQuery,
   lookupWords,
   chooseVariants,
+  isPlausibleInflection,
   alsoMatched,
   buildTsQuery,
   reciprocalRankFusion,
@@ -28,7 +29,7 @@ describe('parseSearchQuery', () => {
   it('keeps quoted phrases and exclusions', () => {
     const q = parseSearchQuery('"war on voting" -ballot')
     expect(q.clauses).toEqual([{ anyOf: [{ kind: 'phrase', words: ['war', 'on', 'voting'] }] }])
-    expect(q.excluded).toEqual(['ballot'])
+    expect(q.excluded).toEqual([{ kind: 'word', word: 'ballot' }])
   })
   it('joins OR alternatives into one clause', () => {
     expect(parseSearchQuery('rent OR eviction').clauses).toEqual([
@@ -41,6 +42,16 @@ describe('parseSearchQuery', () => {
   it('tolerates an unclosed quote and punctuation-only input', () => {
     expect(parseSearchQuery('"state of oregon').clauses[0].anyOf[0]).toEqual({ kind: 'phrase', words: ['state', 'of', 'oregon'] })
     expect(parseSearchQuery('?? !!').clauses).toEqual([])
+  })
+})
+
+describe('exclusions and dotted tokens', () => {
+  it('excludes a quoted phrase as a phrase, not word by word', () => {
+    expect(buildTsQuery(parseSearchQuery('housing -"new york"'))?.all).toBe("'housing' & !('new' <-> 'york')")
+  })
+  it('keeps dotted numbers and hosts as one token too', () => {
+    expect(buildTsQuery(parseSearchQuery('90.7'))?.all).toBe("('90.7' | ('90' <-> '7'))")
+    expect(buildTsQuery(parseSearchQuery('kpfk.org'))?.all).toBe("('kpfk.org' | ('kpfk' <-> 'org'))")
   })
 })
 
@@ -67,6 +78,18 @@ describe('chooseVariants', () => {
     expect(v.get('the')).toEqual(['the'])
     expect(v.get('on')).toEqual(['on'])
     expect(v.get('about')).toEqual(['about'])
+  })
+  it('only accepts real plural/singular twins', () => {
+    const v = chooseVariants(
+      ['jones', 'boxes', 'immigrant'],
+      [row('jones', 'jon', 'inflection'), row('boxes', 'box', 'inflection'), row('immigrant', 'immigrants', 'inflection')]
+    )
+    expect(v.get('jones')).toEqual(['jones'])
+    expect(v.get('boxes')).toEqual(['boxes', 'box'])
+    expect(v.get('immigrant')).toEqual(['immigrant', 'immigrants'])
+    expect(isPlausibleInflection('hayes', 'hay')).toBe(false)
+    expect(isPlausibleInflection('barnes', 'barn')).toBe(false)
+    expect(isPlausibleInflection('ciudad', 'ciudades')).toBe(true)
   })
   it('caps variants per word', () => {
     const rows = Array.from({ length: 10 }, (_, i) => row('word', `word${i}`, 'exact'))

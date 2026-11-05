@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { useSearchParams, usePathname } from 'next/navigation'
 import { getQuarterOptions } from '@/lib/quarters'
 import { locationFrom } from '@/lib/nav'
 import {
@@ -23,7 +23,7 @@ import {
   timeToMinutes,
 } from '@/lib/broadcast-format'
 import type { TranscriptSearchResult } from '@/lib/types'
-import { useApiJson, Highlighted, ErrorPanel, FindSwitcher, RowsSkeleton, StatusBadge, CARD, INPUT, BUTTON } from '@/app/components/browse-ui'
+import { useApiJson, useUrlUpdater, Highlighted, ErrorPanel, FindSwitcher, RowsSkeleton, StatusBadge, CARD, INPUT, BUTTON } from '@/app/components/browse-ui'
 
 interface SearchResponse {
   results: TranscriptSearchResult[]
@@ -46,9 +46,9 @@ const RANK_WINDOW = 200
 
 export default function SearchPage() {
   const searchParams = useSearchParams()
-  const router = useRouter()
   const pathname = usePathname()
 
+  const relaxedParam = searchParams.get('relaxed') === '1'
   const q = searchParams.get('q') ?? ''
   const showKey = searchParams.get('show_key') ?? ''
   const quarter = searchParams.get('quarter') ?? ''
@@ -58,14 +58,9 @@ export default function SearchPage() {
   const [draft, setDraft] = useState(q)
   useEffect(() => setDraft(q), [q])
 
-  function update(updates: Record<string, string>) {
-    const p = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(updates)) {
-      if (v) p.set(k, v)
-      else p.delete(k)
-    }
-    router.replace(`${pathname}?${p}`, { scroll: false })
-  }
+  const setUrl = useUrlUpdater()
+  // Any change other than paging starts a fresh (strict) search.
+  const update = (updates: Record<string, string>) => setUrl({ relaxed: '', ...updates })
 
   // Typing updates the URL after a pause; Enter searches immediately.
   const debounce = useRef<ReturnType<typeof setTimeout>>()
@@ -88,13 +83,18 @@ export default function SearchPage() {
     if (showKey) p.set('show_key', showKey)
     if (quarter) p.set('quarter', quarter)
     if (mode === 'semantic') p.set('mode', 'semantic')
+    if (relaxedParam && page > 1) p.set('relaxed', '1')
     return `/api/transcript-search?${p}`
-  }, [q, page, showKey, quarter, mode])
+  }, [q, page, showKey, quarter, mode, relaxedParam])
   const { data, error, loading, reload } = useApiJson<SearchResponse>(apiUrl)
 
   const from = locationFrom(pathname, searchParams.toString())
   const quarterOptions = getQuarterOptions(6).map((o) => ({ label: o.label, value: `${o.year}-Q${o.quarter}` }))
-  const totalPages = data ? Math.ceil(Math.min(data.total, mode === 'lexical' ? RANK_WINDOW : data.total) / LIMIT) : 0
+  // Exact-word results are ranked within the RANK_WINDOW most recent matches.
+  const ranked = mode === 'lexical' || data?.degraded
+  const totalPages = data ? Math.ceil(Math.min(data.total, ranked ? RANK_WINDOW : data.total) / LIMIT) : 0
+  // Paging keeps a relaxed result set relaxed (page 1 decided it).
+  const goPage = (n: number) => setUrl({ page: n <= 1 ? '' : String(n), relaxed: data?.relaxed && n > 1 ? '1' : '' })
 
   return (
     <div className="space-y-4 max-w-4xl">
@@ -186,7 +186,7 @@ export default function SearchPage() {
             ) : (
               <>
                 <strong className="text-warm-900 dark:text-warm-100">{data.total.toLocaleString()}</strong> episode{data.total === 1 ? '' : 's'}
-                {mode === 'lexical' && data.total > RANK_WINDOW && ` — showing the best matches from the ${RANK_WINDOW} most recent. Pick a show or a quarter to reach older ones.`}
+                {ranked && data.total > RANK_WINDOW && ` — showing the best matches from the ${RANK_WINDOW} most recent. Pick a show or a quarter to reach older ones.`}
               </>
             )}
           </p>
@@ -300,13 +300,13 @@ export default function SearchPage() {
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm">
-          <button className={BUTTON} disabled={page <= 1} onClick={() => update({ page: page <= 2 ? '' : String(page - 1) })}>
+          <button className={BUTTON} disabled={page <= 1} onClick={() => goPage(page - 1)}>
             ← Previous
           </button>
           <span className="text-warm-500">
             Page {page} of {totalPages}
           </span>
-          <button className={BUTTON} disabled={page >= totalPages} onClick={() => update({ page: String(page + 1) })}>
+          <button className={BUTTON} disabled={page >= totalPages} onClick={() => goPage(page + 1)}>
             Next →
           </button>
         </div>

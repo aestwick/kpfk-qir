@@ -327,7 +327,7 @@ export default function EpisodesPage() {
 
   const SortIcon = ({ col }: { col: string }) => {
     if (sort !== col) return <span className="text-gray-300 dark:text-warm-600 ml-1">&#8597;</span>
-    return <span className="ml-1">{order === 'asc' ? '&#8593;' : '&#8595;'}</span>
+    return <span className="ml-1">{order === 'asc' ? '↑' : '↓'}</span>
   }
 
   return (

@@ -16,7 +16,7 @@
 // 22s sequential scan).
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getQuarterDateRange } from './qir-format'
+import { quarterParamRange } from './qir-format'
 import { embedQuery, toPgVector } from './embeddings'
 import { getEmbeddingModel } from './settings'
 import type { TranscriptSearchResult } from './types'
@@ -47,6 +47,8 @@ export interface TranscriptSearchParams {
   endDate?: string | null
   page?: number
   limit?: number
+  /** Page 2+ of a relaxed ("most of the words") result set. */
+  relaxed?: boolean
 }
 
 export interface TranscriptSearchResponse {
@@ -62,11 +64,7 @@ export interface TranscriptSearchResponse {
 
 /** Expand "2026-Q1" to its inclusive date range, reusing the QIR helper. */
 function quarterToRange(quarter?: string | null): { start: string | null; end: string | null } {
-  if (!quarter) return { start: null, end: null }
-  const m = quarter.match(/^(\d{4})-Q([1-4])$/)
-  if (!m) return { start: null, end: null }
-  const { start, end } = getQuarterDateRange(parseInt(m[1], 10), parseInt(m[2], 10))
-  return { start, end }
+  return quarterParamRange(quarter) ?? { start: null, end: null }
 }
 
 function resolveArgs(params: TranscriptSearchParams) {
@@ -174,9 +172,11 @@ export async function searchTranscripts(
   const { built, also } = await buildStationQuery(supabase, params.stationId, params.query)
   if (!built) return { results: [], total: 0, alsoMatched: [], relaxed: false }
 
-  let rows = await runV2(supabase, params.stationId, built.all, built.any, a)
-  let relaxed = false
-  if (!rows.length && built.any && a.offset === 0) {
+  // Relaxed paging: page 1 decided the strict query matched nothing, so later
+  // pages (flagged by the client) go straight to the relaxed query.
+  let relaxed = Boolean(params.relaxed && built.any)
+  let rows = await runV2(supabase, params.stationId, relaxed ? built.any! : built.all, built.any, a)
+  if (!rows.length && !relaxed && built.any && a.offset === 0) {
     rows = await runV2(supabase, params.stationId, built.any, built.any, a)
     relaxed = rows.length > 0
   }

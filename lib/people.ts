@@ -24,14 +24,18 @@ export function splitPeople(field: string | null | undefined): string[] {
   return field
     .split(/\s*(?:;|,|&|\/|\s+and\s+|\s+y\s+)\s*/)
     .map((p) => p.replace(/\([^)]*\)/g, '').replace(HONORIFIC, '').replace(/^[\s.-]+|[\s.-]+$/g, ''))
-    .filter((n) => {
-      if (n.length < 4 || n.length > 40) return false
-      if (/[0-9@]/.test(n)) return false
-      if (!STARTS_UPPER.test(n)) return false
-      if (ORG_WORD.test(n)) return false
-      const words = n.split(/\s+/).length
-      return words >= 2 && words <= 5
-    })
+    .filter(isLikelyPersonName)
+}
+
+/** Heuristic: does a split-out fragment look like a person's name (2–5 words,
+ *  capitalised, no digits, not an organisation/affiliation)? */
+export function isLikelyPersonName(n: string): boolean {
+  if (n.length < 4 || n.length > 40) return false
+  if (/[0-9@]/.test(n)) return false
+  if (!STARTS_UPPER.test(n)) return false
+  if (ORG_WORD.test(n)) return false
+  const words = n.split(/\s+/).length
+  return words >= 2 && words <= 5
 }
 
 /** pg_trgm-style trigram set (words padded with two leading + one trailing space). */
@@ -75,20 +79,40 @@ export function phoneticKey(name: string): string {
     .join(' ')
 }
 
-/** Two spellings are the same person when they're very similar AND their last
- *  names agree closely (keeps "Greg Palast" apart from "Greg Grandin"), either
- *  as written or as they sound. First initials must match. */
+function editDistance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)])
+  for (let j = 1; j <= b.length; j++) d[0][j] = j
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+  return d[a.length][b.length]
+}
+
+/** First names must be the same name: sound-alike ("Thom"/"Tom", "Kathy"/
+ *  "Cathy"), or a one-letter swap inside a longer name of the same length
+ *  ("Jeremey"/"Jeremay"). Added/dropped letters and ending changes are
+ *  different names ("Michael"/"Michelle", "Maria"/"Mario", "Carla"/"Carlos"). */
+function sameFirstName(a: string, b: string): boolean {
+  const pa = phoneticKey(a)
+  const pb = phoneticKey(b)
+  if (pa === pb) return true
+  return pa.length === pb.length && pa.length >= 6 && editDistance(pa, pb) === 1 && pa[pa.length - 1] === pb[pb.length - 1]
+}
+
+/** Two spellings are the same person when their first names are the same name
+ *  and their last names are close, as written or as they sound ("Tom Hartman"
+ *  = "Thom Hartmann", "David Korn" = "David Corn"; "Greg Palast" ≠ "Greg
+ *  Grandin", "Michael Brown" ≠ "Michelle Brown"). */
 export function samePerson(a: string, b: string): boolean {
   const fa = foldName(a)
   const fb = foldName(b)
   if (fa === fb) return true
-  const close = (x: string, y: string) => {
-    const lx = x.split(' ').pop() ?? ''
-    const ly = y.split(' ').pop() ?? ''
-    return nameSimilarity(x, y) >= 0.55 && nameSimilarity(lx, ly) >= 0.45
-  }
-  if (fa[0] !== fb[0]) return false
-  return close(fa, fb) || close(phoneticKey(a), phoneticKey(b))
+  const wa = fa.split(' ')
+  const wb = fb.split(' ')
+  if (!sameFirstName(wa[0], wb[0])) return false
+  const la = wa[wa.length - 1]
+  const lb = wb[wb.length - 1]
+  return nameSimilarity(la, lb) >= 0.45 || nameSimilarity(phoneticKey(la), phoneticKey(lb)) >= 0.45
 }
 
 export interface PersonRow {

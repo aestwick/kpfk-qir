@@ -21,11 +21,13 @@
 export interface ParsedQuery {
   /** Each clause is AND-ed; a clause is one word/phrase or an OR of several. */
   clauses: Clause[]
-  /** Words to exclude. */
-  excluded: string[]
+  /** Words or phrases to exclude. */
+  excluded: Term[]
 }
 
-export type Term = { kind: 'word'; word: string } | { kind: 'phrase'; words: string[] }
+/** A phrase may carry `alt`: the token as Postgres indexes it whole ("90.7",
+ *  "kpfk.org" — the default parser keeps dotted numbers/hosts as one token). */
+export type Term = { kind: 'word'; word: string } | { kind: 'phrase'; words: string[]; alt?: string }
 export interface Clause {
   anyOf: Term[]
 }
@@ -58,6 +60,7 @@ const MAX_VARIANTS_PER_WORD = 6
 // Built with the constructor: the project's TS target rejects the `u` flag on
 // regex literals, but every runtime we ship to supports Unicode classes.
 const WORD_RE = new RegExp('[\\p{L}\\p{N}]+', 'gu')
+const DOTTED_RE = new RegExp('^[\\p{L}\\p{N}]+(?:\\.[\\p{L}\\p{N}]+)+$', 'u')
 
 export function tokenize(text: string): string[] {
   return text.toLowerCase().match(WORD_RE) ?? []
@@ -66,7 +69,7 @@ export function tokenize(text: string): string[] {
 /** Parse the search box. Never throws; an all-punctuation query parses empty. */
 export function parseSearchQuery(input: string): ParsedQuery {
   const clauses: Clause[] = []
-  const excluded: string[] = []
+  const excluded: Term[] = []
   const re = /(-?)"([^"]*)"?|(\S+)/g
   let pendingOr = false
   let m: RegExpExecArray | null
@@ -75,12 +78,9 @@ export function parseSearchQuery(input: string): ParsedQuery {
     if (m[2] !== undefined) {
       const words = tokenize(m[2])
       if (!words.length) continue
-      if (negate) {
-        excluded.push(...words)
-        continue
-      }
       const term: Term = words.length === 1 ? { kind: 'word', word: words[0] } : { kind: 'phrase', words }
-      pushTerm(term)
+      if (negate) excluded.push(term)
+      else pushTerm(term)
       continue
     }
     const raw = m[3]
@@ -88,14 +88,11 @@ export function parseSearchQuery(input: string): ParsedQuery {
       pendingOr = clauses.length > 0
       continue
     }
-    if (raw.startsWith('-') && raw.length > 1) {
-      excluded.push(...tokenize(raw.slice(1)))
-      continue
-    }
-    const words = tokenize(raw)
-    // "Fabara-Anelli" / "don't" → a tiny phrase, matching how it's indexed.
-    if (words.length === 1) pushTerm({ kind: 'word', word: words[0] })
-    else if (words.length > 1) pushTerm({ kind: 'phrase', words })
+    const negate2 = raw.startsWith('-') && raw.length > 1
+    const term = rawTerm(negate2 ? raw.slice(1) : raw)
+    if (!term) continue
+    if (negate2) excluded.push(term)
+    else pushTerm(term)
   }
   return { clauses, excluded }
 
@@ -104,6 +101,16 @@ export function parseSearchQuery(input: string): ParsedQuery {
     else clauses.push({ anyOf: [term] })
     pendingOr = false
   }
+}
+
+/** One unquoted token → a word, or a tiny phrase for "Fabara-Anelli" /
+ *  "don't" (matching how it's indexed); dotted tokens keep their whole form. */
+function rawTerm(raw: string): Term | null {
+  const words = tokenize(raw)
+  if (words.length === 1) return { kind: 'word', word: words[0] }
+  if (!words.length) return null
+  const dotted = raw.toLowerCase().match(DOTTED_RE)
+  return dotted ? { kind: 'phrase', words, alt: dotted[0] } : { kind: 'phrase', words }
 }
 
 /** Every distinct word in the query worth a vocabulary lookup. */
@@ -131,7 +138,7 @@ export function chooseVariants(words: string[], rows: VariantRow[]): Map<string,
     // ("the" → "þe", "on" → "ón") only add noise.
     if (w.length > 3 && !STOPWORDS.has(w)) {
       const list = (byTerm.get(w) ?? [])
-        .filter((r) => r.kind !== 'fuzzy' || isPlausibleTypo(w, r))
+        .filter((r) => (r.kind === 'fuzzy' ? isPlausibleTypo(w, r) : r.kind === 'inflection' ? isPlausibleInflection(w, r.variant) : true))
         .sort((a, b) => rankKind(a.kind) - rankKind(b.kind) || b.sim - a.sim || b.ndoc - a.ndoc)
       for (const r of list) {
         if (picked.length >= MAX_VARIANTS_PER_WORD) break
@@ -141,6 +148,19 @@ export function chooseVariants(words: string[], rows: VariantRow[]): Map<string,
     out.set(w, picked)
   }
   return out
+}
+
+/** A plural/singular twin: a trailing "s"; or "es" after s/x/z/ch/sh
+ *  ("boxes"/"box"), or after l/n/r/d/j on a stem of 5+ letters (Spanish:
+ *  "movilizaciones"/"movilización", "ciudades"/"ciudad"). Keeps short names
+ *  from shedding letters: "Jones" ≠ "jon", "Hayes" ≠ "hay", "Barnes" ≠ "barn". */
+export function isPlausibleInflection(typed: string, variant: string): boolean {
+  const fold = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  const [a, b] = [fold(typed), fold(variant)]
+  const [short, long] = a.length < b.length ? [a, b] : [b, a]
+  if (long === `${short}s`) return true
+  if (long !== `${short}es`) return false
+  return /(s|x|z|ch|sh)$/.test(short) || (short.length >= 5 && /[lnrdj]$/.test(short))
 }
 
 /** A trigram look-alike counts as a typo of the typed word only when it is
@@ -171,7 +191,8 @@ function wordGroup(w: string, variants: Map<string, string[]>): string {
 
 function termQuery(t: Term, variants: Map<string, string[]>): string {
   if (t.kind === 'word') return wordGroup(t.word, variants)
-  return `(${t.words.map((w) => wordGroup(w, variants)).join(' <-> ')})`
+  const phrase = `(${t.words.map((w) => wordGroup(w, variants)).join(' <-> ')})`
+  return t.alt ? `(${lex(t.alt)} | ${phrase})` : phrase
 }
 
 export interface BuiltQuery {
@@ -190,7 +211,8 @@ export function buildTsQuery(q: ParsedQuery, variants: Map<string, string[]> = n
     const terms = c.anyOf.map((t) => termQuery(t, variants))
     return terms.length === 1 ? terms[0] : `(${terms.join(' | ')})`
   })
-  const not = q.excluded.map((w) => `!${lex(w)}`)
+  // Exclusions match as typed (no variants); a phrase is excluded as a phrase.
+  const not = q.excluded.map((t) => `!${termQuery(t, new Map())}`)
   const all = [...parts, ...not].join(' & ')
 
   const content = lookupWords(q).filter((w) => !STOPWORDS.has(w))

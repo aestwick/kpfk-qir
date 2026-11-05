@@ -15,7 +15,7 @@ import {
 import { buildShowCatalog, groupKeysFor } from './show-catalog'
 import { buildBroadcastDay, blockAt, isSecondaryFeed, type DayEpisodeRow } from './broadcast-day'
 import { splitPeople, foldName, nameSimilarity, samePerson, mergePeople, rankForQuery, type PersonRow } from './people'
-import { buildShowReport, splitIssues, type ReportEpisodeRow } from './show-report'
+import { buildShowReport, splitIssues, dedupeAirings, type ReportEpisodeRow } from './show-report'
 
 describe('broadcast-format', () => {
   it('validates and shifts dates', () => {
@@ -141,6 +141,11 @@ describe('people', () => {
     expect(samePerson('Mark Pokan', 'Mark Pocan')).toBe(true)
     expect(samePerson('Greg Palast', 'Greg Palace')).toBe(false)
     expect(samePerson('Gerald Horne', 'Gary Horne')).toBe(false)
+    for (const [x, y] of [['Maria Lopez', 'Mario Lopez'], ['John Smith', 'Joan Smith'], ['Michael Brown', 'Michelle Brown'], ['Amy Goodman', 'Andy Goodman'], ['Carlos Rodriguez', 'Carla Rodriguez'], ['Jose Martinez', 'Josefina Martinez'], ['Tom Hayden', 'Tim Hayden']])
+      expect(samePerson(x, y), `${x} vs ${y}`).toBe(false)
+    expect(samePerson('Kathy Kelly', 'Cathy Kelly')).toBe(true)
+    expect(samePerson('Sonali Kohatkar', 'Sonali Kulhatkar')).toBe(true)
+    expect(samePerson('Dr Gerald Horne', 'Geralb Horn')).toBe(false) // typo at the end of the first name: kept apart
   })
   it('merges spelling rows into one person', () => {
     const r = (name: string, n: number, score = 0.8): PersonRow => ({
@@ -196,6 +201,10 @@ describe('show report', () => {
     ])
     expect(r.guests[0]).toEqual({ name: 'Greg Palast', count: 2, episodeIds: [1, 2] })
     expect(r.hosts).toEqual([{ name: 'Tom Hartman', count: 3, episodeIds: [1, 2, 3] }])
+  })
+  it('counts sibling-feed copies of one airing once', () => {
+    const rows = [row(1, { air_start: '09:00:00' }), row(2, { air_start: '09:02:00' }), row(3, { air_start: '10:00:00' }), row(4, { air_date: '2026-10-02' })]
+    expect(dedupeAirings(rows).map((r) => r.id)).toEqual([1, 3, 4])
   })
   it('drops non-issue tags', () => {
     expect(splitIssues('SKIP; Education | none')).toEqual(['Education'])

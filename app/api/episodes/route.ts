@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { parseMp3Url, dateFieldsFromUrl } from '@/lib/parse-mp3-url'
 import { logAuditEvent, requestMeta, AUDIT_ACTIONS } from '@/lib/audit'
-import { getQuarterDateRange } from '@/lib/qir-format'
+import { quarterParamRange } from '@/lib/qir-format'
 import { isIsoDate } from '@/lib/broadcast-format'
 
 // Columns the list may be sorted by (the value reaches .order() verbatim).
@@ -49,9 +49,9 @@ export async function GET(request: NextRequest) {
     if (category) query = query.eq('issue_category', category)
     if (programCategory) query = query.eq('category', programCategory)
 
-    const quarterMatch = quarter?.match(/^(\d{4})-Q([1-4])$/)
-    if (quarterMatch) {
-      const { start, end } = getQuarterDateRange(parseInt(quarterMatch[1], 10), parseInt(quarterMatch[2], 10))
+    const quarterRange = quarterParamRange(quarter)
+    if (quarterRange) {
+      const { start, end } = quarterRange
       // Match episodes by air_date, or by created_at for episodes with null air_date
       query = query.or(`and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
     }

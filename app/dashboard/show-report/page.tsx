@@ -7,8 +7,8 @@
 
 import { useMemo } from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams, usePathname } from 'next/navigation'
-import { useApiJson, ErrorPanel, FindSwitcher, RowsSkeleton, StatusBadge, CARD, INPUT } from '@/app/components/browse-ui'
+import { useSearchParams, usePathname } from 'next/navigation'
+import { useApiJson, useUrlUpdater, ErrorPanel, FindSwitcher, RowsSkeleton, StatusBadge, CARD, INPUT } from '@/app/components/browse-ui'
 import {
   formatAirDate,
   formatAirTime,
@@ -34,6 +34,7 @@ interface ShowRow {
 }
 
 interface ReportResponse {
+  truncated?: boolean
   show: { key: string; name: string; keys: string[]; category: string | null }
   from: string
   to: string
@@ -96,7 +97,6 @@ function TallyList({ title, items, link, empty }: { title: string; items: Tally[
 }
 
 export default function ShowReportPage() {
-  const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const show = searchParams.get('show') ?? ''
@@ -105,14 +105,7 @@ export default function ShowReportPage() {
   const from = isIsoDate(searchParams.get('from')) ? searchParams.get('from')! : month.from
   const to = isIsoDate(searchParams.get('to')) ? searchParams.get('to')! : month.to
 
-  function update(u: Record<string, string>) {
-    const p = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(u)) {
-      if (v) p.set(k, v)
-      else p.delete(k)
-    }
-    router.replace(`${pathname}?${p}`, { scroll: false })
-  }
+  const update = useUrlUpdater()
 
   const shows = useApiJson<{ shows: ShowRow[] }>('/api/shows')
   const options = useMemo(() => {
@@ -203,6 +196,11 @@ export default function ShowReportPage() {
               Search inside this show →
             </Link>
           </div>
+          {data.truncated && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              This range has more episodes than one report can hold — counts cover the earliest part only. Pick a shorter range.
+            </p>
+          )}
           {data.pendingCount > 0 && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
               {data.pendingCount} episode{data.pendingCount === 1 ? ' is' : 's are'} still being processed, so topics and guests may be incomplete.

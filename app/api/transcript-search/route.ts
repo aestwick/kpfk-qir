@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
       endDate,
       page,
       limit,
+      relaxed: searchParams.get('relaxed') === '1',
     }
     const out = mode === 'semantic' ? await searchTranscriptsSemantic(supabase, params) : await searchTranscripts(supabase, params)
     return NextResponse.json({ ...out, page, limit, query: q, mode })

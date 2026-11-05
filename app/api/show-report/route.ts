@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
 import { loadShowCatalog, groupKeysFor } from '@/lib/show-catalog'
-import { buildShowReport, type ReportEpisodeRow } from '@/lib/show-report'
+import { buildShowReport, dedupeAirings, type ReportEpisodeRow } from '@/lib/show-report'
 import { isIsoDate, monthRange, stationToday } from '@/lib/broadcast-format'
 
 export const dynamic = 'force-dynamic'
 
 const MAX_DAYS = 400
+const PAGE = 1000
+const MAX_ROWS = 6000
 
 // GET /api/show-report?show=<feed key or group>&from=YYYY-MM-DD&to=YYYY-MM-DD
 // What one logical show (all its feeds — show_group) covered over a period:
@@ -36,21 +38,36 @@ export async function GET(request: NextRequest) {
     const keys = groupKeysFor(catalog, show)
     const showInfo = catalog.byKey.get(keys[0])
 
-    const { data, error } = await supabase
-      .from('episode_log')
-      .select('id, show_key, air_date, air_start, duration, headline, title, summary, host, guest, issue_category, status')
-      .eq('station_id', stationId)
-      .in('show_key', keys)
-      .gte('air_date', from)
-      .lte('air_date', to)
-      .neq('status', 'archived')
-      .order('air_date', { ascending: true })
-      .order('air_start', { ascending: true })
-      .limit(1000)
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    // Page through (PostgREST caps a response at 1,000 rows): a multi-feed show
+    // over a long range can exceed it. MAX_ROWS keeps a runaway range bounded,
+    // and `truncated` says so instead of silently under-counting.
+    const all: ReportEpisodeRow[] = []
+    let truncated = false
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await supabase
+        .from('episode_log')
+        .select('id, show_key, air_date, air_start, duration, headline, title, summary, host, guest, issue_category, status')
+        .eq('station_id', stationId)
+        .in('show_key', keys)
+        .gte('air_date', from)
+        .lte('air_date', to)
+        .neq('status', 'archived')
+        .order('air_date', { ascending: true })
+        .order('air_start', { ascending: true })
+        .order('id', { ascending: true })
+        .range(offset, offset + PAGE - 1)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      all.push(...((data ?? []) as ReportEpisodeRow[]))
+      if (!data || data.length < PAGE) break
+      if (all.length >= MAX_ROWS) {
+        truncated = true
+        break
+      }
+    }
 
-    const rows = (data ?? []) as ReportEpisodeRow[]
+    const rows = dedupeAirings(all)
     return NextResponse.json({
+      truncated,
       show: { key: keys[0], name: showInfo?.name ?? show, keys, category: showInfo?.category ?? null },
       from,
       to,

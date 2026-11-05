@@ -183,3 +183,12 @@ export function spreadCandidates<T>(
   }
   return picked
 }
+
+/** "2026-Q4" (the dashboard's quarter URL param) → its inclusive date range,
+ *  or null when absent/malformed. Shared by the episode list and search. */
+export function quarterParamRange(param: string | null | undefined): { start: string; end: string } | null {
+  const m = param?.match(/^(\d{4})-Q([1-4])$/)
+  if (!m) return null
+  const { start, end } = getQuarterDateRange(parseInt(m[1], 10), parseInt(m[2], 10))
+  return { start, end }
+}

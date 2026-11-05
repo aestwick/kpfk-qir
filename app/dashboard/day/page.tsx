@@ -7,9 +7,10 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
-import { useRouter, useSearchParams, usePathname } from 'next/navigation'
+import { useSearchParams, usePathname } from 'next/navigation'
 import {
   useApiJson,
+  useUrlUpdater,
   StatusBadge,
   ErrorPanel,
   FindSwitcher,
@@ -73,7 +74,6 @@ function People({ value, role }: { value: string | null; role: string }) {
 }
 
 export default function BroadcastDayPage() {
-  const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const dateParam = searchParams.get('date')
@@ -83,14 +83,7 @@ export default function BroadcastDayPage() {
   const { data, error, loading, reload } = useApiJson<DayResponse>(`/api/broadcast-day${date ? `?date=${date}` : ''}`)
   const shownDate = data?.date ?? date
 
-  function go(params: { date?: string | null; at?: string | null }) {
-    const p = new URLSearchParams(searchParams.toString())
-    for (const [k, v] of Object.entries(params)) {
-      if (v) p.set(k, v)
-      else p.delete(k)
-    }
-    router.replace(`${pathname}?${p}`, { scroll: false })
-  }
+  const go = useUrlUpdater()
 
   // Scroll to (and highlight) the block on air at ?at=HH:MM.
   const focusIdx = useMemo(() => {

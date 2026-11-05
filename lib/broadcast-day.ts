@@ -51,7 +51,7 @@ export interface DayBlock {
 }
 
 /** Same-show feeds starting this close together are one airing. */
-const SAME_AIRING_MINUTES = 5
+export const SAME_AIRING_MINUTES = 5
 
 /** True when an MP3 is the station's secondary/online feed (`2<prefix>_…`). */
 export function isSecondaryFeed(mp3Url: string | null | undefined, prefix = 'kpfk'): boolean {

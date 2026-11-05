@@ -5,8 +5,9 @@
 // responses dropped, errors surfaced, never shown as "no results"), one status
 // badge, one error panel, one highlighted-snippet renderer, one view switcher.
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { authedFetch } from '@/lib/api-client'
 
 // ---------------------------------------------------------------------------
@@ -65,6 +66,26 @@ export function useApiJson<T>(url: string | null): ApiState<T> {
   }, [url, nonce])
 
   return { data, error, loading, reload: () => setNonce((n) => n + 1) }
+}
+
+/** Merge updates into the current URL query (empty value = remove) without a
+ *  scroll jump — the find views keep all their state in the URL. */
+export function useUrlUpdater(): (updates: Record<string, string | null | undefined>) => void {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  return useCallback(
+    (updates) => {
+      const p = new URLSearchParams(searchParams.toString())
+      for (const [k, v] of Object.entries(updates)) {
+        if (v) p.set(k, v)
+        else p.delete(k)
+      }
+      const qs = p.toString()
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams]
+  )
 }
 
 // ---------------------------------------------------------------------------

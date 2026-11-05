@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
-import { mergePeople, rankForQuery, samePerson, type PersonRow } from '@/lib/people'
+import { mergePeople, rankForQuery, samePerson, isLikelyPersonName, type PersonRow } from '@/lib/people'
 import { loadShowCatalog, catalogName } from '@/lib/show-catalog'
 
 export const dynamic = 'force-dynamic'
@@ -18,8 +18,10 @@ export async function GET(request: NextRequest) {
     const { supabase, stationId } = result.context
 
     const sp = new URL(request.url).searchParams
-    const name = (sp.get('name') ?? '').trim()
-    const q = (sp.get('q') ?? name).trim()
+    // % and _ are LIKE wildcards inside search_people(); a name never needs them.
+    const clean = (v: string | null) => (v ?? '').replace(/[%_\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)
+    const name = clean(sp.get('name'))
+    const q = clean(sp.get('q')) || name
     if (q.length < 2) return NextResponse.json({ people: [] })
 
     // "David Corn Mother Jones": a name typed with extra words (an affiliation,
@@ -35,6 +37,9 @@ export async function GET(request: NextRequest) {
     const bySpelling = new Map<string, PersonRow>()
     for (const a of answers)
       for (const r of (a.data ?? []) as PersonRow[]) {
+        // The SQL splitter keeps affiliation fragments ("Amherst College");
+        // the JS heuristic (shared with the Show report) drops them.
+        if (!isLikelyPersonName(r.name)) continue
         const prev = bySpelling.get(r.folded)
         if (!prev || Number(r.score) > Number(prev.score)) bySpelling.set(r.folded, r)
       }

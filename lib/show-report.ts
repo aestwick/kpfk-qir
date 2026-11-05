@@ -3,6 +3,8 @@
 // show-report.test.ts); the API route does the loading.
 
 import { splitPeople, foldName } from './people'
+import { timeToMinutes } from './broadcast-format'
+import { SAME_AIRING_MINUTES } from './broadcast-day'
 
 export interface ReportEpisodeRow {
   id: number
@@ -61,6 +63,23 @@ function tally(pairs: [string, number][]): Tally[] {
   return Array.from(by.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
 }
 
+/** One row per airing: sibling feeds of the show logged for the same airing
+ *  (same date, start within a few minutes — the Broadcast Day folding rule)
+ *  collapse to the first. Rows must be in air order. */
+export function dedupeAirings<T extends Pick<ReportEpisodeRow, 'air_date' | 'air_start'>>(rows: T[]): T[] {
+  const out: T[] = []
+  for (const r of rows) {
+    const start = timeToMinutes(r.air_start)
+    const twin = out.find((o) => {
+      const os = timeToMinutes(o.air_start)
+      return o.air_date === r.air_date && os != null && start != null && Math.abs(os - start) <= SAME_AIRING_MINUTES
+    })
+    if (!twin) out.push(r)
+  }
+  return out
+}
+
+/** Roll up a show's episodes. Pass rows already de-duplicated (dedupeAirings). */
 export function buildShowReport(rows: ReportEpisodeRow[]): ShowReport {
   const PUBLISHED = new Set(['summarized', 'compliance_checked'])
   return {
