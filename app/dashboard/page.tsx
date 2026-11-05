@@ -54,6 +54,8 @@ interface DashData {
   pipelinePaused: boolean
   pipelinePausedGlobal?: boolean
   pipelinePausedStation?: boolean
+  /** Over its spend cap — the workers skip it as if paused. */
+  pipelineOverBudget?: boolean
 }
 
 const BADGE_COLORS: Record<string, string> = {
@@ -314,8 +316,8 @@ export default function DashboardOverview() {
   const { counts, queues, cost, categories, activity24h, timeEstimates, qirReadiness, coverageGaps, complianceSummary, qirStatus, qualityFlags, pipelinePaused } = data
   const pausedGlobal = !!data.pipelinePausedGlobal
   // Older API responses only carried the effective flag; treat that as station.
-  const pausedStation = data.pipelinePausedStation ?? (pipelinePaused && !pausedGlobal)
-  const pause = describePause({ global: pausedGlobal, station: pausedStation })
+  const pausedStation = data.pipelinePausedStation ?? (pipelinePaused && !pausedGlobal && !data.pipelineOverBudget)
+  const pause = describePause({ global: pausedGlobal, station: pausedStation, overBudget: !!data.pipelineOverBudget })
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)

@@ -51,6 +51,9 @@ export function jobActionAccess(action: unknown): JobActionAccess {
 export interface PauseState {
   global: boolean
   station: boolean
+  /** Over its spend cap (station, global default or universal ceiling): the
+   *  workers skip the station exactly as if paused (isPipelinePaused). */
+  overBudget?: boolean
 }
 
 export function describePause(state: PauseState): { paused: boolean; headline: string; detail: string } {
@@ -68,6 +71,13 @@ export function describePause(state: PauseState): { paused: boolean; headline: s
       paused: true,
       headline: 'This station is paused',
       detail: 'No processing will run for this station until it is resumed. Other stations are unaffected.',
+    }
+  }
+  if (state.overBudget) {
+    return {
+      paused: true,
+      headline: 'This station is over its spending limit',
+      detail: 'Processing is on hold until the limit is raised or the budget period rolls over. Resuming will not restart it.',
     }
   }
   return { paused: false, headline: 'Running', detail: '' }

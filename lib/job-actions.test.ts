@@ -44,6 +44,14 @@ describe('describePause', () => {
     expect(d.headline).toBe('All stations are paused')
     expect(d.detail).toMatch(/super-admin/)
   })
+  it('an over-budget station is not shown as running', () => {
+    const d = describePause({ global: false, station: false, overBudget: true })
+    expect(d.paused).toBe(true)
+    expect(d.headline).toMatch(/spending limit/)
+  })
+  it('a pause flag takes precedence over the budget message', () => {
+    expect(describePause({ global: false, station: true, overBudget: true }).headline).toBe('This station is paused')
+  })
   it('mentions both when both are on', () => {
     expect(describePause({ global: true, station: true }).detail).toMatch(/also paused on its own/)
   })

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused, isComplianceBlocking } from '@/lib/settings'
+import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused, isStationOverBudget, isComplianceBlocking } from '@/lib/settings'
 import { BLOCKING_SEVERITY, CLEARING_REVIEW_STATUS, summarizeBlockedEpisodes, type BlockingFlagRow } from '@/lib/compliance-blocking'
 import { QIR_CANDIDATE_STATUSES, quarterEpisodeOrFilter } from '@/lib/qir-format'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
@@ -531,8 +531,8 @@ async function buildDashboard(
     // Effective pause = global kill switch OR this station's own flag; both
     // are reported so the Home page can say which one is on.
     ...(await (async () => {
-      const [g, st] = await Promise.all([isPipelinePaused(), isStationPaused(stationId)])
-      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st }
+      const [g, st, ob] = await Promise.all([isPipelinePaused(), isStationPaused(stationId), isStationOverBudget(stationId)])
+      return { pipelinePaused: g || st || ob, pipelinePausedGlobal: g, pipelinePausedStation: st, pipelineOverBudget: ob }
     })()),
   })
 }

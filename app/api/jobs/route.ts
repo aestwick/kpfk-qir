@@ -3,7 +3,7 @@ import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue, discover
 import { jobPriority } from '@/lib/tier'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
-import { isPipelinePaused, isStationPaused, invalidateSetting } from '@/lib/settings'
+import { isPipelinePaused, isStationPaused, isStationOverBudget, invalidateSetting } from '@/lib/settings'
 import { jobActionAccess } from '@/lib/job-actions'
 import { setGlobalPaused, setStationPaused, sweepFailedJobs, isPipelineQueueName } from '@/lib/pipeline-control'
 
@@ -296,9 +296,10 @@ export async function GET(request: NextRequest) {
 
     // Global kill switch and this station's own flag, reported separately so
     // the UI can say which one is on (effective = either).
-    const [globalPaused, stationPaused] = await Promise.all([
+    const [globalPaused, stationPaused, overBudget] = await Promise.all([
       isPipelinePaused(),
       isStationPaused(stationId),
+      isStationOverBudget(stationId),
     ])
 
     const data: Record<string, unknown> = {}
@@ -310,7 +311,9 @@ export async function GET(request: NextRequest) {
       }
     }
     data.backlog = backlog
-    data.pipeline_paused = globalPaused || stationPaused
+    // Effective = what the workers see (isPipelinePaused(stationId)).
+    data.pipeline_paused = globalPaused || stationPaused || overBudget
+    data.pipeline_over_budget = overBudget
     data.pipeline_paused_global = globalPaused
     data.pipeline_paused_station = stationPaused
 

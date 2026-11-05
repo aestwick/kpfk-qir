@@ -127,7 +127,8 @@ export default function JobsPage() {
   // this station's own pause (any editor). Either one stops this station.
   const [pausedGlobal, setPausedGlobal] = useState(false)
   const [pausedStation, setPausedStation] = useState(false)
-  const pipelinePaused = pausedGlobal || pausedStation
+  const [overBudget, setOverBudget] = useState(false)
+  const pipelinePaused = pausedGlobal || pausedStation || overBudget
   const { role, isSuperAdmin } = useNavAccess()
   const canEdit = roleAllows(role, 'editor')
   const [failedDetails, setFailedDetails] = useState<Record<string, QueueWithFailed> & { backlog?: EpisodeBacklog } | null>(null)
@@ -170,6 +171,7 @@ export default function JobsPage() {
         if (typeof data.pipeline_paused_global === 'boolean') {
           setPausedGlobal(data.pipeline_paused_global)
           setPausedStation(!!data.pipeline_paused_station)
+          setOverBudget(!!data.pipeline_over_budget)
         } else if (typeof data.pipeline_paused === 'boolean') {
           setPausedGlobal(false)
           setPausedStation(data.pipeline_paused)
@@ -466,7 +468,7 @@ export default function JobsPage() {
     }
   }
 
-  const pause = describePause({ global: pausedGlobal, station: pausedStation })
+  const pause = describePause({ global: pausedGlobal, station: pausedStation, overBudget })
 
   return (
     <div className="space-y-6">
