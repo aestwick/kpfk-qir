@@ -210,13 +210,19 @@ export interface TranscriptSearchResult {
   snippet: string
   startMs: number | null
   matchType?: 'lexical' | 'semantic'
+  /** Station-local air time (Postgres time, "09:00:00"). */
+  airStart?: string | null
+  host?: string | null
+  guest?: string | null
+  /** The caption at the moment (highlighted with the same sentinels). */
+  momentText?: string | null
 }
 
 export interface UsageLog {
   id: number
   station_id: string
   episode_id: number | null
-  service: 'groq' | 'openai'
+  service: 'groq' | 'deepgram' | 'assemblyai' | 'openai'
   model: string
   operation: 'transcribe' | 'summarize' | 'curate' | 'compliance' | 'embed' | 'verify' | 'translate'
   input_tokens: number

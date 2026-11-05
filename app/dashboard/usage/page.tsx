@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { authedFetch } from '@/lib/api-client'
 import { SkeletonCards, SkeletonBlock } from '@/app/components/skeleton'
+import { isTranscriptionService } from '@/lib/transcription/pricing'
 
 interface UsageEntry {
   id: number
@@ -26,7 +27,7 @@ interface OperationStats {
 }
 
 interface Totals {
-  groq: number
+  transcription: number
   openai: number
   total: number
   episodeCount: number
@@ -98,12 +99,12 @@ export default function UsagePage() {
 
   // Group entries by date for daily table
   const dailySpend: Record<string, {
-    groq: number; openai: number; total: number; count: number;
+    transcription: number; openai: number; total: number; count: number;
     durationSeconds: number; inputTokens: number; outputTokens: number
   }> = {}
   for (const entry of entries) {
     const day = entry.created_at.slice(0, 10)
-    if (!dailySpend[day]) dailySpend[day] = { groq: 0, openai: 0, total: 0, count: 0, durationSeconds: 0, inputTokens: 0, outputTokens: 0 }
+    if (!dailySpend[day]) dailySpend[day] = { transcription: 0, openai: 0, total: 0, count: 0, durationSeconds: 0, inputTokens: 0, outputTokens: 0 }
     const cost = Number(entry.estimated_cost) || 0
     const d = dailySpend[day]
     d.total += cost
@@ -111,8 +112,8 @@ export default function UsagePage() {
     d.durationSeconds += Number(entry.duration_seconds) || 0
     d.inputTokens += Number(entry.input_tokens) || 0
     d.outputTokens += Number(entry.output_tokens) || 0
-    if (entry.service === 'groq') d.groq += cost
-    if (entry.service === 'openai') d.openai += cost
+    if (isTranscriptionService(entry.service)) d.transcription += cost
+    else if (entry.service === 'openai') d.openai += cost
   }
 
   const sortedDays = Object.keys(dailySpend).sort().reverse()
@@ -162,11 +163,11 @@ export default function UsagePage() {
               <p className="text-xl font-bold">{formatCost(totals?.total ?? 0)}</p>
             </div>
             <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
-              <p className="text-xs text-gray-500 dark:text-warm-400">Groq (Transcription)</p>
-              <p className="text-xl font-bold">{formatCost(totals?.groq ?? 0)}</p>
+              <p className="text-xs text-gray-500 dark:text-warm-400">Transcription (Groq, Deepgram, AssemblyAI)</p>
+              <p className="text-xl font-bold">{formatCost(totals?.transcription ?? 0)}</p>
             </div>
             <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
-              <p className="text-xs text-gray-500 dark:text-warm-400">OpenAI (Summarization)</p>
+              <p className="text-xs text-gray-500 dark:text-warm-400">OpenAI (summaries, compliance, translation)</p>
               <p className="text-xl font-bold">{formatCost(totals?.openai ?? 0)}</p>
             </div>
             <div className="bg-white rounded-lg shadow p-4 dark:bg-surface-raised dark:shadow-card-dark">
@@ -258,7 +259,7 @@ export default function UsagePage() {
                   <th className="text-right px-4 py-2 font-medium">Calls</th>
                   <th className="text-right px-4 py-2 font-medium">Audio</th>
                   <th className="text-right px-4 py-2 font-medium">Tokens</th>
-                  <th className="text-right px-4 py-2 font-medium">Groq</th>
+                  <th className="text-right px-4 py-2 font-medium">Transcription</th>
                   <th className="text-right px-4 py-2 font-medium">OpenAI</th>
                   <th className="text-right px-4 py-2 font-medium">Total</th>
                 </tr>
@@ -279,7 +280,7 @@ export default function UsagePage() {
                       <td className="px-4 py-2 text-right text-gray-500 dark:text-warm-400">
                         {tokenTotal > 0 ? formatTokens(tokenTotal) : '—'}
                       </td>
-                      <td className="px-4 py-2 text-right">{formatCost(d.groq)}</td>
+                      <td className="px-4 py-2 text-right">{formatCost(d.transcription)}</td>
                       <td className="px-4 py-2 text-right">{formatCost(d.openai)}</td>
                       <td className="px-4 py-2 text-right font-medium">{formatCost(d.total)}</td>
                     </tr>

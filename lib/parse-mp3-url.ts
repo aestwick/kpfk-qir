@@ -1,7 +1,9 @@
 /**
  * Parse air date, time, and show key from archive MP3 URL.
- * Format: <prefix>_YYMMDD_HHMMSSshowkey.mp3
+ * Format: <prefix>[stream]_YYMMDD_HHMMSS<showkey>.mp3
  * e.g. kpfk_260106_233000casc.mp3 → 2026-01-06, 23:30:00, casc
+ *      kpfthd3_260627_160000quantum.mp3 (prefix kpft) → 2026-06-27, 16:00:00, quantum
+ *      kpfk_261018_100000bts_friday.mp3 → show key bts_friday
  *
  * The filename prefix is station-specific (stations.mp3_filename_prefix). It
  * defaults to 'kpfk' for backward compatibility when a station hasn't set one.
@@ -12,7 +14,12 @@ export function parseMp3Url(mp3Url: string, filenamePrefix: string = 'kpfk'): {
   showKey: string
 } | null {
   const safePrefix = filenamePrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = mp3Url.match(new RegExp(`${safePrefix}_(\\d{6})_(\\d{6})([a-zA-Z]+)\\.mp3`))
+  // The prefix may carry a stream suffix (KPFT's HD3 files are `kpfthd3_…`
+  // under prefix `kpft`), and show keys may contain digits or underscores
+  // (`ragradio2`, `bts_friday`, `gv_derek`). The old `[a-zA-Z]+` / bare-prefix
+  // pattern rejected both, so ingest fell back to the RSS pubDate (rendered in
+  // the wrong zone for non-Pacific stations) and "Fix dates" refused them.
+  const match = mp3Url.match(new RegExp(`${safePrefix}[a-z0-9]*_(\\d{6})_(\\d{6})([A-Za-z0-9_]+)\\.mp3`))
   if (!match) return null
 
   const [, datePart, timePart, showKey] = match

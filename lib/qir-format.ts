@@ -41,6 +41,18 @@ export function formatQirEntry(entry: QirEntry): string {
   return lines.join('\n')
 }
 
+/** Episode statuses eligible for a QIR draft (fully summarized). */
+export const QIR_CANDIDATE_STATUSES = ['summarized', 'compliance_checked'] as const
+
+/**
+ * PostgREST `.or()` filter for a quarter's QIR candidates: aired in [start,end],
+ * or (no air_date) created in that window. Shared by the generate worker and
+ * the report page's compliance-blocking panel so both see the same episodes.
+ */
+export function quarterEpisodeOrFilter(start: string, end: string): string {
+  return `and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`
+}
+
 export function getQuarterDateRange(year: number, quarter: number): { start: string; end: string; label: string } {
   const startMonth = (quarter - 1) * 3
   // UTC arithmetic: local-time Date + toISOString() shifted both dates back a
@@ -184,4 +196,13 @@ export function spreadCandidates<T>(
     if (!any) break
   }
   return picked
+}
+
+/** "2026-Q4" (the dashboard's quarter URL param) → its inclusive date range,
+ *  or null when absent/malformed. Shared by the episode list and search. */
+export function quarterParamRange(param: string | null | undefined): { start: string; end: string } | null {
+  const m = param?.match(/^(\d{4})-Q([1-4])$/)
+  if (!m) return null
+  const { start, end } = getQuarterDateRange(parseInt(m[1], 10), parseInt(m[2], 10))
+  return { start, end }
 }

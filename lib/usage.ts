@@ -20,7 +20,7 @@ const OPENAI_INPUT_COST_PER_TOKEN = 0.15 / 1_000_000
 const OPENAI_OUTPUT_COST_PER_TOKEN = 0.60 / 1_000_000
 
 // OpenAI text-embedding-3-small pricing: $0.02/1M tokens
-const OPENAI_EMBEDDING_COST_PER_TOKEN = 0.02 / 1_000_000
+export const OPENAI_EMBEDDING_COST_PER_TOKEN = 0.02 / 1_000_000
 
 // Provider/model are recorded per call now that transcription is pluggable
 // (Groq Whisper, Deepgram, AssemblyAI). Cost is derived from the provider's

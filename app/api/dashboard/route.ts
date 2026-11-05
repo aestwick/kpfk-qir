@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, getSetting, isPipelinePaused } from '@/lib/settings'
+import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused, isComplianceBlocking } from '@/lib/settings'
+import { BLOCKING_SEVERITY, CLEARING_REVIEW_STATUS, summarizeBlockedEpisodes, type BlockingFlagRow } from '@/lib/compliance-blocking'
+import { QIR_CANDIDATE_STATUSES, quarterEpisodeOrFilter } from '@/lib/qir-format'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
 import { fetchAllRows } from '@/lib/fetch-all'
 import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
+import { isTranscriptionService } from '@/lib/transcription/pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -93,6 +96,8 @@ async function buildDashboard(
     qualityFlagEpisodes,
     lastFiledQir,
     lastCompletedJobs,
+    blockingFlagRows,
+    complianceBlockingOn,
   ] = await Promise.all([
     // 1. Overall status counts
     Promise.all(
@@ -257,35 +262,64 @@ async function buildDashboard(
       .in('operation', ['transcribe', 'summarize', 'compliance', 'ingest'])
       .order('created_at', { ascending: false })
       .limit(20),
+
+    // 21. Flags that compliance blocking holds out of THIS quarter's report:
+    // critical + not dismissed (unreviewed 'suggested' included) on the
+    // quarter's report candidates — the same rule as workers/generate-qir.ts
+    // (lib/compliance-blocking.ts). The ACTIVE_REVIEW_STATUSES counts above
+    // leave out unreviewed flags, so on their own they can read "no active
+    // flags" while episodes are being held out.
+    // Paged: hosted PostgREST caps a response at 1000 rows (Q3 2026 alone
+    // had 148 such flags; a busy quarter could pass the cap).
+    pagedRows('blocking flags', (from, to) => supabase
+      .from('compliance_flags')
+      .select('id, episode_id, severity, review_status, episode_log!inner(station_id, status)')
+      .eq('severity', BLOCKING_SEVERITY)
+      .neq('review_status', CLEARING_REVIEW_STATUS)
+      .eq('episode_log.station_id', stationId)
+      .in('episode_log.status', [...QIR_CANDIDATE_STATUSES])
+      .or(quarterEpisodeOrFilter(qtr.start, qtr.end), { referencedTable: 'episode_log' })
+      .order('id')
+      .range(from, to)),
+
+    isComplianceBlocking(),
   ])
+
+  const blockedEpisodes = summarizeBlockedEpisodes((blockingFlagRows.data ?? []) as unknown as BlockingFlagRow[])
+  const complianceBlocking = {
+    enabled: complianceBlockingOn,
+    heldOut: blockedEpisodes.length,
+    blockingFlags: blockedEpisodes.reduce((n, b) => n + b.blocking_flags, 0),
+    unreviewed: blockedEpisodes.reduce((n, b) => n + b.unreviewed, 0),
+  }
 
   // Aggregate status counts
   const allCounts = Object.fromEntries(statusCounts)
   const quarterCounts = Object.fromEntries(qtrStatusCounts)
 
   // Aggregate usage/cost
-  const usage = { groq: 0, openai: 0, total: 0, episodes: new Set<number>(), apiCalls: 0 }
+  const usage = { transcription: 0, openai: 0, total: 0, episodes: new Set<number>(), apiCalls: 0 }
   for (const row of usageThisQuarter.data ?? []) {
     const cost = Number(row.estimated_cost) || 0
     usage.total += cost
-    if (row.service === 'groq') usage.groq += cost
-    if (row.service === 'openai') usage.openai += cost
+    if (isTranscriptionService(row.service)) usage.transcription += cost
+    else if (row.service === 'openai') usage.openai += cost
     if (row.episode_id) usage.episodes.add(row.episode_id)
     usage.apiCalls++
   }
 
   // Daily cost aggregation
-  const dailyMap = new Map<string, { groq: number; openai: number }>()
+  const dailyMap = new Map<string, { transcription: number; openai: number }>()
   for (const row of dailyCosts.data ?? []) {
     const day = row.created_at.slice(0, 10)
-    const entry = dailyMap.get(day) ?? { groq: 0, openai: 0 }
+    const entry = dailyMap.get(day) ?? { transcription: 0, openai: 0 }
     const cost = Number(row.estimated_cost) || 0
-    if (row.service === 'groq') entry.groq += cost
-    else entry.openai += cost
+    if (isTranscriptionService(row.service)) entry.transcription += cost
+    else if (row.service === 'openai') entry.openai += cost
     dailyMap.set(day, entry)
   }
   const dailyCostData = Array.from(dailyMap.entries())
-    .map(([date, costs]) => ({ date, groq: costs.groq, openai: costs.openai, total: costs.groq + costs.openai }))
+    .map(([date, costs]) => ({ date, transcription: costs.transcription, openai: costs.openai, total: costs.transcription + costs.openai }))
     .sort((a, b) => a.date.localeCompare(b.date))
 
   // Category distribution
@@ -397,11 +431,12 @@ async function buildDashboard(
     : null
 
   // Monthly cost
-  let monthGroq = 0, monthOpenai = 0
+  let monthTranscription = 0, monthOpenai = 0, monthTotal = 0
   for (const row of monthlyUsage.data ?? []) {
     const cost = Number(row.estimated_cost) || 0
-    if (row.service === 'groq') monthGroq += cost
-    else monthOpenai += cost
+    monthTotal += cost
+    if (isTranscriptionService(row.service)) monthTranscription += cost
+    else if (row.service === 'openai') monthOpenai += cost
   }
 
   // Quality flags: filter episodes that might have transcript issues
@@ -472,9 +507,9 @@ async function buildDashboard(
     // Cost/spend metrics are super-admin-only — omit the entire block otherwise.
     ...(isSuperAdmin ? {
       cost: {
-        quarter: { groq: usage.groq, openai: usage.openai, total: usage.total, episodeCount: usage.episodes.size, apiCalls: usage.apiCalls },
+        quarter: { transcription: usage.transcription, openai: usage.openai, total: usage.total, episodeCount: usage.episodes.size, apiCalls: usage.apiCalls },
         daily: dailyCostData,
-        month: { groq: monthGroq, openai: monthOpenai, total: monthGroq + monthOpenai },
+        month: { transcription: monthTranscription, openai: monthOpenai, total: monthTotal },
       },
     } : {}),
     categories: categoryData,
@@ -490,10 +525,16 @@ async function buildDashboard(
     },
     coverageGaps,
     complianceSummary: complianceFlagCounts,
+    complianceBlocking,
     qirStatus,
     qualityFlags,
     lastFiledQir: lastFiled,
     lastCompletedJobs: lastJobTimestamps,
-    pipelinePaused: await isPipelinePaused(),
+    // Effective pause = global kill switch OR this station's own flag; both
+    // are reported so the Home page can say which one is on.
+    ...(await (async () => {
+      const [g, st] = await Promise.all([isPipelinePaused(), isStationPaused(stationId)])
+      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st }
+    })()),
   })
 }

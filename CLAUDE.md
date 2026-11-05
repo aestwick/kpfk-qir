@@ -55,12 +55,17 @@ workers/
                       transcript + VTT. Groq path ffmpeg-chunks; Deepgram/
                       AssemblyAI take mp3_url directly. Diarized speaker labels →
                       WebVTT voice spans. Records provider/model per transcript.
+                      Applies show/episode-scoped correction rules; sends the
+                      optional name hint (talk shows only).
   summarize.ts      — Load transcript → OpenAI → parse JSON → update episode metadata.
                       Records AI copy + resolves human/AI winner per field
                       (lib/field-sources.ts)
   generate-qir.ts   — Group episodes → OpenAI curation → build draft
   discover-sync.ts  — Daily: scrape each station's archive program list →
                       insert NEW show_keys as inactive (opt-out onboarding)
+  corrections.ts    — Transcript names: re-apply pending correction rules to
+                      STORED transcripts (startup + on rule change); nightly
+                      CMS-host sync + suggested-corrections miner
 ```
 
 ### Library / Shared
@@ -73,6 +78,12 @@ lib/
                       runTranscription (fallback) + cost rates + config status.
                       groq.ts (chunked Whisper), deepgram.ts / assemblyai.ts
                       (URL-based, diarizing). vtt.ts: speaker-aware VTT builder.
+                      Names: corrections.ts (one rule engine: scope, VTT-safe
+                      apply, SQL prefilter), repair.ts (rules → stored
+                      transcripts), vocabulary.ts (Whisper name hint + echo
+                      guard), names.ts, store.ts (DB loaders), miner.ts +
+                      suggestions.ts (nightly miner), cues.ts (cue rebuild),
+                      chunking.ts (ffmpeg chunk args), benchmark.ts (scoring)
   confessor.ts      — Confessor archive API client (?req=fil) + pubfile projection
                       (host/guest/issues/human_summary) with loose-JSON parsing
   field-sources.ts  — Per-field human/ai/manual provenance engine (build/apply/
@@ -95,6 +106,10 @@ lib/
                       safe harbor at the moment it aired); used by /api/compliance/triage
   fetch-all.ts      — fetchAllRows(): pages past PostgREST's 1000-row cap. Use it for
                       any read that can exceed 1000 rows (it silently truncates otherwise)
+  search-query.ts   — Pure: search box → expanded to_tsquery (quotes/-x/OR, variants)
+  transcript-search.ts — Search RPC calls (exact + by-meaning fusion), vocab refresh
+  broadcast-format.ts  — Shared air date/time/offset formatters + episode/day/person links
+  broadcast-day.ts, show-report.ts, people.ts, show-catalog.ts — pure logic for the find views
   episode-feed.ts   — Pure logic behind GET /api/v1/episodes: the published-status
                       contract, field allowlist, param parsing/validation, keyset
                       cursor codec, response envelopes, public_id ref resolution
@@ -114,7 +129,10 @@ app/api/
   qir/export/route.ts       — GET export as CSV or text
   downloads/route.ts        — GET batch download transcripts, VTTs, episode CSV
   settings/route.ts         — GET all / PUT upsert setting
-  corrections/route.ts      — CRUD for transcript corrections
+  corrections/route.ts      — CRUD for transcript corrections (show_key scope;
+                              edits clear backfilled_at → stored-text repair)
+  corrections/vocabulary/   — per-show name list (transcript_vocabulary)
+  corrections/suggestions/  — miner suggestions: approve (→ rule) / reject
   usage/route.ts            — GET cost analytics with date range
   audit/route.ts            — GET audit log (super-admin only, paginated, filterable)
   audit/event/route.ts      — POST client-reported auth/station events (allowlisted)
@@ -142,10 +160,13 @@ app/dashboard/              (menu label in quotes — the menu itself is lib/nav
   page.tsx                  — "Home": pipeline viz, stats, cost analytics, activity feed
   episodes/page.tsx         — "Episodes": table with filters, sort, bulk actions
   episodes/[id]/page.tsx    — Episode detail: audio player, transcript, edit summary
+  day/page.tsx              — "What aired": broadcast day log (?date=&at=)
+  show-report/page.tsx      — "What a show covered" over a period (?show=&from=&to=)
+  people/page.tsx           — "Who was on": hosts & guests, spelling-forgiving (?q=|name=)
   shows/page.tsx            — "Shows": directory of the station's programs
   shows/[showKey]/page.tsx  — One show's episodes
   shows/audit/page.tsx      — "Show check-up": per-show completeness + issues report
-  search/page.tsx           — "Search transcripts"
+  search/page.tsx           — "What was said": transcript search → audio moment
   generate/page.tsx         — "Quarterly report": QIR draft builder (?quarter=YYYY-Qn)
   compliance/triage/page.tsx — "Review flags": triage by tier (lib/compliance-tier.ts) —
                               A listen-now / B glance / C safe harbor / D other checks;
@@ -224,6 +245,21 @@ supabase/migrations/
   037_transcription_providers.sql — transcripts.provider/model; seeds
                                   transcription_providers (order+enable) +
                                   diarization_enabled defaults in qir_settings
+  ...
+  047_transcript_names.sql      — transcript_corrections.show_key + backfilled_at;
+                                  transcript_vocabulary; transcript_correction_
+                                  suggestions; mine_name_variants() RPC
+  048_seed_kpfk_vocabulary.sql  — KPFK show names (Confessor DJ list, kpfk.org,
+                                  Ace's confirmations)
+  053_lockdown_public_exposure.sql — closes what the public anon key reached:
+                                  qir_settings/schema_migrations service-only,
+                                  drops episode_log "Public read access" (anon
+                                  keeps published-only, 6-column read for the
+                                  public site's episode player), legacy RPC,
+                                  shared-DB contacts/tags/show_page tables
+  054_role_aware_write_policies.sql — user_has_station_role(); *_write policies
+                                  need editor; station pause/spend keys super-
+                                  admin only; usage_log service-role only
 ```
 
 **Migrations are tracked** — QIR has its own tracker, **`public.schema_migrations`**
@@ -269,6 +305,8 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 
 **Steady-state is current-quarter-scoped; backfills opt out via a window.** The transcribe + summarize + compliance candidate queries are pinned to the **current calendar quarter** — via `getProcessingWindowBounds()` in `lib/quarters.ts`, which is `getCurrentQuarterBounds()` plus a **`QUARTER_GRACE_DAYS` (10-day) grace window**: during the first 10 days of a quarter the start reaches back to the previous quarter's start, so late-evening last-day airings ingested after the 00:00 UTC flip (and backfills/retries) still drain before the FCC filing deadline. Dashboards/backlog counts keep the strict `getCurrentQuarterBounds()`. A historical one-off (e.g. retro-generating WPFW's Q4 2020 QIR from an archive backup) gets past that gate by passing an explicit `{ window: { start, end } }` in the transcribe/summarize job data; `resolveWindow(job)` uses it instead of the current quarter, and the continue/backoff/chain re-enqueues (`workers/index.ts`) thread the same window through the whole drain. QIR *generation* was never quarter-locked (`generate-qir.ts` is parameterized by `year`/`quarter`). A windowed backfill also **bypasses the per-station pause** across **all three expensive stages** (transcribe/summarize/**compliance** processors + the transcribe→summarize→compliance chain treat a `window`-bearing job as an explicit operator action) so a *parked* station can still drain a one-off backfill end-to-end — the **global** kill switch still stops it. `scripts/backfill-quarter.ts --kick` re-enqueues the windowed chain **and** a windowed compliance sweep (which checks episodes already `summarized` before the chain reached compliance). Driver: **`scripts/backfill-quarter.ts`** (`npm run backfill-quarter -- --station <slug> --year <Y> --quarter <Q> --urls <file>`) inserts a flat list of archive MP3 URLs as `pending` episodes (dates/show keys parsed from the filename, show names + categories resolved from each show's live feed, duration filled from the audio at transcription), kicks the windowed chain, and — with `--generate` — enqueues the draft once they've summarized. The Generate page's quarter picker reaches back 6 years so a backfilled quarter is reviewable/finalizable in the UI.
 
+**Search & the "find" views** (migrations 046_search_views … 052; note main also has unrelated 046–048 files — the tracker keys on full filename, so both sets apply once). Four dashboard views answer the everyday questions, each with URL-held state so links can be shared: **What aired** `/dashboard/day?date=&at=` (`/api/broadcast-day`, `lib/broadcast-day.ts` — station-local day log; same-show feeds folded, `2kpfk_` online-feed copies flagged), **What was said** `/dashboard/search` (`/api/transcript-search`), **What a show covered** `/dashboard/show-report?show=&from=&to=` (`/api/show-report`, `lib/show-report.ts`, by `show_group`), **Who was on** `/dashboard/people?q=|name=` (`/api/people`, `lib/people.ts`). Shared UI pieces live in `app/components/browse-ui.tsx`; shared date/time/link helpers in `lib/broadcast-format.ts` (`episode_log.duration` is **minutes**; air_date/air_start are station-local wall time). Transcript search is `lib/transcript-search.ts` → `search_transcripts_v2()`: the typed query is parsed in `lib/search-query.ts` (quotes, `-x`, `OR`) and each word widened to the spellings that actually occur, via the per-station vocabulary `search_vocab` (accent twins, plurals, and — for rare/absent words only — trigram look-alikes: "Hartmann" → Whisper's "Hartman"). Things that bit, all measured on live: (1) under RLS the planner seq-scanned every transcript (22s) — the search RPCs are therefore `SECURITY DEFINER` with an explicit `qir_assert_station_member()` check; (2) `transcripts`' heap is tiny (text is TOASTed) so the planner still preferred seq/index scans that detoast every tsvector — the functions `SET enable_seqscan/enable_indexscan = off` (bitmap only); (3) ranking detoasts too, so only the 200 most recent matches are ranked (`total_count` still counts all); (4) tsvector positions clamp at 16,383, so quoted phrases late in long shows are also matched per caption (`transcript_cues`). "By meaning" search uses **one vector per episode** (`episode_embeddings`: title/host/guests/issues/summary; `npm run backfill-episode-embeddings`, ~$0.02 for the archive) fused with the exact pass by reciprocal rank — per-chunk embeddings were retired because HNSW inserts cost ~1s/row on this instance (the worker stored ~1 in 5 while paying for all). The summarize worker embeds each batch and folds new transcripts into the vocabulary (`refresh_search_vocab`, watermarked; `npm run refresh-search-vocab` to catch up). `npm run search-benchmark` replays the fixed real-question set in `docs/search-benchmark.json` against a running app as a signed-in user.
+
 **Broadcast-week verification** (`npm run verify-week -- --station <slug>`) answers "did what aired match what we expected to air?" for a date window (default: the last 7 station-local days). The *expected* side comes read-only from the sibling CMS app's tables in the shared database — `cms_schedule_published` (concrete per-date rows) when present for a date, else the recurring `cms_schedule_slots` weekly grid — matched to QIR airings (`episode_log`) by show identity + time overlap. Identity resolves as: the slot's CMS show → its `cms_show_source.qir_show_key` mappings + `program_slug`, **expanded through QIR's own `show_keys.show_group`** (one logical show spans multiple feed keys — e.g. the overnight strip logs six hourly keys), with a normalized-name fallback for label-only slots. Blocks whose show has no *active* `show_keys` row report as "not tracked" (QIR deliberately skips music/arts shows), not "missing". Layer 1 (always, free) reports per day: aired / partial / missing blocks, unscheduled airings (and what they displaced), plus pipeline issues — including `pending` episodes stranded behind the current-quarter gate (after the grace window; fix: `backfill-quarter --kick`). Layer 2 (`--verify`, ~150–200 gpt-4o-mini calls/week ≈ a few cents, logged to `usage_log` as operation `verify`) reads each transcript and checks the content actually supports the claimed show — catching reruns, pledge drives, substitute programming, and dead air the log alone can't reveal. Its prompt is the `verify_prompt` setting (default `DEFAULT_VERIFY_PROMPT` in `lib/settings.ts`, per-station override like every other AI prompt), and the pass honors the spend limits (skipped/aborted when over budget). Output: terminal summary + markdown/JSON reports in `reports/` (gitignored); each run leaves an `audit_log` row (`verify.week.complete`). It's a review aid, not pass/fail — preemptions are legitimate; a human decides. The engine is pure and unit-tested (`lib/verify-week.ts`); the driver (`scripts/verify-week.ts`) needs the worker env and is read-only apart from usage + audit logging.
 
 **Transcription is provider-pluggable with fallback** (`lib/transcription/`). The worker resolves a per-station, ordered provider plan from the `transcription_providers` setting (array order = priority; each entry has an `enabled` toggle), keeping only providers whose API key is present in the env, then tries each in turn until one succeeds (`runTranscription`). **Groq** keeps the ffmpeg-chunk path, with its Whisper model chosen per station by the `transcription_model` setting (dropdown on the Groq row; catalog + per-hour prices in `lib/groq-models.ts`, default **turbo** at $0.04/hr vs large-v3 at $0.111/hr; all transcription rates live in `lib/transcription/pricing.ts`); **Deepgram** (nova-2) and **AssemblyAI** (universal) take the `mp3_url` directly (no ffmpeg) and **diarize** (speaker labels), gated by `diarization_enabled`. A genuine 404 (`AudioUnavailableError`) is terminal → episode marked `unavailable` (no fallthrough — no provider can fetch a missing file); other provider errors fall through to the next, and only an all-providers failure marks the episode `failed`. Each transcript records the `provider`/`model` that produced it; usage cost is logged at the actual provider's rate (`lib/usage.ts`). Speaker labels are emitted into the VTT as WebVTT `<v Speaker N>` voice spans — `lib/vtt.ts#parseVtt` strips those tags so transcript-search cues stay clean, and the plain `transcript` column stays speaker-free so summarization is undisturbed. Order/toggles + the diarization switch are edited at **Settings → Pipeline → Transcription Providers** (per-station override); the dashboard badges each provider configured/missing from `providerConfigStatus()` (key **presence** only, never the value). Defaults keep Groq primary (lowest cost, prior behaviour) with Deepgram then AssemblyAI as fallbacks — reorder to put a diarizing provider first for speaker captions on every episode.
@@ -287,7 +325,9 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 
 **Auth is active** — `dashboard/layout.tsx` requires a Supabase session and redirects to `/login` otherwise. (An older note about an "auth bypass" is obsolete.)
 
-**Transcript corrections** are applied as post-processing after Groq returns text. They support plain text and regex patterns. Managed from the Settings page.
+**Transcript corrections** are applied as post-processing after the provider returns text. They support plain text and regex patterns, and a scope: station-wide, one **show** (`show_key`, every feed of its `show_group`) or one episode. Managed from Settings → Corrections. **Rules also fix stored transcripts**: a rule with `backfilled_at` null (new, edited, re-enabled, or approved) is re-applied by the corrections worker to every stored transcript in its scope — transcript text, VTT cue text (never timings or `<v>` tags), `transcript_cues`, and re-embedded `transcript_chunks` — then stamped (`lib/transcription/repair.ts`). Text only, no audio. A rule whose replacement re-matches itself ("Cary" → "Cary Harrison") is skipped for stored text. All rule logic lives in `lib/transcription/corrections.ts` (JS regex — never translated to SQL except as a superset prefilter, because Postgres reads `\b` as backspace).
+
+**Names: vocabulary hint + suggested corrections** (design + measurements: `docs/names-vocabulary-scan.md`). `transcript_vocabulary` holds each show's correctly spelled hosts/regulars (`show_key` null = station-wide terms). It is seeded from Confessor's DJ list (migration 048), and the corrections worker copies new website (CMS) hosts in nightly; a name switched **off** is never re-added. Two consumers: (1) the **Whisper hint** — when `vocabulary_hint_enabled` (per station, default **off**), Groq gets a short comma list (station terms, show names, that episode's Confessor names; ≤600 UTF-8 bytes) as `prompt`; **never for Music** (every prompt made music transcripts worse, and Groq's no_speech_prob can't detect music), a rejected prompt retries the chunk without it, and segments that echo the list back are dropped. (2) the **nightly miner** — `mine_name_variants()` (SQL, pg_trgm) finds capitalized pairs near a show's known names in its last 60 days of transcripts; `lib/transcription/suggestions.ts` filters noise; results wait in `transcript_correction_suggestions` until a person approves (creates a show-scoped rule → repair) or rejects (sticks). Measure changes with `npm run benchmark-names` (fixed episode set incl. music, ~$0.30/run on turbo).
 
 **Cost tracking** is automatic. Every Groq and OpenAI API call is logged to `usage_log` with estimated cost.
 
@@ -302,7 +342,7 @@ Failures at any stage set `status = 'failed'` with `error_message` and increment
 The app is multi-tenant: **one codebase, one database, one deployment** serving multiple radio stations (KPFK + the other Pacifica stations). Isolation is **defense in depth** — Postgres RLS is the hard backstop, and app code *also* filters every query by `station_id`.
 
 - **Tenant tables** (migrations 012–015): `stations` (slug, name, timezone, `rss_base_url`, `mp3_filename_prefix`, `station_id_patterns`), `station_users` (user↔station with role viewer/editor/admin), `super_admins`, `station_settings` (per-station overrides). Every tenant-scoped table (`episode_log`, `show_keys`, `qir_drafts`, `transcript_corrections`, `compliance_wordlist`, `usage_log`) carries `station_id`; `transcripts`/`compliance_flags` inherit scope via their `episode_id` join. `qir_settings` stays **global** (the default layer under `station_settings`).
-- **RLS** (014): `user_station_ids()` returns the caller's stations (memberships, or all for super_admins); policies gate every tenant table by it. Finalized `qir_drafts` are additionally public-readable (`status='final'`).
+- **RLS** (014): `user_station_ids()` returns the caller's stations (memberships, or all for super_admins); policies gate every tenant table by it. Finalized `qir_drafts` are additionally public-readable (`status='final'`). Writes additionally need **editor** (`user_has_station_role(station_id, 'editor')`, migration 054), mirroring `lib/auth.ts#requireRole`. The public **anon** key can read only `episode_log`'s published rows and only `mp3_url, headline, host, guest, summary, transcript_url` (the public site's episode player), plus `tags`/`show_tags` (053). Everything else it can't touch: `qir_settings` and `schema_migrations` are service-role/postgres only. **When the public site needs another field, grant that column to anon explicitly; never add a `USING (true)` policy.**
 - **Request path**: `lib/auth.ts#getStationContext(request)` resolves the caller (Bearer token), their allowed stations, and the active station (from the `qir_station` cookie / `x-station-slug` header), returning a **request-scoped RLS client**. API routes use it + an explicit `.eq('station_id', …)`. Client pages call `lib/api-client.ts#authedFetch`. The active station is chosen client-side by the station switcher — the server never defaults one (a wrong default would leak cross-tenant).
 - **Workers** run with the service-role client (RLS bypassed), so their `station_id` filter is the *only* guard. Jobs carry `stationId`; the ingest/auto-retry cron acts as a per-station **dispatcher** (fans out one job per station); transcribe/summarize/compliance filter both the candidate-select and the atomic claim guard by `station_id`.
 - **Settings** resolve per station: `station_settings(station_id,key)` → global `qir_settings(key)` → hard-coded default (`lib/settings.ts`, 60s cache keyed by `(stationId,key)`). Prompts interpolate `{{STATION_NAME}}`.

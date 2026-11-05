@@ -1,0 +1,417 @@
+{
+  "variant": "after",
+  "at": "2026-11-05T06:08:51.681Z",
+  "outcomes": [
+    {
+      "id": "A1",
+      "need": "day",
+      "query": "Oct 9 2026, 7am, 8am, 9am",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 1172,
+      "got": [
+        9678,
+        9680,
+        9682
+      ]
+    },
+    {
+      "id": "A2",
+      "need": "day",
+      "query": "what was on KPFK Saturday Oct 10 2026 at 9pm",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 761,
+      "got": [
+        9716
+      ]
+    },
+    {
+      "id": "A3",
+      "need": "day",
+      "query": "Spanish show Tuesday Oct 13 2026 9pm",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 321,
+      "got": [
+        9816
+      ]
+    },
+    {
+      "id": "A4",
+      "need": "day",
+      "query": "Oct 13 2026 8pm",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 258,
+      "got": [
+        9813,
+        9772
+      ]
+    },
+    {
+      "id": "B1",
+      "need": "moment",
+      "query": "\"the state of Oregon is going to be getting my ballot around Christmas\"",
+      "supported": true,
+      "recall": 1,
+      "momentOk": true,
+      "ms": 1784,
+      "got": [
+        9682,
+        9784
+      ]
+    },
+    {
+      "id": "B2",
+      "need": "moment",
+      "query": "Hartmann said ICE has gathered around fifty million voter files",
+      "supported": true,
+      "recall": 0,
+      "momentOk": false,
+      "ms": 4053,
+      "got": [
+        10263,
+        10373,
+        10493,
+        10534,
+        10033,
+        10342,
+        9784,
+        10466,
+        9879,
+        6901,
+        10526,
+        10304
+      ]
+    },
+    {
+      "id": "B3",
+      "need": "moment",
+      "query": "Prosegur",
+      "supported": true,
+      "recall": 1,
+      "momentOk": true,
+      "ms": 487,
+      "got": [
+        9008,
+        7661,
+        9682,
+        10024
+      ]
+    },
+    {
+      "id": "B4",
+      "need": "moment",
+      "query": "Partido de las Cucarachas",
+      "supported": true,
+      "recall": 1,
+      "momentOk": false,
+      "ms": 612,
+      "got": [
+        2494,
+        7151,
+        9736,
+        9772,
+        9813,
+        1916
+      ]
+    },
+    {
+      "id": "B5",
+      "need": "moment",
+      "query": "nueva movilizacion masiva en India",
+      "supported": true,
+      "recall": 1,
+      "momentOk": true,
+      "ms": 748,
+      "got": [
+        9772,
+        614,
+        10179,
+        9175,
+        1166,
+        1425
+      ]
+    },
+    {
+      "id": "B6",
+      "need": "moment",
+      "query": "\"The Hidden History of the War on Voting\"",
+      "supported": true,
+      "recall": 1,
+      "momentOk": true,
+      "ms": 1265,
+      "got": [
+        9682,
+        9784,
+        8035,
+        9879
+      ]
+    },
+    {
+      "id": "B7",
+      "need": "moment",
+      "query": "los musulmanes trajeron universidades y hospitales a España",
+      "supported": true,
+      "recall": 1,
+      "momentOk": true,
+      "ms": 3356,
+      "got": [
+        9667,
+        10321,
+        9623,
+        10049,
+        10363,
+        10130,
+        9665,
+        9308,
+        9816,
+        9592,
+        9898,
+        10518
+      ]
+    },
+    {
+      "id": "C1",
+      "need": "show",
+      "query": "Thom Hartmann October 2026",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 544,
+      "got": [
+        9422,
+        9459,
+        9531,
+        9568,
+        9608,
+        9645,
+        9682,
+        9752,
+        9793,
+        9835,
+        9879,
+        9918
+      ],
+      "note": "3 issue cats, 14 guests"
+    },
+    {
+      "id": "C2",
+      "need": "show",
+      "query": "Background Briefing with Ian Masters, October 2026 - topics and guests",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 245,
+      "got": [
+        9434,
+        9503,
+        9545,
+        9582,
+        9617,
+        9658,
+        9726,
+        9765,
+        9807,
+        9847,
+        9892,
+        9962
+      ],
+      "note": "3 issue cats, 45 guests"
+    },
+    {
+      "id": "C3",
+      "need": "show",
+      "query": "Sojourner Truth in October",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 239,
+      "got": [
+        9455,
+        9678,
+        9914,
+        10142,
+        10376
+      ],
+      "note": "3 issue cats, 9 guests"
+    },
+    {
+      "id": "D1",
+      "need": "people",
+      "query": "Greg Palast",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2615,
+      "got": [
+        10263,
+        10024,
+        9990,
+        9655,
+        8588,
+        8214,
+        8139,
+        7453,
+        2056,
+        636
+      ],
+      "note": "matched \"Greg Palast\""
+    },
+    {
+      "id": "D2",
+      "need": "people",
+      "query": "Greg Palace",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2101,
+      "got": [
+        10263,
+        10024,
+        9990,
+        9655,
+        8588,
+        8214,
+        8139,
+        7453,
+        2056,
+        636
+      ],
+      "note": "matched \"Greg Palast\""
+    },
+    {
+      "id": "D3",
+      "need": "people",
+      "query": "Mark Pokan",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2042,
+      "got": [
+        10534,
+        10304,
+        9879,
+        8897,
+        8516,
+        8452,
+        7955,
+        7325,
+        6828,
+        6628,
+        6598
+      ],
+      "note": "matched \"Mark Pocan\""
+    },
+    {
+      "id": "D4",
+      "need": "people",
+      "query": "Gerald Horn",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2043,
+      "got": [
+        10405,
+        10378,
+        9944,
+        8547,
+        7651,
+        7616,
+        7598,
+        7425,
+        6697,
+        6541,
+        6446,
+        2467
+      ],
+      "note": "matched \"Gerald Horn\""
+    },
+    {
+      "id": "D5",
+      "need": "people",
+      "query": "Phil Ittner",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2011,
+      "got": [
+        10110,
+        8965,
+        8737,
+        8035,
+        7168,
+        7130,
+        6637
+      ],
+      "note": "matched \"Phil Itner\""
+    },
+    {
+      "id": "D6",
+      "need": "people",
+      "query": "Thom Hartmann",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2088,
+      "got": [
+        10534,
+        10526,
+        10493,
+        10450,
+        10380,
+        10373,
+        10342,
+        10325,
+        10304,
+        10263,
+        10219,
+        10147
+      ],
+      "note": "matched \"Tom Hartman\""
+    },
+    {
+      "id": "D7",
+      "need": "people",
+      "query": "Sonali Kolhatkar",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2097,
+      "got": [
+        10504,
+        10274,
+        10042,
+        9804,
+        9693,
+        9579,
+        9434,
+        9428,
+        9429,
+        9166,
+        9163,
+        9164
+      ],
+      "note": "matched \"Sonali Kolhatkar\""
+    },
+    {
+      "id": "D8",
+      "need": "people",
+      "query": "David Corn Mother Jones",
+      "supported": true,
+      "recall": 1,
+      "momentOk": null,
+      "ms": 2847,
+      "got": [
+        9918,
+        9272
+      ],
+      "note": "matched \"David Corn\""
+    }
+  ]
+}
