@@ -7,7 +7,8 @@ import { StationRole } from '@/lib/types'
 // The client (station switcher) is responsible for setting this; the server
 // never guesses an active station (see STATION_CONTEXT_MISSING below).
 export const STATION_HEADER = 'x-station-slug'
-export const STATION_COOKIE = 'qir_station'
+import { STATION_COOKIE } from '@/lib/station-cookie'
+export { STATION_COOKIE }
 
 export interface StationContext {
   userId: string

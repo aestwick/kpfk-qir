@@ -45,7 +45,7 @@ const queueLabels: Record<typeof queueNames[number], string> = {
   ingest: 'Ingest',
   transcribe: 'Transcribe',
   summarize: 'Summarize',
-  compliance: 'Generate QIR',
+  compliance: 'Compliance check',
 }
 
 function getBacklogCount(name: typeof queueNames[number], backlog?: EpisodeBacklog | null): number | null {
@@ -321,7 +321,7 @@ export default function JobsPage() {
   if (sseTimedOut && !queues) {
     return (
       <div className="space-y-6">
-        <h2 className="text-2xl font-bold">Jobs</h2>
+        <h2 className="text-2xl font-bold">Processing queue</h2>
         <div className="bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800/40 rounded-xl p-4">
           <p className="text-sm text-amber-800 dark:text-amber-300">
             Unable to connect to live updates. Queue data may be stale.
@@ -360,7 +360,7 @@ export default function JobsPage() {
 
   if (!queues) return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Jobs</h2>
+      <h2 className="text-2xl font-bold">Processing queue</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
       </div>
@@ -464,7 +464,7 @@ export default function JobsPage() {
         </div>
       )}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">Jobs</h2>
+        <h2 className="text-2xl font-bold">Processing queue</h2>
         <div className="flex items-center gap-2">
           {!pipelinePaused && (
             <button

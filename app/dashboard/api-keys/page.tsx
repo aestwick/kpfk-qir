@@ -97,7 +97,7 @@ export default function ApiKeysPage() {
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
-        <h2 className="text-2xl font-bold">API Keys</h2>
+        <h2 className="text-2xl font-bold">API keys</h2>
         <p className="text-sm text-gray-500 dark:text-warm-400 mt-1">
           Station-scoped keys for the programmatic read API (<code>/api/v1/*</code>). Pass as{' '}
           <code>Authorization: Bearer &lt;key&gt;</code>. Each key reads only this station&apos;s data,

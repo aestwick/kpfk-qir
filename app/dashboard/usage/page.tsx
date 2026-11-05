@@ -124,7 +124,7 @@ export default function UsagePage() {
   if (forbidden) {
     return (
       <div className="space-y-6">
-        <h2 className="text-2xl font-bold">Usage & Costs</h2>
+        <h2 className="text-2xl font-bold">AI costs</h2>
         <div className="bg-white rounded-lg shadow p-8 text-center dark:bg-surface-raised dark:shadow-card-dark">
           <p className="text-sm text-gray-600 dark:text-warm-300 font-medium">Restricted to super-admins</p>
           <p className="text-xs text-gray-400 dark:text-warm-500 mt-1">
@@ -137,7 +137,7 @@ export default function UsagePage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Usage & Costs</h2>
+      <h2 className="text-2xl font-bold">AI costs</h2>
 
       {/* Date Range */}
       <div className="flex gap-3 items-center">

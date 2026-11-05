@@ -420,7 +420,7 @@ export default function MasterControlPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-2xl font-bold">Master Control</h2>
+          <h2 className="text-2xl font-bold">All stations</h2>
           <p className="text-sm text-warm-500 dark:text-warm-400">All stations — pipeline activity and controls (super-admin)</p>
         </div>
         <div className="flex items-center gap-2">

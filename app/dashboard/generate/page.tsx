@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { parseQuarterParam } from '@/lib/nav'
 import { authedFetch } from '@/lib/api-client'
 import { getQuarterOptions } from '@/lib/quarters'
 import { summarizeDateSpread } from '@/lib/qir-format'
@@ -283,6 +284,21 @@ export default function GenerateQirPage() {
   // Q4 2020 report) for review/finalize, not just the last year.
   const quarterOptions = getQuarterOptions(6)
   const [selectedQuarter, setSelectedQuarter] = useState(quarterOptions[0])
+  // ?quarter=YYYY-Qn preselects a quarter (the sidebar's filing-deadline link
+  // points at the quarter that's actually due, not the one in progress). Data
+  // loading waits for this so the default quarter is never fetched first.
+  const [quarterReady, setQuarterReady] = useState(false)
+  useEffect(() => {
+    const want = parseQuarterParam(new URLSearchParams(window.location.search).get('quarter'))
+    const opt = want && quarterOptions.find((o) => o.year === want.year && o.quarter === want.quarter)
+    if (opt) setSelectedQuarter(opt)
+    setQuarterReady(true)
+  }, [])
+  // The quarter the page is showing right now. A response for any other
+  // quarter (the user switched while it was in flight) is discarded, so an
+  // edit or finalize can never land on a different quarter's draft.
+  const currentQuarterKey = useRef('')
+  currentQuarterKey.current = `${selectedQuarter.year}-${selectedQuarter.quarter}`
   const [drafts, setDrafts] = useState<QirDraft[]>([])
   const [activeDraft, setActiveDraft] = useState<QirDraft | null>(null)
   const [generating, setGenerating] = useState(false)
@@ -306,11 +322,13 @@ export default function GenerateQirPage() {
   const [showGuidance, setShowGuidance] = useState(false)
 
   const fetchShows = useCallback(async () => {
+    const key = `${selectedQuarter.year}-${selectedQuarter.quarter}`
     setShowsLoading(true)
     try {
       const res = await authedFetch(
         `/api/qir/shows?year=${selectedQuarter.year}&quarter=${selectedQuarter.quarter}`
       )
+      if (key !== currentQuarterKey.current) return
       if (res.ok) {
         const data = await res.json()
         const shows: AvailableShow[] = data.shows ?? []
@@ -320,11 +338,12 @@ export default function GenerateQirPage() {
         setSelectedShows(new Set(shows.map(s => s.group)))
       }
     } finally {
-      setShowsLoading(false)
+      if (key === currentQuarterKey.current) setShowsLoading(false)
     }
   }, [selectedQuarter.year, selectedQuarter.quarter])
 
   const fetchDrafts = useCallback(async () => {
+    const key = `${selectedQuarter.year}-${selectedQuarter.quarter}`
     setLoading(true)
     try {
       const [draftsRes, dashRes, settingsRes] = await Promise.all([
@@ -332,6 +351,7 @@ export default function GenerateQirPage() {
         authedFetch('/api/dashboard'),
         authedFetch('/api/settings'),
       ])
+      if (key !== currentQuarterKey.current) return
       if (draftsRes.ok) {
         const data = await draftsRes.json()
         setDrafts(data.drafts ?? [])
@@ -350,15 +370,16 @@ export default function GenerateQirPage() {
         }
       }
     } finally {
-      setLoading(false)
+      if (key === currentQuarterKey.current) setLoading(false)
     }
   }, [selectedQuarter.year, selectedQuarter.quarter])
 
   useEffect(() => {
+    if (!quarterReady) return
     setActiveDraft(null)
     fetchDrafts()
     fetchShows()
-  }, [fetchDrafts, fetchShows])
+  }, [fetchDrafts, fetchShows, quarterReady])
 
   const totalAvailableEpisodes = useMemo(
     () => availableShows.reduce((sum, s) => sum + s.episode_count, 0),
@@ -582,7 +603,7 @@ export default function GenerateQirPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">QIR Builder</h2>
+        <h2 className="text-2xl font-bold">Quarterly report</h2>
         <div className="flex items-center gap-3">
           <select
             value={`${selectedQuarter.year}-${selectedQuarter.quarter}`}
