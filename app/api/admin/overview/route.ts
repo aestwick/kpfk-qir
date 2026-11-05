@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/fetch-all'
+import { TRANSCRIBED_STATUSES } from '@/lib/episode-feed'
 import { getSetting, invalidateSetting, invalidateBudgetCache, isStationPaused, isStationOverBudget, isPipelinePaused } from '@/lib/settings'
 
 export const dynamic = 'force-dynamic'
@@ -108,7 +110,7 @@ export async function GET(request: NextRequest) {
               .from('episode_log')
               .select('updated_at')
               .eq('station_id', s.id)
-              .in('status', ['transcribed', 'summarized', 'compliance_checked'])
+              .in('status', [...TRANSCRIBED_STATUSES])
               .order('updated_at', { ascending: false })
               .limit(1)
               .maybeSingle(),
@@ -157,10 +159,16 @@ export async function GET(request: NextRequest) {
       ),
       // Running spend tally: every station's usage this quarter (month-to-date is
       // a subset). Service-role cross-tenant read, aggregated per station below.
-      supabaseAdmin
-        .from('usage_log')
-        .select('station_id, service, estimated_cost, created_at')
-        .gte('created_at', start),
+      // Paged: a quarter is ~9k rows; PostgREST caps a response at 1000.
+      fetchAllRows<{ station_id: string | null; service: string; estimated_cost: number | null; created_at: string }>(
+        'quarter usage',
+        (from, to) => supabaseAdmin
+          .from('usage_log')
+          .select('station_id, service, estimated_cost, created_at')
+          .gte('created_at', start)
+          .order('id')
+          .range(from, to)
+      ).then((data) => ({ data })),
     ])
 
     // Per-station spend: quarter-to-date (groq/openai/total) + month-to-date total.

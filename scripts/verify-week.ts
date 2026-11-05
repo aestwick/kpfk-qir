@@ -37,6 +37,7 @@ import { resolveShowDisplayName, cleanFeedName } from '../lib/shows'
 import { getVerifyPrompt, isStationOverBudget, isUniversalOverBudget } from '../lib/settings'
 import { isSpendLimitError } from '../lib/retry-policy'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
+import { fetchAllRows } from '../lib/fetch-all'
 import {
   expandBlocks,
   enrichBlocks,
@@ -87,26 +88,6 @@ function localDate(timeZone: string, daysAgo = 0): string {
 /** The date N days after/before a YYYY-MM-DD string (UTC arithmetic, no TZ drift). */
 function shiftDate(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86400_000).toISOString().slice(0, 10)
-}
-
-/**
- * Fetch every row of a query, paging with .range(). PostgREST silently caps a
- * response at the server's max-rows (1000 by default on hosted Supabase) even
- * when .limit() asks for more, so a plain capped select can truncate a long
- * window with no error — later days would just read "missing".
- */
-async function fetchAllRows<T>(
-  context: string,
-  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-  pageSize = 500
-): Promise<T[]> {
-  const rows: T[] = []
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await page(from, from + pageSize - 1)
-    if (error) throw new Error(`Failed to load ${context}: ${error.message}`)
-    rows.push(...(data ?? []))
-    if (!data || data.length < pageSize) return rows
-  }
 }
 
 function parseArgs(argv: string[]): Args {

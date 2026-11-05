@@ -212,3 +212,18 @@ describe('seedMissingFromFlat', () => {
     expect(after.host).toBe('Human Host')
   })
 })
+
+describe('setFieldChoice — toggling back to manual', () => {
+  it('keeps the hand-typed value when the toggle sends no value', () => {
+    const edited = setFieldChoice(null, 'summary', 'manual', 'Hand-written rundown')
+    const toAi = setFieldChoice(edited.fieldSources, 'summary', 'ai')
+    const back = setFieldChoice(toAi.fieldSources, 'summary', 'manual')
+    expect(back.fieldSources.summary?.manual).toBe('Hand-written rundown')
+    expect(back.value).toBe('Hand-written rundown')
+  })
+  it('still lets an explicit null clear the manual copy', () => {
+    const edited = setFieldChoice(null, 'guest', 'manual', 'Jane Doe')
+    const cleared = setFieldChoice(edited.fieldSources, 'guest', 'manual', null)
+    expect(cleared.fieldSources.guest?.manual).toBeNull()
+  })
+})

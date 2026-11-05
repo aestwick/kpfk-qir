@@ -96,13 +96,17 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'id and active (boolean) are required' }, { status: 400 })
   }
 
-  const { error } = await supabase
+  const { data: matched, error } = await supabase
     .from('api_keys')
     .update({ active: body.active })
     .eq('id', id)
     .eq('station_id', stationId)
+    .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  // Unknown (or other-station) id: say so rather than return ok and write an
+  // audit row for a revoke that never happened.
+  if (!matched?.length) return NextResponse.json({ error: 'API key not found' }, { status: 404 })
 
   const meta = requestMeta(request)
   void logAuditEvent({
@@ -131,13 +135,15 @@ export async function DELETE(request: NextRequest) {
   const id = request.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const { error } = await supabase
+  const { data: matched, error } = await supabase
     .from('api_keys')
     .delete()
     .eq('id', parseInt(id))
     .eq('station_id', stationId)
+    .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!matched?.length) return NextResponse.json({ error: 'API key not found' }, { status: 404 })
 
   const meta = requestMeta(request)
   void logAuditEvent({

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse } from '@/lib/auth'
+import { fetchAllRows } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,19 +21,24 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from')
     const to = searchParams.get('to')
 
-    let query = supabase
-      .from('usage_log')
-      .select('*')
-      .eq('station_id', stationId)
-      .order('created_at', { ascending: false })
-
-    if (from) query = query.gte('created_at', from)
-    if (to) query = query.lte('created_at', to)
-
-    const { data, error } = await query
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    // Paged: a month of KPFK usage is ~3k rows and PostgREST caps a response
+    // at 1000, so a single select summed only the newest third of the range.
+    let data: Record<string, any>[]
+    try {
+      data = await fetchAllRows('usage', (lo, hi) => {
+        let query = supabase
+          .from('usage_log')
+          .select('*')
+          .eq('station_id', stationId)
+        if (from) query = query.gte('created_at', from)
+        if (to) query = query.lte('created_at', to)
+        // Ascending id so rows workers insert mid-read land on the last page
+        // instead of shifting earlier offsets (duplicates/over-count).
+        return query.order('id', { ascending: true }).range(lo, hi)
+      })
+      data.reverse() // entries are returned newest-first, as before
+    } catch (err) {
+      return NextResponse.json({ error: (err as Error).message }, { status: 500 })
     }
 
     // Calculate totals
