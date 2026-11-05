@@ -417,8 +417,9 @@ async function shutdown() {
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 
-// Re-apply any correction rules not yet applied to stored transcripts — on the
-// first start after migration 047 this is the existing rules' backfill.
-correctionsQueue.add('corrections-startup', { task: 'backfill' }).then(() => {
+// Name upkeep on startup: sync website hosts into the name list, mine
+// suggestions, and re-apply any rules not yet applied to stored transcripts —
+// on the first start after migration 047 that is the existing rules' backfill.
+correctionsQueue.add('corrections-startup', { task: 'nightly' }).then(() => {
   console.log('[workers] startup corrections backfill queued')
 }).catch(console.error)
