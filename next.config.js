@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  // The app never uses next/image, so turn the optimizer off entirely. This
+  // disables the /_next/image endpoint, which is where the unpatched-in-14.x
+  // image-optimizer RCE/DoS advisories live (see npm audit on next@14.2.35).
+  images: { unoptimized: true },
   async redirects() {
     return [
       {
