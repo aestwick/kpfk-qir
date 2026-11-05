@@ -19,7 +19,7 @@ import {
 import type { EpisodeLog } from '../lib/types'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { fetchBlockingFlags } from '../lib/compliance-blocking'
-import { parseCurationResponse, selectionLine, rewriteUserMessage, rewriteFor, applyCuration, mapLimit, type CurationRewrite } from '../lib/qir-curation'
+import { parseCurationResponse, selectionUserMessage, selectedIdsFor, rewriteUserMessage, rewriteFor, applyCuration, mapLimit, type CurationRewrite } from '../lib/qir-curation'
 
 export interface GenerateQirOptions {
   year: number
@@ -173,68 +173,51 @@ export async function processGenerateQir(job: Job) {
     (e.guest && e.guest.trim() && e.guest.toLowerCase() !== 'none' ? 2 : 0) +
     (e.summary && e.summary.length > 100 ? 1 : 0) +
     (e.headline ? 1 : 0)
-  const categorySummaries: string[] = []
-  for (const [category, allInCategory] of Object.entries(grouped)) {
-    const entries = spreadCandidates(
+  const quarterMonths = [0, 1, 2].map((i) =>
+    new Date(Date.UTC(year, (quarter - 1) * 3 + i, 1)).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })
+  )
+
+  // Pass 1: WHICH episodes — one call per category (lib/qir-curation.ts
+  // selectionUserMessage: a single all-category call skipped whole categories).
+  // Snippets are for CHOOSING only; nothing written in this pass is filed.
+  const selectUsage = { input: 0, output: 0 }
+  let promptRewrites = false
+  const categoryPicks = await mapLimit(Object.entries(grouped), 4, async ([category, allInCategory]) => {
+    const candidates = spreadCandidates(
       allInCategory,
       candidateCap,
       (e) => isoDateById.get(e.episode_id) ?? e.air_date,
       candidateScore
     )
-    // Snippets are for CHOOSING only; descriptions are written in the rewrite
-    // pass below from the full summary (lib/qir-curation.ts).
-    const entrySummaries = entries.map((e) => selectionLine(e))
-    categorySummaries.push(
-      `\n## ${category} (${entries.length} entries)\n${entrySummaries.join('\n')}`
-    )
-  }
-
-  const quarterMonths = [0, 1, 2].map((i) =>
-    new Date(Date.UTC(year, (quarter - 1) * 3 + i, 1)).toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })
-  )
-
-  const guidanceSection = guidance
-    ? `\n\nADDITIONAL GUIDANCE FROM THE EDITOR:\n${guidance}\n`
-    : ''
-
-  const userMessage = `Select up to ${maxPerCategory} entries per category for the FCC Quarterly Issues Report.
-Available categories: ${issueCategories.join(', ')}
-The report must show service across the WHOLE quarter: within each category, spread selections across ${quarterMonths.join(', ')} rather than clustering in one stretch.
-${guidanceSection}
-${categorySummaries.join('\n')}`
-
-  const response = await openai.chat.completions.create({
-    model: curationModel,
-    messages: [
-      { role: 'system', content: curationSystemPrompt },
-      { role: 'user', content: userMessage },
-    ],
-    temperature: 0.3,
-    response_format: { type: 'json_object' },
+    const res = await openai.chat.completions.create({
+      model: curationModel,
+      messages: [
+        { role: 'system', content: curationSystemPrompt },
+        { role: 'user', content: selectionUserMessage({ category, candidates, maxPerCategory, quarterMonths, guidance }) },
+      ],
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    })
+    selectUsage.input += res.usage?.prompt_tokens ?? 0
+    selectUsage.output += res.usage?.completion_tokens ?? 0
+    const content = res.choices[0]?.message?.content
+    if (!content) throw new Error(`Empty curation response from OpenAI for "${category}"`)
+    let parsed
+    try {
+      parsed = parseCurationResponse(JSON.parse(content))
+    } catch {
+      throw new Error(`Invalid curation JSON from OpenAI for "${category}": ${content.slice(0, 200)}`)
+    }
+    if (parsed.rewrites.size > 0) promptRewrites = true
+    const ids = selectedIdsFor(parsed, candidates, maxPerCategory)
+    if (ids.length === 0) console.warn(`[generate-qir] "${category}": no entries selected from ${candidates.length} candidates`)
+    return ids
   })
-
-  const content = response.choices[0]?.message?.content
-  if (!content) throw new Error('Empty response from OpenAI')
-
-  let curatedSelection: Record<string, unknown[]>
-  try {
-    curatedSelection = JSON.parse(content)
-  } catch {
-    throw new Error(`Invalid JSON from OpenAI: ${content.slice(0, 200)}`)
-  }
-
-  if (typeof curatedSelection !== 'object' || curatedSelection === null || Object.keys(curatedSelection).length === 0) {
-    throw new Error(`OpenAI returned empty or invalid curation selection: ${content.slice(0, 200)}`)
-  }
-
-  // Pass 1 result: WHICH episodes. Its topics/descriptions are not filed —
-  // written from 200-char snippets, some landed on the wrong episode.
-  const selection = parseCurationResponse(curatedSelection)
-  const curatedIds = selection.ids
+  const curatedIds = new Set(categoryPicks.flat())
 
   // Fail loudly rather than store a useless 0-entry draft (the old silent failure).
   if (curatedIds.size === 0) {
-    throw new Error(`OpenAI curation selected no valid episode IDs: ${content.slice(0, 200)}`)
+    throw new Error('OpenAI curation selected no valid episode IDs in any category')
   }
 
   // Pass 2: rewrite each selected entry ON ITS OWN from its FULL summary,
@@ -247,7 +230,6 @@ ${categorySummaries.join('\n')}`
   const rewriteUsage = { input: 0, output: 0 }
   // A selection-only prompt (bare ids, e.g. the built-in default) asks for no
   // rewrite, so there's nothing to redo — entries keep their stored summary.
-  const promptRewrites = selection.rewrites.size > 0
   await mapLimit(promptRewrites ? selectedEntries : [], 8, async (entry) => {
     try {
       const res = await openai.chat.completions.create({
@@ -328,14 +310,15 @@ ${categorySummaries.join('\n')}`
   if (insertErr) throw new Error(`Failed to store draft: ${insertErr.message}`)
 
   // Log usage
-  const usage = response.usage
-  if (usage) {
-    await logCurationUsage(stationId, usage.prompt_tokens, usage.completion_tokens, curationModel, {
+  if (selectUsage.input || selectUsage.output) {
+    await logCurationUsage(stationId, selectUsage.input, selectUsage.output, curationModel, {
       year,
       quarter,
       draft_id: draft?.id,
       episodes_considered: allEntries.length,
       episodes_curated: curatedEntries.length,
+      categories_considered: categoryPicks.length,
+      categories_with_entries: categoryPicks.filter((ids) => ids.length > 0).length,
       pass: 'select',
     })
   }
