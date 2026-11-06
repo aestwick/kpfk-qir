@@ -102,6 +102,10 @@ lib/
   ratelimit.ts      — Redis sliding-window rate limiter (per key)
   api-cache.ts      — Redis response cache with versioned invalidation
   api-handler.ts    — withApiKey() wrapper: auth → scope → rate-limit → cache → ETag
+  compliance-tier.ts — Pure triage tiers for compliance flags (high-risk words,
+                      safe harbor at the moment it aired); used by /api/compliance/triage
+  fetch-all.ts      — fetchAllRows(): pages past PostgREST's 1000-row cap. Use it for
+                      any read that can exceed 1000 rows (it silently truncates otherwise)
   search-query.ts   — Pure: search box → expanded to_tsquery (quotes/-x/OR, variants)
   transcript-search.ts — Search RPC calls (exact + by-meaning fusion), vocab refresh
   broadcast-format.ts  — Shared air date/time/offset formatters + episode/day/person links
@@ -140,7 +144,7 @@ app/api/
                               PATCH revoke/activate, DELETE
   v1/                       — Public read API (API-key auth, GET-only). See "Public Read API".
     qir/route.ts                  — finalized reports (filter year/quarter/status)
-    qir/[year]/q[quarter]/route.ts — one finalized report + curated entries
+    qir/[year]/[quarter]/route.ts  — one finalized report + curated entries (URL /qir/2026/q2)
     episodes/route.ts             — published episode feed (keyset cursor + updated_since)
     episodes/[id]/route.ts        — episode detail by public_id (?include=transcript)
     episodes/[id]/transcript/route.ts — captions: VTT (?format=vtt) or JSON
@@ -164,7 +168,11 @@ app/dashboard/              (menu label in quotes — the menu itself is lib/nav
   shows/audit/page.tsx      — "Show check-up": per-show completeness + issues report
   search/page.tsx           — "What was said": transcript search → audio moment
   generate/page.tsx         — "Quarterly report": QIR draft builder (?quarter=YYYY-Qn)
-  compliance/page.tsx       — "Review flags"; compliance/grid — "Flags by time slot"
+  compliance/triage/page.tsx — "Review flags": triage by tier (lib/compliance-tier.ts) —
+                              A listen-now / B glance / C safe harbor / D other checks;
+                              inline audio, 1–5 keys to decide, bulk close for C and
+                              switched-off checks; data from GET /api/compliance/triage
+  compliance/page.tsx       — "All flags" (the filterable table); compliance/grid — "Flags by time slot"
   settings/page.tsx         — "Settings" (tabs addressable: ?tab=shows|members|…)
   api-keys/page.tsx         — "API keys" (station admin)
   jobs/page.tsx             — "Processing queue" (active station)
@@ -195,8 +203,11 @@ quarter's unreviewed critical compliance flags. Rationale:
 ```
 app/
   page.tsx                  — Redirects to /dashboard
-  login/page.tsx            — Supabase email/password auth
-  [station]/[year]/q[quarter]/page.tsx — Public finalized QIR (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
+  login/page.tsx            — Supabase email/password auth (honours a same-origin ?next=)
+  compliance-report/page.tsx — Printable compliance report. Staff-only: the server renders
+                              a shell; flags load client-side through the authenticated
+                              /api/compliance/report (never read with the service role here)
+  [station]/[year]/[quarter]/page.tsx — Public finalized QIR at /kpfk/2026/q2 (folder is `[quarter]`, never `q[quarter]`: Next has no partial dynamic segments, so that supplies no param; `parseQuarterSegment` in lib/qir-format.ts strips the `q`) (per-station, print-friendly; dynamic so each view, incl. anonymous, is audited)
 ```
 
 ### Shared Components
@@ -335,7 +346,7 @@ The app is multi-tenant: **one codebase, one database, one deployment** serving 
 - **Request path**: `lib/auth.ts#getStationContext(request)` resolves the caller (Bearer token), their allowed stations, and the active station (from the `qir_station` cookie / `x-station-slug` header), returning a **request-scoped RLS client**. API routes use it + an explicit `.eq('station_id', …)`. Client pages call `lib/api-client.ts#authedFetch`. The active station is chosen client-side by the station switcher — the server never defaults one (a wrong default would leak cross-tenant).
 - **Workers** run with the service-role client (RLS bypassed), so their `station_id` filter is the *only* guard. Jobs carry `stationId`; the ingest/auto-retry cron acts as a per-station **dispatcher** (fans out one job per station); transcribe/summarize/compliance filter both the candidate-select and the atomic claim guard by `station_id`.
 - **Settings** resolve per station: `station_settings(station_id,key)` → global `qir_settings(key)` → hard-coded default (`lib/settings.ts`, 60s cache keyed by `(stationId,key)`). Prompts interpolate `{{STATION_NAME}}`.
-- **Public reports** live at `/[station]/[year]/q[quarter]`; legacy `/[year]/q[quarter]` 308-redirects to `/kpfk/...` (next.config.js) so filed FCC links keep resolving.
+- **Public reports** live at `/[station]/[year]/q[N]` (route folder `[station]/[year]/[quarter]`); legacy `/[year]/q[N]` 308-redirects to `/kpfk/...` (next.config.js) so filed FCC links keep resolving.
 
 ### Provisioning a new station (SQL/admin, no UI yet)
 

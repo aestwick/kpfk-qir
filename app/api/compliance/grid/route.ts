@@ -10,6 +10,7 @@ import {
 } from '@/lib/compliance-grid'
 import type { GridAiring, GridWindow } from '@/lib/types'
 import { ACTIVE_REVIEW_STATUSES } from '@/lib/compliance-status'
+import { fetchAllRows } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -110,40 +111,44 @@ async function buildWindow(
   filters: GridFilters,
 ): Promise<GridWindow> {
   // Episodes that aired in the window (station-scoped, with airing metadata).
-  const { data: episodes, error: epError } = await supabase
+  // Paged: a quarter window holds ~2,000 airings and PostgREST caps a response
+  // at 1000, so an unpaged read silently dropped the back half of the grid.
+  const epList = await fetchAllRows<{
+    id: number; show_key: string; show_name: string | null; air_date: string | null
+    air_start: string | null; compliance_report: string | null
+  }>('grid episodes', (from, to) => supabase
     .from('episode_log')
     .select('id, show_key, show_name, air_date, air_start, compliance_report')
     .eq('station_id', stationId)
     .gte('air_date', start)
     .lte('air_date', end)
     .not('air_date', 'is', null)
-  if (epError) throw epError
+    .order('id')
+    .range(from, to))
 
-  const epList = episodes ?? []
-  const epIds = epList.map((e) => e.id)
-
-  // Flag offense counts per episode. Scoped to station via the episode_log join,
-  // mirroring app/api/compliance/route.ts.
+  // Flag offense counts per episode. Scoped to station and window via the
+  // episode_log join (not an id list, which for a quarter would be a ~2,000-id
+  // URL), mirroring app/api/compliance/route.ts.
   const flagCounts = new Map<number, number>()
-  if (epIds.length > 0) {
-    let flagQuery = supabase
-      .from('compliance_flags')
-      .select('episode_id, flag_type, severity, review_status, episode_log!inner(station_id)')
-      .eq('episode_log.station_id', stationId)
-      .in('episode_id', epIds)
-    // Default: only active offenses (investigating + violation). includeResolved
-    // widens it to every flag, including suggested + dismissed.
-    if (!filters.includeResolved) flagQuery = flagQuery.in('review_status', ACTIVE_REVIEW_STATUSES)
-    if (filters.flagTypes.length > 0) {
-      const realTypes = filters.flagTypes.filter((t) => FLAG_TYPES.has(t))
-      // If the only requested type is summary_discrepancy, no flag rows match.
-      flagQuery = flagQuery.in('flag_type', realTypes.length > 0 ? realTypes : ['__none__'])
-    }
-    if (filters.severities.length > 0) flagQuery = flagQuery.in('severity', filters.severities)
-
-    const { data: flagRows, error: flagError } = await flagQuery
-    if (flagError) throw flagError
-    for (const f of flagRows ?? []) {
+  const realTypes = filters.flagTypes.filter((t) => FLAG_TYPES.has(t))
+  // If the only requested type is summary_discrepancy, no flag rows match.
+  const typeFilterEmpty = filters.flagTypes.length > 0 && realTypes.length === 0
+  if (epList.length > 0 && !typeFilterEmpty) {
+    const flagRows = await fetchAllRows<{ episode_id: number }>('grid flags', (from, to) => {
+      let flagQuery = supabase
+        .from('compliance_flags')
+        .select('id, episode_id, episode_log!inner(station_id, air_date)')
+        .eq('episode_log.station_id', stationId)
+        .gte('episode_log.air_date', start)
+        .lte('episode_log.air_date', end)
+      // Default: only active offenses (investigating + violation). includeResolved
+      // widens it to every flag, including suggested + dismissed.
+      if (!filters.includeResolved) flagQuery = flagQuery.in('review_status', ACTIVE_REVIEW_STATUSES)
+      if (realTypes.length > 0) flagQuery = flagQuery.in('flag_type', realTypes)
+      if (filters.severities.length > 0) flagQuery = flagQuery.in('severity', filters.severities)
+      return flagQuery.order('id').range(from, to)
+    })
+    for (const f of flagRows) {
       flagCounts.set(f.episode_id, (flagCounts.get(f.episode_id) ?? 0) + 1)
     }
   }

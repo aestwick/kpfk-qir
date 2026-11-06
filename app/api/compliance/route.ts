@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth'
 import { datesForDowInWindow } from '@/lib/compliance-grid'
 import { ACTIVE_REVIEW_STATUSES, REVIEW_STATUSES, isReviewStatus } from '@/lib/compliance-status'
+import { fetchAllRows } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,18 +19,23 @@ export async function GET(request: NextRequest) {
     // severity (investigating + violation), plus how many raw suggestions are
     // still awaiting triage.
     if (searchParams.get('stats') === 'true') {
-      const { data, error } = await supabase
-        .from('compliance_flags')
-        .select('flag_type, severity, review_status, episode_log!inner(station_id)')
-        .eq('episode_log.station_id', stationId)
-
-      if (error) throw error
+      // Paged: PostgREST caps a response at 1000 rows, and KPFK has thousands
+      // of flags, so an unpaged read undercounted every bucket.
+      const data = await fetchAllRows<{ flag_type: string; severity: string; review_status: string }>(
+        'compliance stats',
+        (from, to) => supabase
+          .from('compliance_flags')
+          .select('id, flag_type, severity, review_status, episode_log!inner(station_id)')
+          .eq('episode_log.station_id', stationId)
+          .order('id')
+          .range(from, to),
+      )
 
       const byType: Record<string, number> = {}
       const bySeverity: Record<string, number> = {}
       let total = 0
       let pendingTriage = 0
-      for (const flag of data ?? []) {
+      for (const flag of data) {
         if (flag.review_status === 'suggested') { pendingTriage++; continue }
         if (flag.review_status === 'dismissed') continue
         byType[flag.flag_type] = (byType[flag.flag_type] ?? 0) + 1
@@ -43,23 +49,29 @@ export async function GET(request: NextRequest) {
     // GET /api/compliance?by_show=true — per-show compliance summary
     if (searchParams.get('by_show') === 'true') {
       // Get all compliance-checked episodes
-      const { data: episodes, error: epError } = await supabase
-        .from('episode_log')
-        .select('id, show_name, show_key')
-        .eq('station_id', stationId)
-        .in('status', ['compliance_checked', 'summarized'])
-
-      if (epError) throw epError
+      const episodes = await fetchAllRows<{ id: number; show_name: string | null; show_key: string }>(
+        'compliance by-show episodes',
+        (from, to) => supabase
+          .from('episode_log')
+          .select('id, show_name, show_key')
+          .eq('station_id', stationId)
+          .in('status', ['compliance_checked', 'summarized'])
+          .order('id')
+          .range(from, to),
+      )
 
       // Get all active flags (investigating + violation), scoped to this
       // station via the episode_log join.
-      const { data: flagRows, error: flagError } = await supabase
-        .from('compliance_flags')
-        .select('episode_id, flag_type, severity, episode_log!inner(station_id)')
-        .eq('episode_log.station_id', stationId)
-        .in('review_status', ACTIVE_REVIEW_STATUSES)
-
-      if (flagError) throw flagError
+      const flagRows = await fetchAllRows<{ episode_id: number; flag_type: string; severity: string }>(
+        'compliance by-show flags',
+        (from, to) => supabase
+          .from('compliance_flags')
+          .select('id, episode_id, flag_type, severity, episode_log!inner(station_id)')
+          .eq('episode_log.station_id', stationId)
+          .in('review_status', ACTIVE_REVIEW_STATUSES)
+          .order('id')
+          .range(from, to),
+      )
 
       // Build per-show summary
       const showMap: Record<string, {
@@ -74,7 +86,7 @@ export async function GET(request: NextRequest) {
         flagged_episodes: Set<number>
       }> = {}
 
-      for (const ep of episodes ?? []) {
+      for (const ep of episodes) {
         const key = ep.show_key
         if (!showMap[key]) {
           showMap[key] = {
@@ -93,9 +105,10 @@ export async function GET(request: NextRequest) {
         showMap[key].episode_ids.add(ep.id)
       }
 
-      for (const flag of flagRows ?? []) {
+      const episodeById = new Map(episodes.map((e) => [e.id, e]))
+      for (const flag of flagRows) {
         // Find which show this episode belongs to
-        const ep = (episodes ?? []).find((e) => e.id === flag.episode_id)
+        const ep = episodeById.get(flag.episode_id)
         if (!ep) continue
         const key = ep.show_key
         if (!showMap[key]) continue
@@ -220,7 +233,9 @@ export async function GET(request: NextRequest) {
 }
 
 // PATCH /api/compliance — set a flag's review status (single or bulk).
-// Body: { id | ids, review_status, resolved_by?, resolved_notes? }
+// Body: { id | ids, review_status, resolved_notes? }. The reviewer is always
+// the signed-in user: a client-sent resolved_by is ignored, so the record of
+// who decided a flag can't be spoofed or left as a placeholder.
 export async function PATCH(request: NextRequest) {
   try {
     const result = await getStationContext(request)
@@ -231,7 +246,7 @@ export async function PATCH(request: NextRequest) {
     if (denied) return stationErrorResponse(denied)
 
     const body = await request.json()
-    const { review_status, resolved_by, resolved_notes } = body
+    const { review_status, resolved_notes } = body
 
     if (!isReviewStatus(review_status)) {
       return NextResponse.json(
@@ -241,7 +256,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const update: Record<string, unknown> = { review_status }
-    if (resolved_by) update.resolved_by = resolved_by
+    update.resolved_by = result.context.userEmail ?? result.context.userId
     if (resolved_notes !== undefined) update.resolved_notes = resolved_notes
 
     // Bulk: { ids: number[], review_status, ... }

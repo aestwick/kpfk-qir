@@ -59,8 +59,28 @@ function writeCookie(name: string, value: string) {
 
 const STATION_ROLES: NavRole[] = ['viewer', 'editor', 'admin']
 
+// The last resolved access for this user, kept for the browser tab. The menu,
+// station picker and role-gated links render from it on the first paint, so
+// they don't start as the viewer menu and then grow (the "menu jumps" bug).
+// It's only a starting point: access is re-read from the database on every
+// mount, and pages/APIs still enforce it on the server.
+const accessKey = (userId: string) => `qir_nav_access_${userId}`
+
+function readCachedAccess(userId: string): Omit<NavAccess, 'switchStation'> | null {
+  try {
+    const raw = sessionStorage.getItem(accessKey(userId))
+    if (!raw) return null
+    const { isSuperAdmin, stations } = JSON.parse(raw) as { isSuperAdmin: boolean; stations: StationOption[] }
+    const cookieSlug = readCookie(STATION_COOKIE)
+    const active = stations.find((o) => o.slug === cookieSlug) ?? stations[0] ?? null
+    return { loading: false, isSuperAdmin, stations, active, role: active?.role ?? null }
+  } catch {
+    return null
+  }
+}
+
 export function NavAccessProvider({ userId, children }: { userId: string; children: React.ReactNode }) {
-  const [state, setState] = useState<Omit<NavAccess, 'switchStation'>>({
+  const [state, setState] = useState<Omit<NavAccess, 'switchStation'>>(() => readCachedAccess(userId) ?? {
     loading: true, isSuperAdmin: false, stations: [], active: null, role: null,
   })
 
@@ -99,6 +119,7 @@ export function NavAccessProvider({ userId, children }: { userId: string; childr
       const cookieSlug = readCookie(STATION_COOKIE)
       const active = stations.find((o) => o.slug === cookieSlug) ?? stations[0] ?? null
       if (active && active.slug !== cookieSlug) writeCookie(STATION_COOKIE, active.slug)
+      try { sessionStorage.setItem(accessKey(userId), JSON.stringify({ isSuperAdmin, stations })) } catch { /* ignore */ }
       setState({ loading: false, isSuperAdmin, stations, active, role: active?.role ?? null })
     }
     load()

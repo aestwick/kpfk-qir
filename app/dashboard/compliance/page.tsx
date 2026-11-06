@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import { authedFetch } from '@/lib/api-client'
+import Link from 'next/link'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { SkeletonCards, SkeletonTableRows } from '@/app/components/skeleton'
+import { SkeletonTableRows } from '@/app/components/skeleton'
 import { ConfirmDialog } from '@/app/components/confirm-dialog'
 import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { withFrom, locationFrom } from '@/lib/nav'
@@ -122,6 +123,16 @@ function slotLabel(dow: string, airStart: string): string {
   return `${day} ${formatSlot(slots[0])}–${formatSlot(slots[slots.length - 1])}`
 }
 
+// Last results, kept in memory for the browser tab. Opening an episode and
+// coming back remounts this page; without this it started empty, showed a
+// skeleton, refetched, and landed at the top. With it, the list you left paints
+// immediately (then refreshes quietly) and the scroll position can be restored
+// against real rows.
+type ListResult = { flags: ComplianceFlag[]; pagination: { page: number; limit: number; total: number; totalPages: number } }
+const listCache = new Map<string, ListResult>()
+let statsCache: Stats | null = null
+let showHealthCache: ShowHealth[] | null = null
+
 export default function CompliancePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -151,10 +162,11 @@ export default function CompliancePage() {
 
   // Data
   const [flags, setFlags] = useState<ComplianceFlag[]>([])
-  const [stats, setStats] = useState<Stats>({ byType: {}, bySeverity: {}, total: 0, pendingTriage: 0 })
-  const [showHealth, setShowHealth] = useState<ShowHealth[]>([])
+  const [stats, setStats] = useState<Stats>(() => statsCache ?? { byType: {}, bySeverity: {}, total: 0, pendingTriage: 0 })
+  const [showHealth, setShowHealth] = useState<ShowHealth[]>(() => showHealthCache ?? [])
   const [showHealthExpanded, setShowHealthExpanded] = useState(false)
   const [pagination, setPagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 0 })
+  const [listLoaded, setListLoaded] = useState(false)
   const [words, setWords] = useState<ComplianceWord[]>([])
   const [settings, setSettings] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
@@ -242,8 +254,14 @@ export default function CompliancePage() {
       const res = await authedFetch(`/api/compliance?${params}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setFlags(data.flags ?? [])
-      setPagination(data.pagination ?? { page: 1, limit: 50, total: 0, totalPages: 0 })
+      const result: ListResult = {
+        flags: data.flags ?? [],
+        pagination: data.pagination ?? { page: 1, limit: 50, total: 0, totalPages: 0 },
+      }
+      listCache.set(params.toString(), result)
+      setFlags(result.flags)
+      setPagination(result.pagination)
+      setListLoaded(true)
     } catch (err) {
       console.error('Failed to fetch flags:', err)
       toast('error', 'Failed to load compliance flags')
@@ -256,10 +274,24 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance?stats=true')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      setStats(data.stats ?? { byType: {}, bySeverity: {}, total: 0, pendingTriage: 0 })
+      statsCache = data.stats ?? { byType: {}, bySeverity: {}, total: 0, pendingTriage: 0 }
+      setStats(statsCache!)
     } catch (err) {
       console.error('Failed to fetch stats:', err)
     }
+  }, [])
+
+  // Paint the list we already have for these filters before the first frame,
+  // so coming back from an episode shows rows, not a skeleton.
+  useLayoutEffect(() => {
+    const hit = listCache.get(buildApiParams().toString())
+    if (hit) {
+      setFlags(hit.flags)
+      setPagination(hit.pagination)
+      setListLoaded(true)
+    }
+    // Once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Initial load — fetch everything in parallel
@@ -267,15 +299,20 @@ export default function CompliancePage() {
     if (initialLoadDone.current) return
     initialLoadDone.current = true
 
-    setLoading(true)
+    const hit = listCache.get(buildApiParams().toString())
+    // The page is usable once the list and counts are in. Show health (reads
+    // every episode at the station) and the rules section fill in after,
+    // instead of holding the whole page behind a skeleton.
+    setLoading(!(hit && statsCache))
+    Promise.all([fetchFlags(), fetchStats()]).then(() => setLoading(false))
+    authedFetch('/api/compliance?by_show=true')
+      .then((r) => (r.ok ? r.json() : { shows: [] }))
+      .then((showData) => { showHealthCache = showData.shows ?? []; setShowHealth(showHealthCache!) })
+      .catch(() => {})
     Promise.all([
-      fetchFlags(),
-      fetchStats(),
       authedFetch('/api/compliance/wordlist').then((r) => r.ok ? r.json() : { words: [] }),
       authedFetch('/api/settings').then((r) => r.ok ? r.json() : { settings: {} }),
-      authedFetch('/api/compliance?by_show=true').then((r) => r.ok ? r.json() : { shows: [] }),
-    ]).then(([, , wordData, settingsData, showData]) => {
-      setShowHealth(showData.shows ?? [])
+    ]).then(([wordData, settingsData]) => {
       setWords(wordData.words ?? [])
       setIsSuperAdmin(wordData.isSuperAdmin === true)
       const s = settingsData.settings ?? {}
@@ -286,8 +323,7 @@ export default function CompliancePage() {
         setCheckToggles(s.compliance_checks_enabled as Record<string, boolean>)
       }
       setBlocking(s.compliance_blocking === 'true' || s.compliance_blocking === true)
-      setLoading(false)
-    })
+    }).catch(() => {})
   }, [fetchFlags, fetchStats])
 
   // Update URL when filters change
@@ -323,28 +359,46 @@ export default function CompliancePage() {
 
   // Preserve scroll position across navigation (e.g. opening an episode and
   // coming back). Keyed by the active filter query so a different filter view
-  // doesn't inherit a stale position. Persisted to sessionStorage as the user
-  // scrolls, and restored once the list has rendered on the next mount.
+  // doesn't inherit a stale position. Saved as the user scrolls — but only
+  // after this mount has restored, because the empty first frame fires a
+  // scroll event at y=0 that used to overwrite the saved spot before it was
+  // read. Restored once the rows for this view have rendered.
   const scrollKey = `compliance-scroll:${searchParams.toString()}`
+  const scrollRestored = useRef(false)
   useEffect(() => {
+    const here = window.location.pathname
     const onScroll = () => {
+      // Ignore the reset-to-top that fires as you leave for another page (the
+      // address has already changed by then); it used to overwrite your spot.
+      if (!scrollRestored.current || window.location.pathname !== here) return
       try { sessionStorage.setItem(scrollKey, String(window.scrollY)) } catch { /* ignore */ }
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [scrollKey])
 
+  // This page restores its own position; stop the browser's automatic restore
+  // from fighting it on Back (it ran against the episode page's height).
   useEffect(() => {
-    if (loading) return
+    const prev = window.history.scrollRestoration
+    window.history.scrollRestoration = 'manual'
+    return () => { window.history.scrollRestoration = prev }
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!listLoaded || scrollRestored.current) return
     let saved: string | null = null
     try { saved = sessionStorage.getItem(scrollKey) } catch { /* ignore */ }
-    if (saved) {
-      // Wait for the freshly-loaded rows to paint before restoring.
-      requestAnimationFrame(() => window.scrollTo(0, parseInt(saved!, 10)))
-    }
-    // Restore once, after the initial load completes for this mount.
+    const y = saved ? parseInt(saved, 10) : 0
+    // Now, and again after the router's own post-navigation scroll.
+    window.scrollTo(0, y)
+    requestAnimationFrame(() => {
+      window.scrollTo(0, y)
+      scrollRestored.current = true
+    })
+    // Restore once, after the first rows of this mount have rendered.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading])
+  }, [listLoaded])
 
   // Toggle selection
   function toggleSelect(id: number) {
@@ -370,7 +424,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, review_status: prevStatus, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ id, review_status: prevStatus }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast('success', `Reverted to ${REVIEW_STATUS_LABELS[prevStatus]}`)
@@ -395,7 +449,7 @@ export default function CompliancePage() {
         const res = await authedFetch('/api/compliance', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids, review_status: st, resolved_by: 'dashboard' }),
+          body: JSON.stringify({ ids, review_status: st }),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
       }
@@ -417,7 +471,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, review_status: status, resolved_notes: notes, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ id, review_status: status, resolved_notes: notes }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast(
@@ -451,7 +505,7 @@ export default function CompliancePage() {
       const res = await authedFetch('/api/compliance', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, review_status: status, resolved_notes: bulkNotes, resolved_by: 'dashboard' }),
+        body: JSON.stringify({ ids, review_status: status, resolved_notes: bulkNotes }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       toast(
@@ -624,28 +678,11 @@ export default function CompliancePage() {
     return params.toString()
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <Breadcrumbs />
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
-        <SkeletonCards count={5} />
-        <div className="bg-white rounded-xl shadow-sm border overflow-hidden dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
-          <table className="w-full">
-            <tbody>
-              <SkeletonTableRows rows={8} />
-            </tbody>
-          </table>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <Breadcrumbs />
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">Compliance</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-warm-100">All flags</h1>
         <div className="flex items-center gap-2">
           <a
             href="/dashboard/compliance/grid"
@@ -678,17 +715,23 @@ export default function CompliancePage() {
         </div>
       </div>
 
-      {/* Triage inbox callout — raw AI suggestions awaiting review */}
+      {/* Triage inbox callout — raw AI suggestions awaiting review. Same-size
+          placeholder while the counts load, so nothing below shifts. */}
+      {loading && !statsCache && (
+        <div className="w-full bg-gray-50 border rounded-xl px-4 py-3 text-sm text-gray-400 dark:bg-warm-800 dark:border-warm-700 dark:text-warm-500">
+          Counting flags awaiting review…
+        </div>
+      )}
       {stats.pendingTriage > 0 && (
-        <button
-          onClick={() => { setFilterStatus('suggested'); setPage(1) }}
+        <Link
+          href="/dashboard/compliance/triage"
           className="w-full text-left bg-gray-50 border rounded-xl px-4 py-3 flex items-center justify-between hover:bg-gray-100 dark:bg-warm-800 dark:border-warm-700 dark:hover:bg-warm-700/50"
         >
           <span className="text-sm text-gray-700 dark:text-warm-200">
             <span className="font-semibold">{stats.pendingTriage}</span> suggested flag{stats.pendingTriage !== 1 ? 's' : ''} awaiting review
           </span>
-          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Review &rarr;</span>
-        </button>
+          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">Review, most urgent first &rarr;</span>
+        </Link>
       )}
 
       {/* Summary Stats Strip — active offenses (investigating + violation) by type */}
@@ -696,13 +739,20 @@ export default function CompliancePage() {
         {FLAG_TYPES.map((type) => (
           <div key={type} className="bg-white rounded-xl shadow-sm border p-3 dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide dark:text-warm-500">{typeLabels[type]}</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1 dark:text-warm-100">{stats.byType[type] ?? 0}</p>
+            <p className="text-2xl font-bold text-gray-900 mt-1 dark:text-warm-100">{loading && !statsCache ? <span className="inline-block h-7 w-8 rounded bg-warm-100 dark:bg-warm-700 animate-pulse align-middle" /> : (stats.byType[type] ?? 0)}</p>
             <p className="text-xs text-gray-500 dark:text-warm-400">active</p>
           </div>
         ))}
       </div>
 
-      {/* Show Health Summary */}
+      {/* Show Health Summary — a same-size placeholder while it loads, so the
+          filters and list below don't jump down when it arrives. */}
+      {showHealth.length === 0 && showHealthCache === null && (
+        <div className="bg-white rounded-xl shadow-sm border px-5 py-4 dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
+          <p className="text-sm font-semibold text-gray-900 dark:text-warm-100">Show Health</p>
+          <p className="text-xs text-gray-500 dark:text-warm-400 mt-0.5">Checking shows…</p>
+        </div>
+      )}
       {showHealth.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border dark:bg-surface-raised dark:shadow-card-dark dark:border-warm-700">
           <button
@@ -974,7 +1024,9 @@ export default function CompliancePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-warm-700">
-              {flags.length === 0 ? (
+              {!listLoaded ? (
+                <SkeletonTableRows rows={8} />
+              ) : flags.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-12 text-center text-gray-400 dark:text-warm-500">
                     No compliance flags found

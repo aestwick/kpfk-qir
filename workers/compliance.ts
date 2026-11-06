@@ -6,7 +6,7 @@ import { logComplianceUsage } from '../lib/usage'
 import { getComplianceChecksEnabled, getComplianceModel, getCompliancePrompt, getSummarizeBatchSize, isPipelinePaused } from '../lib/settings'
 import { getStation } from '../lib/stations'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
-import { wordPattern, restrictedHoursCheck, type RestrictedAt } from '../lib/compliance-match'
+import { wordPattern, wordOccurrences, restrictedHoursCheck, type RestrictedAt, type WordOccurrence } from '../lib/compliance-match'
 
 interface ComplianceFlagInsert {
   episode_id: number
@@ -89,32 +89,36 @@ function runProfanityCheck(
   vttCues: VttCue[]
 ): ComplianceFlagInsert[] {
   const flags: ComplianceFlagInsert[] = []
-  const lower = transcript.toLowerCase()
+
+  const flagAt = (word: string, wordSeverity: string, occ: WordOccurrence): ComplianceFlagInsert => {
+    const start = Math.max(0, occ.index - 50)
+    const end = Math.min(transcript.length, occ.index + word.length + 50)
+    const restricted = restrictedAt(occ.time)
+    return {
+      episode_id: episodeId,
+      flag_type: 'profanity',
+      severity: restricted ? wordSeverity : 'warning',
+      excerpt: transcript.slice(start, end),
+      // The caption cue this occurrence was spoken in, so "Listen" jumps to it.
+      timestamp_seconds: occ.time,
+      details: restricted
+        ? `"${word}" detected during FCC restricted hours (6am-10pm)`
+        : `"${word}" detected during safe harbor hours (10pm-6am)`,
+    }
+  }
 
   for (const { word, severity: wordSeverity } of wordlist) {
-    const pattern = wordPattern(word)
-    let match: RegExpExecArray | null
-    while ((match = pattern.exec(lower)) !== null) {
-      const start = Math.max(0, match.index - 50)
-      const end = Math.min(transcript.length, match.index + word.length + 50)
-      const excerpt = transcript.slice(start, end)
-      // Locate the first utterance of the word in the captions so "Listen"
-      // can jump straight to it. Null if there's no VTT or no match.
-      const timestamp = findTimestampForText(vttCues, word)
-      const restricted = restrictedAt(timestamp)
-
-      flags.push({
-        episode_id: episodeId,
-        flag_type: 'profanity',
-        severity: restricted ? wordSeverity : 'warning',
-        excerpt,
-        timestamp_seconds: timestamp,
-        details: restricted
-          ? `"${word}" detected during FCC restricted hours (6am-10pm)`
-          : `"${word}" detected during safe harbor hours (10pm-6am)`,
-      })
-      // Only flag first occurrence of each word
-      break
+    const occurrences = wordOccurrences(transcript, vttCues, word)
+    if (occurrences.length === 0) continue
+    // One flag per word: its first occurrence (unchanged identity, so triaged
+    // rows survive a re-run). If that first one aired in safe harbor, also flag
+    // the first later occurrence in restricted hours: for a show straddling
+    // 6am or 10pm that's the one that matters, and it was never flagged.
+    const first = occurrences[0]
+    flags.push(flagAt(word, wordSeverity, first))
+    if (!restrictedAt(first.time)) {
+      const laterRestricted = occurrences.slice(1).find((o) => o.time != null && restrictedAt(o.time))
+      if (laterRestricted) flags.push(flagAt(word, wordSeverity, laterRestricted))
     }
   }
 
