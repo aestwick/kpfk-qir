@@ -206,3 +206,23 @@ export function quarterParamRange(param: string | null | undefined): { start: st
   const { start, end } = getQuarterDateRange(parseInt(m[1], 10), parseInt(m[2], 10))
   return { start, end }
 }
+
+/**
+ * Parse the `{quarter}` URL segment of a QIR route (`/[station]/[year]/[quarter]`,
+ * `/api/v1/qir/[year]/[quarter]`). Public links use the `q2` form, so the param
+ * arrives as `"q2"`; bare `"2"` is accepted too. Anything else is null.
+ *
+ * These folders used to be named `q[quarter]`. Next.js has no partial dynamic
+ * segments, so that folder matched any third segment but supplied NO `quarter`
+ * param at all — `parseInt(undefined)` is NaN, and every public report link
+ * (`/kpfk/2026/q2`) and `/api/v1/qir/{y}/q{n}` call failed (404 / 400).
+ */
+export function parseQuarterSegment(segment: string | undefined): number | null {
+  const m = /^q?([1-4])$/i.exec(segment ?? '')
+  return m ? Number(m[1]) : null
+}
+
+/** Parse the `{year}` URL segment of a QIR route: exactly four digits, else null. */
+export function parseYearSegment(segment: string | undefined): number | null {
+  return /^\d{4}$/.test(segment ?? '') ? Number(segment) : null
+}
