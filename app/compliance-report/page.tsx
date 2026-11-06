@@ -27,11 +27,12 @@ function getQuarterLabel(quarter: string): string {
   return `${months[startMonth]} 1, ${yNum} – ${months[startMonth + 2]} ${endDate.getDate()}, ${yNum}`
 }
 
-export async function generateMetadata({
-  searchParams,
-}: {
-  searchParams: Record<string, string | string[] | undefined>
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>
+  }
+): Promise<Metadata> {
+  const searchParams = await props.searchParams;
   const quarter = (searchParams.quarter as string) ?? ''
   const flagType = (searchParams.type as string) ?? ''
   const station = await resolveStation((searchParams.station as string) ?? '')
@@ -40,11 +41,12 @@ export async function generateMetadata({
   return { title, description: title }
 }
 
-export default async function ComplianceReportPage({
-  searchParams,
-}: {
-  searchParams: Record<string, string | string[] | undefined>
-}) {
+export default async function ComplianceReportPage(
+  props: {
+    searchParams: Promise<Record<string, string | string[] | undefined>>
+  }
+) {
+  const searchParams = await props.searchParams;
   const flagType = (searchParams.type as string) ?? ''
   const severity = (searchParams.severity as string) ?? ''
   const quarter = (searchParams.quarter as string) ?? ''

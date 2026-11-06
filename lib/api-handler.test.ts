@@ -13,6 +13,9 @@ import { authenticateApiKey, requireScope } from './api-auth'
 import { checkRateLimit } from './ratelimit'
 import { cached } from './api-cache'
 
+// Next 15 passes route params as a Promise; static routes get an empty one.
+const noParams = { params: Promise.resolve({}) }
+
 const mAuth = authenticateApiKey as unknown as ReturnType<typeof vi.fn>
 const mScope = requireScope as unknown as ReturnType<typeof vi.fn>
 const mRate = checkRateLimit as unknown as ReturnType<typeof vi.fn>
@@ -38,21 +41,21 @@ describe('withApiKey', () => {
   it('401s when authentication fails', async () => {
     mAuth.mockResolvedValue({ error: { status: 401, error: 'Missing API key' } })
     const handler = withApiKey(async () => ({ json: { ok: true } }), { scope: 'qir' })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.status).toBe(401)
   })
 
   it('403s when the key lacks the scope', async () => {
     mScope.mockReturnValue({ status: 403, error: "lacks 'qir'" })
     const handler = withApiKey(async () => ({ json: { ok: true } }), { scope: 'qir' })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.status).toBe(403)
   })
 
   it('429s with Retry-After when rate limited', async () => {
     mRate.mockResolvedValue({ allowed: false, limit: 5, remaining: 0, resetSec: 12 })
     const handler = withApiKey(async () => ({ json: { ok: true } }), { scope: 'qir' })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.status).toBe(429)
     expect(res.headers.get('retry-after')).toBe('12')
     expect(res.headers.get('x-ratelimit-remaining')).toBe('0')
@@ -63,7 +66,7 @@ describe('withApiKey', () => {
       scope: 'qir',
       cache: { resource: 'qir', ttlSec: 3600 },
     })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.status).toBe(200)
     expect(res.headers.get('etag')).toBeTruthy()
     expect(res.headers.get('x-cache')).toBe('MISS')
@@ -78,7 +81,7 @@ describe('withApiKey', () => {
       scope: 'qir',
       cache: { resource: 'qir', ttlSec: 3600 },
     })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.headers.get('x-cache')).toBe('HIT')
   })
 
@@ -87,9 +90,9 @@ describe('withApiKey', () => {
       scope: 'qir',
       cache: { resource: 'qir', ttlSec: 3600 },
     })
-    const first = await handler(req())
+    const first = await handler(req(), noParams)
     const etag = first.headers.get('etag')!
-    const second = await handler(req({ headers: { 'if-none-match': etag } }))
+    const second = await handler(req({ headers: { 'if-none-match': etag } }), noParams)
     expect(second.status).toBe(304)
   })
 
@@ -97,7 +100,7 @@ describe('withApiKey', () => {
     const handler = withApiKey(async () => ({ body: 'WEBVTT\n\n', contentType: 'text/vtt; charset=utf-8' }), {
       scope: 'transcripts',
     })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.headers.get('content-type')).toContain('text/vtt')
     expect(await res.text()).toContain('WEBVTT')
   })
@@ -109,7 +112,7 @@ describe('withApiKey', () => {
       scope: 'qir',
       cache: { resource: 'qir', ttlSec: 60 },
     })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.status).toBe(500)
   })
 
@@ -118,7 +121,7 @@ describe('withApiKey', () => {
       scope: 'episodes',
       cache: { resource: 'episodes', ttlSec: 300 },
     })
-    const res = await handler(req())
+    const res = await handler(req(), noParams)
     expect(res.status).toBe(404)
 
     const cacheOpts = mCached.mock.calls[0][0]
@@ -131,9 +134,10 @@ describe('withApiKey', () => {
       async (_r, { params }) => ({ json: { year: params.year } }),
       { scope: 'qir' },
     )
-    const res = await handler(req(), { params: { year: '2025' } })
+    const res = await handler(req(), { params: Promise.resolve({ year: '2025' }) })
     expect(await res.json()).toEqual({ year: '2025' })
   })
+
 })
 
 // A route whose response depends on a property of the CALLING KEY must declare
@@ -158,16 +162,16 @@ describe('withApiKey — per-key cache vary', () => {
       scope: 'qir',
       cache: { resource: 'qir', ttlSec: 60 },
     })
-    await handler(req())
+    await handler(req(), noParams)
     expect(subkeys()[0]).toBe('/api/v1/qir?')
   })
 
   it('separates entries for keys that differ on the varied property', async () => {
     const handler = scopedHandler()
 
-    await handler(req()) // key without the transcripts scope
+    await handler(req(), noParams) // key without the transcripts scope
     mAuth.mockResolvedValue({ ctx: { ...CTX, keyId: 2, scopes: ['episodes', 'transcripts'] } })
-    await handler(req()) // key with it
+    await handler(req(), noParams) // key with it
 
     const [withoutScope, withScope] = subkeys()
     expect(withoutScope).not.toBe(withScope)
@@ -178,9 +182,9 @@ describe('withApiKey — per-key cache vary', () => {
   it('still shares one entry between keys that agree on it', async () => {
     const handler = scopedHandler()
 
-    await handler(req())
+    await handler(req(), noParams)
     mAuth.mockResolvedValue({ ctx: { ...CTX, keyId: 99 } })
-    await handler(req())
+    await handler(req(), noParams)
 
     const [a, b] = subkeys()
     expect(a).toBe(b)

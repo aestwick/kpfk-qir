@@ -56,7 +56,7 @@ export default function PeoplePage() {
 
   const [draft, setDraft] = useState(name || q)
   useEffect(() => setDraft(name || q), [name, q])
-  const debounce = useRef<ReturnType<typeof setTimeout>>()
+  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   function search(v: string, now = false) {
     setDraft(v)
     clearTimeout(debounce.current)

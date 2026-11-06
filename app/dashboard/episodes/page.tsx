@@ -117,7 +117,7 @@ export default function EpisodesPage() {
 
   const [textFilterLocal, setTextFilterLocal] = useState(textFilterParam)
   useEffect(() => setTextFilterLocal(textFilterParam), [textFilterParam])
-  const textDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const textDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   function setTextFilter(v: string) {
     setTextFilterLocal(v)
     clearTimeout(textDebounceRef.current)
@@ -125,7 +125,7 @@ export default function EpisodesPage() {
   }
 
   // Debounce text filter updates to URL
-  const showDebounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const showDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   function setShowFilter(v: string) {
     setShowFilterLocal(v)

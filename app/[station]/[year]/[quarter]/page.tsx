@@ -21,11 +21,12 @@ async function resolveStation(slug: string): Promise<{ id: string; name: string 
   return data ?? null
 }
 
-export async function generateMetadata({
-  params,
-}: {
-  params: { station: string; year: string; quarter: string }
-}): Promise<Metadata> {
+export async function generateMetadata(
+  props: {
+    params: Promise<{ station: string; year: string; quarter: string }>
+  }
+): Promise<Metadata> {
+  const params = await props.params;
   const year = parseYearSegment(params.year)
   const quarter = parseQuarterSegment(params.quarter)
   const station = await resolveStation(params.station)
@@ -68,11 +69,12 @@ function groupByCategory(entries: QirEntry[]): Record<string, QirEntry[]> {
   return grouped
 }
 
-export default async function PublicQirPage({
-  params,
-}: {
-  params: { station: string; year: string; quarter: string }
-}) {
+export default async function PublicQirPage(
+  props: {
+    params: Promise<{ station: string; year: string; quarter: string }>
+  }
+) {
+  const params = await props.params;
   const year = parseYearSegment(params.year)
   const quarter = parseQuarterSegment(params.quarter)
 
@@ -102,7 +104,7 @@ export default async function PublicQirPage({
 
   // Audit the (often anonymous) public report view. Fire-and-forget; no JWT here
   // so the actor is recorded as 'anonymous'. IP/UA come from the request headers.
-  const h = headers()
+  const h = await headers()
   const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() ?? h.get('x-real-ip') ?? null
   void logAuditEvent({
     action: AUDIT_ACTIONS.REPORT_READ,

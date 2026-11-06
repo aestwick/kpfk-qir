@@ -63,7 +63,7 @@ export default function SearchPage() {
   const update = (updates: Record<string, string>) => setUrl({ relaxed: '', ...updates })
 
   // Typing updates the URL after a pause; Enter searches immediately.
-  const debounce = useRef<ReturnType<typeof setTimeout>>()
+  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   function onType(v: string) {
     setDraft(v)
     clearTimeout(debounce.current)

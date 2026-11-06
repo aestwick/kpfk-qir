@@ -29,7 +29,7 @@ Background workers (BullMQ + Redis) process episodes through each stage. An hour
 
 ## Stack
 
-- **Next.js 14** (App Router) — dashboard UI + API routes + public QIR pages
+- **Next.js 15.5** (App Router, React 19) — dashboard UI + API routes + public QIR pages. Route `params`/`searchParams` and `headers()`/`cookies()` are async (await them); `lib/api-handler.ts#withApiKey` awaits `params` for every `/api/v1` route
 - **Supabase** (PostgreSQL + Auth) — all persistent state
 - **BullMQ + Redis** — background job queues with hourly cron
 - **Groq API** (whisper-large-v3-turbo by default; per-station choice) — audio transcription

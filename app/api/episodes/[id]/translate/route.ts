@@ -4,10 +4,8 @@ import { getStationContext, stationErrorResponse, requireRole } from '@/lib/auth
 import { bumpCacheVersion } from '@/lib/api-cache'
 import { logTranslationUsage } from '@/lib/usage'
 
-export async function POST(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)

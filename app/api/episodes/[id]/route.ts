@@ -10,10 +10,8 @@ export const dynamic = 'force-dynamic'
 
 const isDualField = (k: string): k is DualField => (DUAL_FIELDS as string[]).includes(k)
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
@@ -127,10 +125,8 @@ async function invalidatePublicApiCache(stationId: string): Promise<void> {
   ])
 }
 
-export async function PATCH(
-  request: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const result = await getStationContext(request)
     if (result.error) return stationErrorResponse(result.error)
