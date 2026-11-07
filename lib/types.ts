@@ -307,7 +307,7 @@ export type ApiScope = 'qir' | 'episodes' | 'transcripts' | 'shows' | 'usage'
 export interface ComplianceFlag {
   id: number
   episode_id: number
-  flag_type: 'profanity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id' | 'indecency'
+  flag_type: 'profanity' | 'station_id_missing' | 'technical' | 'payola_plugola' | 'sponsor_id' | 'indecency' | 'rerun'
   severity: 'info' | 'warning' | 'critical'
   excerpt: string | null
   timestamp_seconds: number | null

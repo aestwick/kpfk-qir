@@ -13,6 +13,7 @@ import { resolveGroupDisplayName, resolveShowDisplayName, showGroupKey, DEFAULT_
 import { generatePassphrase } from '@/lib/passphrase'
 import type { StationMember, StationRole } from '@/lib/types'
 import { episodeHref } from '@/lib/nav'
+import { COMPLIANCE_CHECK_DEFAULTS } from '@/lib/compliance-status'
 import type { CorrectionForm } from '@/app/components/transcript-corrections'
 
 /* ─── lazy-loaded corrections component ─── */
@@ -180,7 +181,7 @@ export default function SettingsPage() {
   const [savingMode, setSavingMode] = useState(false)
   // Transcription provider order/toggles + which keys are configured server-side.
   const [providers, setProviders] = useState<ProviderRow[]>([])
-  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>({})
+  const [providerStatus, setProviderStatus] = useState<Record<string, boolean>>(COMPLIANCE_CHECK_DEFAULTS)
   const [diarizationEnabled, setDiarizationEnabled] = useState(true)
   const [discoveryAutoActivate, setDiscoveryAutoActivate] = useState(false)
   const [savingProviders, setSavingProviders] = useState(false)
@@ -330,7 +331,7 @@ export default function SettingsPage() {
       setDiarizationEnabled(data.settings?.diarization_enabled !== false)
       setDiscoveryAutoActivate(data.settings?.discovery_auto_activate === true)
       if (data.settings?.compliance_checks_enabled) {
-        setComplianceChecks(data.settings.compliance_checks_enabled as Record<string, boolean>)
+        setComplianceChecks({ ...COMPLIANCE_CHECK_DEFAULTS, ...(data.settings.compliance_checks_enabled as Record<string, boolean>) })
       }
       if (data.settings?.compliance_prompt) {
         setCompliancePrompt(data.settings.compliance_prompt as string)
@@ -1952,6 +1953,7 @@ export default function SettingsPage() {
               { key: 'payola_plugola', label: 'Payola/Plugola', cost: '~$0.002/ep' },
               { key: 'sponsor_id', label: 'Sponsor ID', cost: '~$0.002/ep' },
               { key: 'indecency', label: 'Indecency/Sexual Content', cost: '~$0.002/ep' },
+              { key: 'rerun', label: 'Rerun (80%+ match) + disclosure', cost: 'Free' },
             ].map(({ key, label, cost }) => (
               <button
                 key={key}

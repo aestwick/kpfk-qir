@@ -94,6 +94,7 @@ const FLAG_LABELS: Record<string, string> = {
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
   indecency: 'Indecency',
+  rerun: 'Rerun',
 }
 
 /* ─── helpers ─── */

@@ -7,6 +7,11 @@ import { getComplianceChecksEnabled, getComplianceModel, getCompliancePrompt, ge
 import { getStation } from '../lib/stations'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { wordPattern, wordOccurrences, restrictedHoursCheck, type RestrictedAt, type WordOccurrence } from '../lib/compliance-match'
+import { fetchAllRows } from '../lib/fetch-all'
+import { isSecondaryFeed } from '../lib/broadcast-day'
+import {
+  FINGERPRINT_VERSION, LOOKBACK_DAYS, fingerprint, bestMatch, airedEarlier, findDisclosures, rerunFlagFields, type PriorAiring,
+} from '../lib/rerun'
 
 interface ComplianceFlagInsert {
   episode_id: number
@@ -381,6 +386,132 @@ async function runAiComplianceCheck(
   return { flags, inputTokens, outputTokens }
 }
 
+// ---------------------------------------------------------------------------
+// Rerun check (lib/rerun.ts). Compares this episode's transcript fingerprint
+// with every earlier airing of the same show (show_group, all feeds) over the
+// last LOOKBACK_DAYS; at >= RERUN_THRESHOLD overlap it looks for an on-air
+// rerun announcement. Fingerprints are cached in transcript_fingerprints and
+// computed lazily, so the first check of a long-running show reads its
+// back-catalogue once and every later check reads a few KB per prior.
+// The online feed (`2<prefix>_…`) is ignored on both sides: it isn't broadcast,
+// and it re-publishes on-air shows (and podcasts ahead of air) by design.
+// ---------------------------------------------------------------------------
+
+type GroupIndex = { groupOf: Map<string, string>; keysOf: Map<string, string[]>; nameOf: Map<string, string | null> }
+
+async function loadShowGroups(stationId: string): Promise<GroupIndex> {
+  const rows = await fetchAllRows<{ key: string; show_group: string | null; display_name: string | null; feed_name: string | null; show_name: string | null }>(
+    'show_keys',
+    (from, to) => supabaseAdmin.from('show_keys').select('key, show_group, display_name, feed_name, show_name').eq('station_id', stationId).order('key').range(from, to),
+  )
+  const groupOf = new Map<string, string>()
+  const keysOf = new Map<string, string[]>()
+  const nameOf = new Map<string, string | null>()
+  for (const r of rows) {
+    const g = r.show_group ?? r.key
+    groupOf.set(r.key, g)
+    keysOf.set(g, [...(keysOf.get(g) ?? []), r.key])
+    nameOf.set(r.key, r.display_name ?? r.feed_name ?? r.show_name ?? null)
+  }
+  return { groupOf, keysOf, nameOf }
+}
+
+function chunk<T>(xs: T[], n: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n))
+  return out
+}
+
+/** Fingerprints for `ids`, from the cache where current, else computed from the
+ *  transcript and stored. Episodes with no transcript are simply absent. */
+async function loadFingerprints(ids: number[]): Promise<Map<number, number[]>> {
+  const out = new Map<number, number[]>()
+  for (const part of chunk(ids, 200)) {
+    const { data, error } = await supabaseAdmin
+      .from('transcript_fingerprints')
+      .select('episode_id, version, fingerprint')
+      .in('episode_id', part)
+    if (error) throw new Error(`Failed to load fingerprints: ${error.message}`)
+    for (const r of data ?? []) if (r.version === FINGERPRINT_VERSION) out.set(r.episode_id, (r.fingerprint as (number | string)[]).map(Number))
+  }
+  const missing = ids.filter((id) => !out.has(id))
+  for (const part of chunk(missing, 20)) {
+    const texts = new Map<number, string>()
+    const { data, error } = await supabaseAdmin.from('transcripts').select('episode_id, transcript').in('episode_id', part)
+    if (error) throw new Error(`Failed to load transcripts for fingerprints: ${error.message}`)
+    for (const t of data ?? []) if (t.transcript) texts.set(t.episode_id, t.transcript)
+    const rows = Array.from(texts, ([episode_id, text]) => ({ episode_id, version: FINGERPRINT_VERSION, fingerprint: fingerprint(text), computed_at: new Date().toISOString() }))
+    if (rows.length > 0) {
+      const { error } = await supabaseAdmin.from('transcript_fingerprints').upsert(rows, { onConflict: 'episode_id' })
+      if (error) console.warn(`[compliance] fingerprint cache write failed: ${error.message}`)
+    }
+    for (const r of rows) out.set(r.episode_id, r.fingerprint)
+  }
+  return out
+}
+
+function daysBefore(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+async function runRerunCheck(
+  stationId: string,
+  mp3Prefix: string,
+  groups: GroupIndex,
+  episode: { id: number; show_key: string; air_date: string | null; air_start: string | null; mp3_url: string | null },
+  transcript: string,
+  vttCues: VttCue[],
+): Promise<ComplianceFlagInsert[]> {
+  if (!episode.air_date || isSecondaryFeed(episode.mp3_url, mp3Prefix)) return []
+  const group = groups.groupOf.get(episode.show_key) ?? episode.show_key
+  const keys = groups.keysOf.get(group) ?? [episode.show_key]
+
+  const candidates = await fetchAllRows<{ id: number; show_key: string; air_date: string | null; air_start: string | null; mp3_url: string | null }>(
+    'rerun priors',
+    (from, to) => supabaseAdmin
+      .from('episode_log')
+      .select('id, show_key, air_date, air_start, mp3_url')
+      .eq('station_id', stationId)
+      .in('show_key', keys)
+      .gte('air_date', daysBefore(episode.air_date!, LOOKBACK_DAYS))
+      .lte('air_date', episode.air_date!)
+      .neq('id', episode.id)
+      .order('id')
+      .range(from, to),
+  )
+  const priorRows = candidates.filter((p) => !isSecondaryFeed(p.mp3_url, mp3Prefix) && airedEarlier(episode, p))
+  if (priorRows.length === 0) return []
+
+  // Always from the current text (a re-transcribe replaces it), and cached for
+  // the episodes that will later be compared against this one.
+  const fp = fingerprint(transcript)
+  const { error: fpErr } = await supabaseAdmin
+    .from('transcript_fingerprints')
+    .upsert({ episode_id: episode.id, version: FINGERPRINT_VERSION, fingerprint: fp, computed_at: new Date().toISOString() }, { onConflict: 'episode_id' })
+  if (fpErr) console.warn(`[compliance] fingerprint cache write failed: ${fpErr.message}`)
+  const fps = await loadFingerprints(priorRows.map((p) => p.id))
+  const priors: (PriorAiring & { show_name: string | null })[] = priorRows
+    .filter((p) => fps.has(p.id))
+    .map((p) => ({ id: p.id, air_date: p.air_date, air_start: p.air_start, fingerprint: fps.get(p.id)!, show_name: groups.nameOf.get(p.show_key) ?? null }))
+
+  const match = bestMatch(fp, priors)
+  if (!match) return []
+
+  const { data: orig } = await supabaseAdmin.from('transcripts').select('transcript').eq('episode_id', match.prior.id).maybeSingle()
+  const disclosures = findDisclosures(transcript, orig?.transcript ?? '')
+  const f = rerunFlagFields(episode, match as typeof match & { prior: (typeof priors)[number] }, transcript, disclosures)
+  return [{
+    episode_id: episode.id,
+    flag_type: 'rerun',
+    severity: f.severity,
+    excerpt: f.excerpt,
+    timestamp_seconds: f.disclosureText ? findTimestampForText(vttCues, f.disclosureText) : null,
+    details: f.details,
+  }]
+}
+
 export async function processCompliance(job: Job) {
   // Service-role client bypasses RLS, so the station_id filter is the only guard.
   const stationId = job.data?.stationId as string | undefined
@@ -468,6 +599,9 @@ export async function processCompliance(job: Job) {
     }
   }
 
+  // Show → show_group index for the rerun check (one read per batch).
+  const showGroups = checksEnabled.rerun !== false ? await loadShowGroups(stationId) : null
+
   let checked = 0
 
   for (let i = 0; i < episodes.length; i++) {
@@ -524,6 +658,12 @@ export async function processCompliance(job: Job) {
         if (aiResult.inputTokens > 0) {
           await logComplianceUsage(stationId, episode.id, aiResult.inputTokens, aiResult.outputTokens, complianceModel)
         }
+      }
+
+      // 5. Rerun check — ≥80% of the transcript matches an earlier airing of the
+      // same show; then was it announced on air? Free (no AI).
+      if (showGroups) {
+        allFlags.push(...await runRerunCheck(stationId, station.mp3_filename_prefix ?? station.slug, showGroups, episode, data.transcript, vttCues))
       }
 
       // Reconcile against existing flags rather than wiping them: when this run

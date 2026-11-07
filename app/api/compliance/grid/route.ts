@@ -14,10 +14,10 @@ import { fetchAllRows } from '@/lib/fetch-all'
 
 export const dynamic = 'force-dynamic'
 
-// The 6 compliance_flags types; `summary_discrepancy` is a synthetic 7th source
+// The 7 compliance_flags types; `summary_discrepancy` is a synthetic 7th source
 // (episode_log.compliance_report), not a real flag row. See spec §6.1.
 const FLAG_TYPES = new Set([
-  'profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency',
+  'profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency', 'rerun',
 ])
 const DISCREPANCY_TYPE = 'summary_discrepancy'
 

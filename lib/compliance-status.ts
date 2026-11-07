@@ -42,6 +42,20 @@ export const FLAG_TYPE_LABELS: Record<string, string> = {
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID Missing',
   indecency: 'Indecency',
+  rerun: 'Rerun',
+}
+
+// Default on/off for each check when compliance_checks_enabled doesn't name it.
+// Stored settings are merged OVER these, so a check added later (rerun) is on
+// for stations whose saved toggles predate it.
+export const COMPLIANCE_CHECK_DEFAULTS: Record<string, boolean> = {
+  profanity: true,
+  station_id_missing: true,
+  technical: true,
+  payola_plugola: true,
+  sponsor_id: true,
+  indecency: true,
+  rerun: true,
 }
 
 export function flagTypeLabel(type: string): string {

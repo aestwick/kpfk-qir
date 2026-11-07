@@ -3,6 +3,7 @@ import { getStation } from './stations'
 import { fetchAllRows } from './fetch-all'
 import { resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from './openai-models'
 import { resolveGroqModel } from './groq-models'
+import { COMPLIANCE_CHECK_DEFAULTS } from './compliance-status'
 
 const settingsCache = new Map<string, { value: unknown; fetchedAt: number }>()
 const CACHE_TTL_MS = 60_000 // 1 minute
@@ -199,14 +200,8 @@ export async function getEmbeddingModel(stationId: string): Promise<string> {
 }
 
 export async function getComplianceChecksEnabled(stationId: string): Promise<Record<string, boolean>> {
-  return (await getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId)) ?? {
-    profanity: true,
-    station_id_missing: true,
-    technical: true,
-    payola_plugola: true,
-    sponsor_id: true,
-    indecency: true,
-  }
+  const stored = await getSetting<Record<string, boolean>>('compliance_checks_enabled', stationId)
+  return { ...COMPLIANCE_CHECK_DEFAULTS, ...(stored ?? {}) }
 }
 
 // Which OpenAI model runs the AI compliance pass. Global-only like the

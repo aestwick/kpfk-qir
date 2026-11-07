@@ -81,6 +81,7 @@ const FLAG_TYPE_LABELS: Record<string, string> = {
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID Missing',
   indecency: 'Indecency',
+  rerun: 'Rerun',
 }
 
 const SEVERITY_COLORS: Record<string, string> = {

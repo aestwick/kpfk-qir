@@ -10,7 +10,7 @@ import { Breadcrumbs } from '@/app/components/breadcrumbs'
 import { withFrom, locationFrom } from '@/lib/nav'
 import { useToast } from '@/app/components/toast'
 import { DAY_NAMES_SHORT } from '@/lib/compliance-grid'
-import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, type ReviewStatus } from '@/lib/compliance-status'
+import { REVIEW_STATUS_LABELS, REVIEW_STATUS_BADGE, COMPLIANCE_CHECK_DEFAULTS, type ReviewStatus } from '@/lib/compliance-status'
 import { getQuarterOptions as getQuarterRange } from '@/lib/quarters'
 
 interface ComplianceFlag {
@@ -76,7 +76,7 @@ const STATUS_FILTER_OPTIONS: { value: string; label: string }[] = [
 // Status transitions offered as quick actions, given the flag's current status.
 const STATUS_ACTIONS: ReviewStatus[] = ['investigating', 'violation', 'dismissed', 'suggested']
 
-const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency'] as const
+const FLAG_TYPES = ['profanity', 'station_id_missing', 'technical', 'payola_plugola', 'sponsor_id', 'indecency', 'rerun'] as const
 const SEVERITIES = ['info', 'warning', 'critical']
 
 // Quarter filter options. Value is `YYYY-Q` (split on `-` below into year/quarter
@@ -98,6 +98,7 @@ const typeLabels: Record<string, string> = {
   payola_plugola: 'Payola/Plugola',
   sponsor_id: 'Sponsor ID',
   indecency: 'Indecency',
+  rerun: 'Rerun',
 }
 
 function formatTimestamp(seconds: number | null): string {
@@ -202,7 +203,7 @@ export default function CompliancePage() {
 
   // Check toggles — per-flag-type map matching DB schema
   const [checkToggles, setCheckToggles] = useState<Record<string, boolean>>({
-    profanity: true, station_id_missing: true, technical: true, payola_plugola: true, sponsor_id: true, indecency: true,
+    ...COMPLIANCE_CHECK_DEFAULTS,
   })
   const [blocking, setBlocking] = useState(false)
   // Centralized compliance config (prompt, checks default, blocking, global
@@ -320,7 +321,7 @@ export default function CompliancePage() {
       setCompliancePrompt((s.compliance_prompt as string) ?? '')
       // compliance_checks_enabled is a JSON object: { profanity: true, station_id_missing: true, ... }
       if (s.compliance_checks_enabled && typeof s.compliance_checks_enabled === 'object') {
-        setCheckToggles(s.compliance_checks_enabled as Record<string, boolean>)
+        setCheckToggles({ ...COMPLIANCE_CHECK_DEFAULTS, ...(s.compliance_checks_enabled as Record<string, boolean>) })
       }
       setBlocking(s.compliance_blocking === 'true' || s.compliance_blocking === true)
     }).catch(() => {})

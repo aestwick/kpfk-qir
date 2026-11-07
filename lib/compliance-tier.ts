@@ -9,7 +9,7 @@
 //   C  Safe harbor  aired 10pm–6am, when the FCC allows indecent and profane
 //                   (never obscene) speech; acknowledge, keep for the record
 //   D  Other        not an on-air language question: sponsor / payola,
-//                   technical, station ID
+//                   technical, station ID, rerun
 //
 // "High-risk" means the words behind FCC profanity enforcement (the seven
 // words and their forms). The FCC publishes no list and context decides —
@@ -26,7 +26,7 @@ export const TIER_LABELS: Record<Tier, { title: string; rule: string }> = {
   A: { title: 'Listen now', rule: '6am–10pm, high-risk word or indecency' },
   B: { title: 'Glance', rule: '6am–10pm, other listed words' },
   C: { title: 'Safe harbor', rule: '10pm–6am, allowed by the FCC' },
-  D: { title: 'Other checks', rule: 'Sponsor, payola, technical, station ID' },
+  D: { title: 'Other checks', rule: 'Sponsor, payola, technical, station ID, rerun' },
 }
 
 // Stems of the high-risk words. "fuck" and "shit" count anywhere in a word,
