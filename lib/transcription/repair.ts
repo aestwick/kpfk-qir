@@ -10,6 +10,13 @@
 // existing active rules; new rules only exist once a person creates or
 // approves them, so nothing reaches stored text without a human decision.
 //
+// The cached English translation (english_transcript / english_vtt, written by
+// app/api/episodes/[id]/translate) was made from the OLD text, so a repair that
+// changes an episode nulls it; the next translate request rebuilds it from the
+// corrected text. Re-applying the rule to the English copy instead would only
+// be right when the rule's text survives translation verbatim (names usually
+// do, phrases don't) — a re-translation is a few cents of gpt-4o-mini on demand.
+//
 // Text-only: no audio is re-transcribed. Idempotent: re-running finds nothing
 // left to change. Summaries are not rewritten (re-summarize regenerates them).
 // Known limit: no lock against the transcribe worker — a re-transcription that
@@ -166,7 +173,13 @@ export async function backfillPendingCorrections(
 
     const { error: upError } = await client
       .from('transcripts')
-      .update({ transcript: after, vtt: vttAfter })
+      .update({
+        transcript: after,
+        vtt: vttAfter,
+        // Stale: translated from the uncorrected text (see header).
+        english_transcript: null,
+        english_vtt: null,
+      })
       .eq('episode_id', episodeId)
     if (upError) throw new Error(`episode ${episodeId}: ${upError.message}`)
     // Captions changed: move the episode in the public feed's updated_since
