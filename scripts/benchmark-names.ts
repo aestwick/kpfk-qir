@@ -14,6 +14,7 @@
 //   npm run benchmark-names -- --rescore    # score cached runs only, no API
 //   npm run benchmark-names -- --fresh      # ignore cache, re-transcribe
 //   npm run benchmark-names -- --model whisper-large-v3
+//   npm run benchmark-names -- --fixture scripts/data/names-benchmark-staff.json
 // Output: terminal summary + reports/names-benchmark/<model>/report.md
 
 import { execFile } from 'child_process'
@@ -57,7 +58,11 @@ const opt = (f: string) => {
   return i >= 0 ? args[i + 1] : undefined
 }
 const MODEL = resolveGroqModel(opt('--model') ?? DEFAULT_GROQ_MODEL)
-const OUT = path.join(process.cwd(), 'reports', 'names-benchmark', MODEL)
+// --fixture <path> runs another episode set; its results get their own folder so
+// the caches of the two sets never mix.
+const FIXTURE = opt('--fixture')
+const FIXTURE_PATH = FIXTURE ? path.resolve(FIXTURE) : path.join(__dirname, 'data', 'names-benchmark.json')
+const OUT = path.join(process.cwd(), 'reports', 'names-benchmark', MODEL, ...(FIXTURE ? [path.basename(FIXTURE, '.json')] : []))
 
 async function cutChunk(ep: Episode, dir: string): Promise<string> {
   const out = path.join(dir, `ep${ep.id}_c${ep.chunk}.m4a`)
@@ -103,7 +108,7 @@ const sum = (scores: NameScore[]) => scores.reduce((a, s) => ({ right: a.right +
 let STATION_TERMS: string[] = []
 
 async function main() {
-  const fixture: Fixture = JSON.parse(await fs.readFile(path.join(__dirname, 'data', 'names-benchmark.json'), 'utf8'))
+  const fixture: Fixture = JSON.parse(await fs.readFile(FIXTURE_PATH, 'utf8'))
   STATION_TERMS = fixture.stationTerms
   await fs.mkdir(OUT, { recursive: true })
   const audioDir = path.join(os.tmpdir(), 'qir-names-benchmark')

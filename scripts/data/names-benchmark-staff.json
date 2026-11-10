@@ -1,0 +1,355 @@
+{
+  "stationTerms": [
+    "KPFK",
+    "Pacifica Radio",
+    "Ace Estwick",
+    "Maggie LePique",
+    "Mark Maxwell",
+    "Dan Pavlish",
+    "Casey J. Adler",
+    "Arnella Barbara"
+  ],
+  "episodes": [
+    {
+      "id": 9763,
+      "show": "counterspin",
+      "kind": "talk",
+      "chunk": 1,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_261012_163000counterspin.mp3",
+      "hint": [
+        "Casey J. Adler"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        },
+        {
+          "name": "Casey J. Adler",
+          "variants": [
+            "Casey J. Adlar",
+            "Casey J Adler"
+          ]
+        },
+        {
+          "name": "Dan Pavlish",
+          "variants": [
+            "Dan Pavlis",
+            "Dan Pavlich",
+            "Dan Pavlik"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10461,
+      "show": "makingcontact",
+      "kind": "talk",
+      "chunk": 1,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_261102_160000makingcontact.mp3",
+      "hint": [
+        "Casey J. Adler",
+        "Dan Pavlish"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        },
+        {
+          "name": "Casey J. Adler",
+          "variants": [
+            "Casey J. Adlar",
+            "Casey J Adler"
+          ]
+        },
+        {
+          "name": "Dan Pavlish",
+          "variants": [
+            "Dan Pavlis",
+            "Dan Pavlich",
+            "Dan Pavlik"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10230,
+      "show": "makingcontact",
+      "kind": "talk",
+      "chunk": 1,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_261026_160000makingcontact.mp3",
+      "hint": [
+        "Stephanie Sharp",
+        "Dan Pavlish"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        },
+        {
+          "name": "Dan Pavlish",
+          "variants": [
+            "Dan Pavlis",
+            "Dan Pavlich",
+            "Dan Pavlik"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10486,
+      "show": "qrcode",
+      "kind": "talk",
+      "chunk": 3,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_261103_060000qrcode.mp3",
+      "hint": [
+        "Ramses Ja",
+        "Q Ward"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7400,
+      "show": "caryharrisfiles",
+      "kind": "talk",
+      "chunk": 1,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_260731_100000caryharrisfiles.mp3",
+      "hint": [
+        "Cary Harrison"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10433,
+      "show": "darkstardeadmusic",
+      "kind": "music",
+      "chunk": 1,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_261101_200000darkstardeadmusic.mp3",
+      "hint": [
+        "Arnella Barbara"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        },
+        {
+          "name": "Maggie LePique",
+          "variants": [
+            "Maggie LaPique",
+            "Maggie Lapique",
+            "Maggie LaPeake",
+            "Maggie LaPeak",
+            "Maggie Lapika",
+            "Maggie LaPete",
+            "Maggie Lapik"
+          ]
+        },
+        {
+          "name": "Arnella Barbara",
+          "variants": [
+            "Arnella Barber",
+            "Arnella Barbera",
+            "Arnela Barbara",
+            "Arnella Barba"
+          ]
+        },
+        {
+          "name": "Casey J. Adler",
+          "variants": [
+            "Casey J. Adlar",
+            "Casey J Adler"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9993,
+      "show": "gv_derek",
+      "kind": "music",
+      "chunk": 6,
+      "mp3": "https://archive.kpfk.org/mp3/kpfk_261019_110000gv_derek.mp3",
+      "hint": [
+        "Maggie LePique",
+        "Arnella Barbara"
+      ],
+      "names": [
+        {
+          "name": "Ace Estwick",
+          "variants": [
+            "Ace Eastwick",
+            "Acey Eastwick",
+            "ACE Eastwick",
+            "Ace Eastwic",
+            "Case Estwick"
+          ]
+        },
+        {
+          "name": "Maggie LePique",
+          "variants": [
+            "Maggie LaPique",
+            "Maggie Lapique",
+            "Maggie LaPeake",
+            "Maggie LaPeak",
+            "Maggie Lapika",
+            "Maggie LaPete",
+            "Maggie Lapik"
+          ]
+        }
+      ]
+    }
+  ],
+  "rules": {
+    "existing": [],
+    "suggested": [
+      {
+        "show": null,
+        "variant": "Ace Eastwick",
+        "correct": "Ace Estwick"
+      },
+      {
+        "show": null,
+        "variant": "Acey Eastwick",
+        "correct": "Ace Estwick"
+      },
+      {
+        "show": null,
+        "variant": "ACE Eastwick",
+        "correct": "Ace Estwick"
+      },
+      {
+        "show": null,
+        "variant": "Ace Eastwic",
+        "correct": "Ace Estwick"
+      },
+      {
+        "show": null,
+        "variant": "Case Estwick",
+        "correct": "Ace Estwick"
+      },
+      {
+        "show": null,
+        "variant": "Maggie LaPique",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Maggie Lapique",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Maggie LaPeake",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Maggie LaPeak",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Maggie Lapika",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Maggie LaPete",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Maggie Lapik",
+        "correct": "Maggie LePique"
+      },
+      {
+        "show": null,
+        "variant": "Dan Pavlis",
+        "correct": "Dan Pavlish"
+      },
+      {
+        "show": null,
+        "variant": "Dan Pavlich",
+        "correct": "Dan Pavlish"
+      },
+      {
+        "show": null,
+        "variant": "Dan Pavlik",
+        "correct": "Dan Pavlish"
+      },
+      {
+        "show": null,
+        "variant": "Arnella Barber",
+        "correct": "Arnella Barbara"
+      },
+      {
+        "show": null,
+        "variant": "Arnella Barbera",
+        "correct": "Arnella Barbara"
+      },
+      {
+        "show": null,
+        "variant": "Arnela Barbara",
+        "correct": "Arnella Barbara"
+      },
+      {
+        "show": null,
+        "variant": "Arnella Barba",
+        "correct": "Arnella Barbara"
+      },
+      {
+        "show": null,
+        "variant": "Mark Maxwel",
+        "correct": "Mark Maxwell"
+      }
+    ]
+  }
+}
