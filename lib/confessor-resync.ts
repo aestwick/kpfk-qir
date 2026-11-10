@@ -16,9 +16,9 @@
  * A pinned field still gets its human copy refreshed so the dashboard shows the
  * current upstream value; the pinned choice keeps driving the flat column.
  *
- * Re-summarize (opt-in, `resummarize: true`): when a write moves the RESOLVED
- * host or guest of a published episode — the two values the summarizer is fed —
- * the episode is sent back through summarize (status → transcribed, priority so
+ * Re-summarize (opt-in, `resummarize: true`): when a write changes anything the
+ * summarizer is fed (lib/summarize-input.ts: resolved host/guest, producer notes,
+ * producer issue tags) on a published episode, it is sent back through summarize (status → transcribed, priority so
  * the current-quarter window can't strand it; compliance clears priority when it
  * re-checks). The AI copies are regenerated; pinned/manual choices still win.
  *
@@ -32,7 +32,6 @@
 import { supabaseAdmin } from './supabase'
 import { fetchConfessorEpisodes, normalizeConfessorMp3Url, projectPubfile } from './confessor'
 import {
-  aiInputsChanged,
   applyHuman,
   seedMissingFromFlat,
   type DualField,
@@ -42,6 +41,7 @@ import { logAuditEvent, AUDIT_ACTIONS } from './audit'
 import { fetchAllRows } from './fetch-all'
 import { PUBLISHED_STATUSES } from './episode-feed'
 import { summarizeQueue } from './queue'
+import { summarizeInputs, summarizeInputsChanged } from './summarize-input'
 import type { ConfessorPubfile } from './types'
 
 export interface ResyncOptions {
@@ -124,7 +124,7 @@ async function writeEpisode(
 ): Promise<WriteResult> {
   const { data: fresh, error: readErr } = await supabaseAdmin
     .from('episode_log')
-    .select('field_sources, host, guest, issue_category, summary, status, updated_at')
+    .select('field_sources, host, guest, issue_category, summary, human_summary, status, updated_at')
     .eq('id', episode.id)
     .maybeSingle()
 
@@ -139,6 +139,7 @@ async function writeEpisode(
     guest: string | null
     issue_category: string | null
     summary: string | null
+    human_summary: string | null
     status: string
     updated_at: string
   }
@@ -151,7 +152,13 @@ async function writeEpisode(
   // Only a published episode is sent back: anything earlier in the pipeline
   // will be summarized with the new host/guest anyway, and a failed one is
   // auto-retry's business.
-  const rerun = resummarize && PUBLISHED.has(f.status) && aiInputsChanged(beforeFlat, flat)
+  const rerun =
+    resummarize &&
+    PUBLISHED.has(f.status) &&
+    summarizeInputsChanged(
+      summarizeInputs({ ...beforeFlat, human_summary: f.human_summary, field_sources: f.field_sources }),
+      summarizeInputs({ ...flat, human_summary: humanSummary, field_sources: fieldSources }),
+    )
   const now = new Date().toISOString()
 
   const { data: updated, error: upErr } = await supabaseAdmin

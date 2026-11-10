@@ -9,6 +9,7 @@ import { buildEpisodeEmbeddingRows, storeEpisodeEmbeddings, EPISODE_EMBEDDING_FI
 import { refreshSearchVocab } from '../lib/transcript-search'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { applyAi, FieldSources } from '../lib/field-sources'
+import { buildSummarizeUserMessage, summarizeInputs } from '../lib/summarize-input'
 
 interface SummaryResponse {
   headline: string
@@ -146,11 +147,8 @@ export async function processSummarize(job: Job) {
       // Air date/time are derived deterministically from the archive MP3 filename
       // at ingest (parseMp3Url + dateFieldsFromUrl) and stored as episode metadata,
       // so they're ground truth and don't need to go through the summarizer.
-      const userMessage = `Show: ${episode.show_name || ''}
-Host(s): ${episode.host || ''}
-Guest(s): ${episode.guest || ''}
-Transcript:
-${transcriptText}`
+      // Producer notes + issue tags from Confessor ride along (lib/summarize-input.ts).
+      const userMessage = buildSummarizeUserMessage(episode.show_name, summarizeInputs(episode), transcriptText)
 
       // Retry with exponential backoff on transient errors
       let response: OpenAI.Chat.Completions.ChatCompletion | null = null

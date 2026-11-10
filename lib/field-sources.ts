@@ -202,25 +202,3 @@ export function hasConflict(choice: FieldChoice | undefined | null): boolean {
   return nonEmpty(choice.human) && nonEmpty(choice.ai) && choice.human!.trim() !== choice.ai!.trim()
 }
 
-/**
- * The dual fields the summarizer reads as INPUT (workers/summarize.ts puts the
- * resolved host + guest in front of the transcript). When a Confessor re-sync
- * moves either resolved value, the AI copies were written from stale input and
- * are worth regenerating; a change only to the human summary or issue tags is
- * not — those reach the flat columns directly and the model never sees them.
- */
-export const AI_INPUT_FIELDS: DualField[] = ['host', 'guest']
-
-const norm = (s: string | null | undefined): string => (s ?? '').trim()
-
-/**
- * True when a re-sync changed what the summarizer would be told. Compares the
- * RESOLVED (flat) values, not the human copies: a pinned/manual field keeps its
- * flat value however the upstream copy moves, so it never triggers a re-run.
- */
-export function aiInputsChanged(
-  before: Partial<Record<DualField, string | null>>,
-  after: Partial<Record<DualField, string | null>>,
-): boolean {
-  return AI_INPUT_FIELDS.some((f) => norm(before[f]) !== norm(after[f]))
-}

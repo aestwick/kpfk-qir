@@ -12,8 +12,8 @@ import { resyncConfessor } from '../lib/confessor-resync'
  *
  * Without a stationId the job is a dispatcher (cron) and fans out one job per
  * station that has a Confessor host. 60 days = Confessor's own `fil` window, so
- * every episode still re-readable is re-read every night. Episodes whose
- * resolved host/guest moved are re-summarized (lib docs explain why only those).
+ * every episode still re-readable is re-read every night. Episodes where anything
+ * the summarizer sees changed are re-summarized (lib/summarize-input.ts).
  */
 export const RESYNC_DAYS = 60
 /** Rows asked of Confessor per show: a daily show airs ~60 times in 60 days. */
