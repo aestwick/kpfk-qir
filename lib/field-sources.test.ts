@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  aiInputsChanged,
   applyAi,
   applyHuman,
   buildHumanFieldSources,
@@ -8,6 +9,7 @@ import {
   seedMissingFromFlat,
   setFieldChoice,
   type DualField,
+  type FieldSources,
 } from './field-sources'
 
 const human = (over: Partial<Record<'host' | 'guest' | 'issue_category' | 'summary', string | null>> = {}) => ({
@@ -225,5 +227,35 @@ describe('setFieldChoice — toggling back to manual', () => {
     const edited = setFieldChoice(null, 'guest', 'manual', 'Jane Doe')
     const cleared = setFieldChoice(edited.fieldSources, 'guest', 'manual', null)
     expect(cleared.fieldSources.guest?.manual).toBeNull()
+  })
+})
+
+describe('aiInputsChanged', () => {
+  it('is true when the resolved guest moves', () => {
+    expect(aiInputsChanged({ host: 'A', guest: null }, { host: 'A', guest: 'Shirin Neshat' })).toBe(true)
+  })
+  it('is true when the resolved host moves', () => {
+    expect(aiInputsChanged({ host: 'A', guest: 'G' }, { host: 'B', guest: 'G' })).toBe(true)
+  })
+  it('ignores summary / issue_category changes — the model never sees them', () => {
+    expect(
+      aiInputsChanged(
+        { host: 'A', guest: 'G', summary: 'old', issue_category: 'Health' },
+        { host: 'A', guest: 'G', summary: 'new', issue_category: 'Education' },
+      ),
+    ).toBe(false)
+  })
+  it('treats whitespace and null/empty as equal', () => {
+    expect(aiInputsChanged({ host: ' A ', guest: null }, { host: 'A', guest: '' })).toBe(false)
+  })
+  it('does not fire for a pinned field whose human copy changed (flat value held)', () => {
+    const before = { host: 'A', guest: 'Shirin Neshat', issue_category: null, summary: null }
+    const seeded: FieldSources = {
+      host: { human: 'A', ai: 'A', active: 'human' },
+      guest: { human: null, ai: 'Shireen Nishat', manual: 'Shirin Neshat', active: 'manual', pinned: true },
+    }
+    const { flat } = applyHuman(seeded, { host: 'A', guest: 'Shireen N.', issue_category: null, summary: null })
+    expect(flat.guest).toBe('Shirin Neshat')
+    expect(aiInputsChanged(before, flat)).toBe(false)
   })
 })

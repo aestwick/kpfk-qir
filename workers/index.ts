@@ -7,6 +7,7 @@ import { processGenerateQir } from './generate-qir'
 import { processAutoRetry } from './auto-retry'
 import { processDiscoverSync } from './discover-sync'
 import { processCorrections } from './corrections'
+import { processConfessorResync } from './confessor-resync'
 import { isPipelinePaused } from '../lib/settings'
 import { jobPriority } from '../lib/tier'
 import { continuationData, ZERO_PROGRESS_BACKOFF_MS } from '../lib/job-chain'
@@ -277,6 +278,28 @@ correctionsWorker.on('failed', (job, err) => {
   console.error(`[corrections] failed:`, err.message)
 })
 
+// -- Confessor Re-sync Worker --
+// Nightly: re-reads Confessor for the last 60 days and pulls producers' after-air
+// edits onto existing episodes (ingest is insert-only). Re-summarizes episodes
+// whose host/guest moved. Per-station pause is enforced in the processor.
+const confessorResyncQueue = new Queue('confessor-resync', {
+  connection,
+  defaultJobOptions: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 },
+})
+const confessorResyncWorker = new Worker('confessor-resync', processConfessorResync, {
+  connection,
+  concurrency: 1,
+})
+confessorResyncWorker.on('completed', (job) => {
+  const r = (job.returnvalue ?? {}) as Record<string, unknown>
+  if (r.dispatched != null) console.log(`[confessor-resync] dispatched ${r.dispatched} station(s)`)
+  else if (r.skipped) console.log(`[confessor-resync] skipped (${r.skipped})`)
+  else console.log(`[confessor-resync] ${r.station} — ${r.written} updated, ${r.resummarized} re-summarized (${r.matched} matched, ${r.failedShows} show(s) unreadable)`)
+})
+confessorResyncWorker.on('failed', (job, err) => {
+  console.error(`[confessor-resync] failed:`, err.message)
+})
+
 // -- Cron Schedules --
 async function setupCron() {
   // Remove any existing repeatable jobs first
@@ -290,6 +313,9 @@ async function setupCron() {
   }
   for (const job of await correctionsQueue.getRepeatableJobs()) {
     await correctionsQueue.removeRepeatableByKey(job.key)
+  }
+  for (const job of await confessorResyncQueue.getRepeatableJobs()) {
+    await confessorResyncQueue.removeRepeatableByKey(job.key)
   }
   const existingDiscover = await discoverSyncQueue.getRepeatableJobs()
   for (const job of existingDiscover) {
@@ -328,10 +354,20 @@ async function setupCron() {
     }
   )
 
+  await confessorResyncQueue.add(
+    'confessor-resync-cron',
+    {},
+    {
+      // daily at 11:23 UTC (~3–4am Pacific): after producers' evening edits.
+      repeat: { pattern: '23 11 * * *' },
+    }
+  )
+
   console.log('[cron] hourly ingest scheduled at minute :02')
   console.log('[cron] auto-retry scheduled every 4 hours at minute :17')
   console.log('[cron] archive discovery sync scheduled daily at 06:37')
   console.log('[cron] transcript-name upkeep scheduled daily at 03:47')
+  console.log('[cron] Confessor re-sync scheduled daily at 11:23 UTC')
 }
 
 setupCron().catch(console.error)
@@ -410,6 +446,7 @@ async function shutdown() {
     generateQirWorker.close(),
     autoRetryWorker.close(),
     discoverSyncWorker.close(),
+    confessorResyncWorker.close(),
   ])
   process.exit(0)
 }

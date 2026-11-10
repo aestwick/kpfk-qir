@@ -41,3 +41,5 @@ export const autoRetryQueue = lazyQueue('auto-retry', { attempts: 1 })
 export const discoverSyncQueue = lazyQueue('discover-sync', { attempts: 1 })
 // Transcript-name upkeep: rule backfill + nightly miner (workers/corrections.ts).
 export const correctionsQueue = lazyQueue('corrections', { attempts: 1 })
+// Nightly Confessor re-sync of after-air human metadata (workers/confessor-resync.ts).
+export const confessorResyncQueue = lazyQueue('confessor-resync', { attempts: 1 })
