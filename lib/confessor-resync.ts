@@ -41,6 +41,7 @@ import { logAuditEvent, AUDIT_ACTIONS } from './audit'
 import { fetchAllRows } from './fetch-all'
 import { PUBLISHED_STATUSES } from './episode-feed'
 import { summarizeQueue } from './queue'
+import { getExcludedCategories } from './settings'
 import { summarizeInputs, summarizeInputsChanged } from './summarize-input'
 import type { ConfessorPubfile } from './types'
 
@@ -121,10 +122,11 @@ async function writeEpisode(
   humanSummary: string | null,
   human: Record<DualField, string | null>,
   resummarize: boolean,
+  excludedCategories: string[],
 ): Promise<WriteResult> {
   const { data: fresh, error: readErr } = await supabaseAdmin
     .from('episode_log')
-    .select('field_sources, host, guest, issue_category, summary, human_summary, status, updated_at')
+    .select('field_sources, host, guest, issue_category, summary, human_summary, status, category, updated_at')
     .eq('id', episode.id)
     .maybeSingle()
 
@@ -141,6 +143,7 @@ async function writeEpisode(
     summary: string | null
     human_summary: string | null
     status: string
+    category: string | null
     updated_at: string
   }
   const beforeFlat = { host: f.host, guest: f.guest, issue_category: f.issue_category, summary: f.summary }
@@ -152,8 +155,13 @@ async function writeEpisode(
   // Only a published episode is sent back: anything earlier in the pipeline
   // will be summarized with the new host/guest anyway, and a failed one is
   // auto-retry's business.
+  // The summarizer never claims an excluded category (workers/summarize.ts,
+  // priority or not), so resetting one to `transcribed` would strand it
+  // unpublished. Same substring semantics as the summarizer.
+  const excluded = excludedCategories.some((exc) => f.category?.includes(exc))
   const rerun =
     resummarize &&
+    !excluded &&
     PUBLISHED.has(f.status) &&
     summarizeInputsChanged(
       summarizeInputs({ ...beforeFlat, human_summary: f.human_summary, field_sources: f.field_sources }),
@@ -228,6 +236,8 @@ export async function resyncConfessor(stationId: string, opts: ResyncOptions): P
   const byUrl = new Map<string, EpisodeRow>()
   for (const e of episodes) byUrl.set(e.mp3_url, e)
 
+  const excludedCategories = opts.resummarize ? await getExcludedCategories(station.id) : []
+
   const showKeys = opts.show ? [opts.show] : Array.from(new Set(episodes.map((e) => e.show_key)))
 
   const report: ResyncReport = {
@@ -300,7 +310,7 @@ export async function resyncConfessor(stationId: string, opts: ResyncOptions): P
       for (const f of changed) report.byField[f] = (report.byField[f] ?? 0) + 1
 
       if (opts.apply) {
-        const w = await writeEpisode(episode, row.pubfile ?? null, proj.humanSummary, human, opts.resummarize)
+        const w = await writeEpisode(episode, row.pubfile ?? null, proj.humanSummary, human, opts.resummarize, excludedCategories)
         if (w.result === 'written') {
           report.written++
           if (w.resummarized) report.resummarized.push(episode.public_id)

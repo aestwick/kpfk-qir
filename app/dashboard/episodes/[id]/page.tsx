@@ -474,7 +474,9 @@ export default function EpisodeDetailPage() {
 
   const seekToRef = useRef<SeekToFn | null>(null)
 
-  const fetchEpisode = useCallback(async () => {
+  // keepDrafts: refresh the episode (e.g. field provenance after an inline
+  // host/guest save) without overwriting unsaved summary/category edits.
+  const fetchEpisode = useCallback(async (opts?: { keepDrafts?: boolean }) => {
     const [epRes, flagsRes] = await Promise.all([
       authedFetch(`/api/episodes/${id}`),
       authedFetch(`/api/compliance?episode_id=${id}`),
@@ -483,8 +485,10 @@ export default function EpisodeDetailPage() {
       const data = await epRes.json()
       setEpisode(data.episode)
       setTranscript(data.transcript)
-      setEditSummary(data.episode.summary ?? '')
-      setEditCategory(data.episode.issue_category ?? '')
+      if (!opts?.keepDrafts) {
+        setEditSummary(data.episode.summary ?? '')
+        setEditCategory(data.episode.issue_category ?? '')
+      }
       setHumanSummaryRepeats(data.humanSummaryRepeats ?? 0)
     }
     if (flagsRes.ok) {
@@ -794,8 +798,9 @@ export default function EpisodeDetailPage() {
                 onSaved={(newValue) => {
                   setEpisode((prev) => prev ? { ...prev, [item.editable!]: newValue || null } : prev)
                   // The save also records a manual override in field_sources;
-                  // refetch so the Human/AI card shows it instead of the stale copy.
-                  fetchEpisode()
+                  // refetch so the Human/AI card shows it instead of the stale copy —
+                  // keeping any unsaved summary/category draft in the editor.
+                  fetchEpisode({ keepDrafts: true })
                 }}
               />
             ) : (
