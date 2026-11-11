@@ -227,3 +227,4 @@ describe('setFieldChoice — toggling back to manual', () => {
     expect(cleared.fieldSources.guest?.manual).toBeNull()
   })
 })
+

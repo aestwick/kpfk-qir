@@ -201,3 +201,4 @@ export function hasConflict(choice: FieldChoice | undefined | null): boolean {
   if (!choice) return false
   return nonEmpty(choice.human) && nonEmpty(choice.ai) && choice.human!.trim() !== choice.ai!.trim()
 }
+

@@ -128,7 +128,7 @@ function InlineEditField({
   onSaved,
 }: {
   value: string
-  field: 'host' | 'guest'
+  field: 'host' | 'guest' | 'headline'
   episodeId: string
   onSaved: (newValue: string) => void
 }) {
@@ -474,7 +474,9 @@ export default function EpisodeDetailPage() {
 
   const seekToRef = useRef<SeekToFn | null>(null)
 
-  const fetchEpisode = useCallback(async () => {
+  // keepDrafts: refresh the episode (e.g. field provenance after an inline
+  // host/guest save) without overwriting unsaved summary/category edits.
+  const fetchEpisode = useCallback(async (opts?: { keepDrafts?: boolean }) => {
     const [epRes, flagsRes] = await Promise.all([
       authedFetch(`/api/episodes/${id}`),
       authedFetch(`/api/compliance?episode_id=${id}`),
@@ -483,8 +485,10 @@ export default function EpisodeDetailPage() {
       const data = await epRes.json()
       setEpisode(data.episode)
       setTranscript(data.transcript)
-      setEditSummary(data.episode.summary ?? '')
-      setEditCategory(data.episode.issue_category ?? '')
+      if (!opts?.keepDrafts) {
+        setEditSummary(data.episode.summary ?? '')
+        setEditCategory(data.episode.issue_category ?? '')
+      }
       setHumanSummaryRepeats(data.humanSummaryRepeats ?? 0)
     }
     if (flagsRes.ok) {
@@ -793,6 +797,10 @@ export default function EpisodeDetailPage() {
                 episodeId={id}
                 onSaved={(newValue) => {
                   setEpisode((prev) => prev ? { ...prev, [item.editable!]: newValue || null } : prev)
+                  // The save also records a manual override in field_sources;
+                  // refetch so the Human/AI card shows it instead of the stale copy —
+                  // keeping any unsaved summary/category draft in the editor.
+                  fetchEpisode({ keepDrafts: true })
                 }}
               />
             ) : (
@@ -851,7 +859,14 @@ export default function EpisodeDetailPage() {
       {/* Summary & Category Editor */}
       <div className="bg-white dark:bg-surface-raised rounded-lg shadow dark:shadow-card-dark p-4 space-y-3">
         <h3 className="font-semibold text-sm text-gray-500 dark:text-warm-400 uppercase">Summary & Category</h3>
-        {episode.headline && <p className="font-medium">{episode.headline}</p>}
+        <div className="font-medium">
+          <InlineEditField
+            value={episode.headline ?? ''}
+            field="headline"
+            episodeId={id}
+            onSaved={(newValue) => setEpisode((prev) => prev ? { ...prev, headline: newValue || null } : prev)}
+          />
+        </div>
         <textarea
           value={editSummary}
           onChange={(e) => setEditSummary(e.target.value)}
