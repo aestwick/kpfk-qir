@@ -5,8 +5,7 @@
 --
 -- Idempotent and non-clobbering: only rows whose category is still null are set,
 -- so a later hand edit in Settings → Shows is never overwritten on re-run.
--- Still undecided (left null): codepinradio, swanapodcast (Local vs National),
--- allabove (music vs talk).
+-- Still undecided (left null): allabove (music vs talk).
 
 with kpfk as (select id from stations where slug = 'kpfk'),
 mapping(key, category) as (
@@ -37,7 +36,10 @@ mapping(key, category) as (
     ('larb',                  'Arts & Entertainment'),
     ('rockprofile',           'Arts & Entertainment'),
     -- Español
-    ('traveltips',            'Español')
+    ('traveltips',            'Español'),
+    -- Public Affairs
+    ('codepinradio',          'Public Affairs - National+Syndicated'),
+    ('swanapodcast',          'Public Affairs - Local')
 )
 update show_keys sk
 set category = m.category
