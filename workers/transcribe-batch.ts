@@ -20,7 +20,7 @@ import type { Job } from 'bullmq'
 import { supabaseAdmin } from '../lib/supabase'
 import { getTranscriptionBatchSettings, isPipelinePaused, isVocabularyHintEnabled } from '../lib/settings'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
-import { summarizeQueue } from '../lib/queue'
+import { summarizeQueue, transcribeQueue } from '../lib/queue'
 import { jobPriority } from '../lib/tier'
 import { pickBatchCandidates, fitsBatchSizeLimit, type BatchSettings } from '../lib/transcription/batch-policy'
 import {
@@ -71,6 +71,24 @@ async function returnToSync(stationId: string, ids: number[], reason: string) {
     .eq('station_id', stationId)
     .in('id', ids)
     .eq('status', 'batch_queued')
+}
+
+/**
+ * Return a batch's episodes to sync AND start a transcribe run for them, carrying
+ * the batch's window: a historical backfill's chain may already have ended, and
+ * the startup/4-hourly kick only covers the current quarter, so without this a
+ * returned backfill episode would sit in pending forever. The processor enforces
+ * pause; the stage lock makes an overlapping run a no-op.
+ */
+async function returnRowToSync(row: BatchRow, ids: number[], reason: string) {
+  if (!ids.length) return
+  await returnToSync(row.station_id, ids, reason)
+  const window = row.job_window ? { window: row.job_window } : {}
+  await transcribeQueue.add(
+    'batch-fallback',
+    { stationId: row.station_id, ...window, source: 'chain', chain: true },
+    { priority: await jobPriority(row.station_id) },
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -235,8 +253,19 @@ export async function processBatchPoll(_job: Job) {
     try {
       collected += await pollOne(row)
     } catch (err) {
-      // One bad batch must not block the others; it's retried next tick.
-      console.error(`[transcribe:batch] poll of batch ${row.id} failed:`, err instanceof Error ? err.message : err)
+      // One bad batch must not block the others; it's retried next tick — until
+      // the give-up age. A batch Groq can no longer return (getBatch or the file
+      // download failing every tick) must not hold its episodes forever.
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[transcribe:batch] poll of batch ${row.id} failed:`, msg)
+      if (Date.now() - Date.parse(row.submitted_at) > SUBMITTED_GIVE_UP_MS) {
+        try {
+          await returnRowToSync(row, row.episode_ids, `Groq batch unreadable after 72h — sent to normal transcription: ${msg}`)
+          await closeRow(row, { status: 'failed', error: `gave up after 72h: ${msg}`.slice(0, 1000), returned_to_sync: row.episode_ids.length })
+        } catch (giveUpErr) {
+          console.error(`[transcribe:batch] give-up of batch ${row.id} failed:`, giveUpErr instanceof Error ? giveUpErr.message : giveUpErr)
+        }
+      }
     }
   }
   const swept = await sweepStranded()
@@ -254,7 +283,7 @@ async function pollOne(row: BatchRow): Promise<number> {
 
   if (row.status === 'submitting' || !row.provider_batch_id) {
     if (age < SUBMITTING_STALE_MS) return 0
-    await returnToSync(row.station_id, row.episode_ids, 'Batch submit never completed — sent to normal transcription')
+    await returnRowToSync(row, row.episode_ids, 'Batch submit never completed — sent to normal transcription')
     await closeRow(row, { status: 'failed', error: 'stuck in submitting', returned_to_sync: row.episode_ids.length })
     return 0
   }
@@ -262,7 +291,7 @@ async function pollOne(row: BatchRow): Promise<number> {
   const remote = await getBatch(row.provider_batch_id)
   if (!isTerminalBatchStatus(remote.status)) {
     if (age > SUBMITTED_GIVE_UP_MS) {
-      await returnToSync(row.station_id, row.episode_ids, `Groq batch ${remote.status} after 72h — sent to normal transcription`)
+      await returnRowToSync(row, row.episode_ids, `Groq batch ${remote.status} after 72h — sent to normal transcription`)
       await closeRow(row, { status: 'failed', provider_status: remote.status, error: 'gave up after 72h', returned_to_sync: row.episode_ids.length })
     } else {
       await closeRow(row, { provider_status: remote.status })
@@ -281,11 +310,15 @@ async function pollOne(row: BatchRow): Promise<number> {
 
   const corrections = await loadCorrectionRules(supabaseAdmin, row.station_id)
   const { groupOf } = await loadShowGroups(supabaseAdmin, row.station_id)
-  const { data: eps } = await supabaseAdmin
+  const { data: eps, error: epsErr } = await supabaseAdmin
     .from('episode_log')
     .select('id, show_key, duration, status')
     .eq('station_id', row.station_id)
     .in('id', row.episode_ids)
+  // Throw rather than close the batch on an empty read: closing it would let the
+  // sweep send already-paid results back to be transcribed (and paid for) again.
+  // The poll loop leaves the batch open and retries next tick.
+  if (epsErr) throw new Error(`episode read for batch ${row.id}: ${epsErr.message}`)
 
   let transcribed = 0
   const back: number[] = []
@@ -312,7 +345,7 @@ async function pollOne(row: BatchRow): Promise<number> {
   const why = remote.status === 'completed'
     ? 'Groq batch item failed — sent to normal transcription'
     : `Groq batch ${remote.status} — sent to normal transcription`
-  await returnToSync(row.station_id, back, reasons[0] ? `${why}: ${reasons[0]}` : why)
+  await returnRowToSync(row, back, reasons[0] ? `${why}: ${reasons[0]}` : why)
   await closeRow(row, {
     status: remote.status === 'completed' || transcribed > 0 ? 'collected' : 'failed',
     provider_status: remote.status,
