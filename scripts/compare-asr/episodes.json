@@ -1,0 +1,14 @@
+{
+  "_comment": "Default test set for scripts/compare-asr (KPFK, picked 2026-11-21 from episode_log, read-only). One 15-minute excerpt per episode at the same offsets for both pipelines. Override with --episodes <id,id,...> [--start <sec>] [--duration <sec>].",
+  "station": "kpfk",
+  "start_sec": 120,
+  "duration_sec": 900,
+  "episodes": [
+    { "id": 11015, "role": "News / public-affairs talk" },
+    { "id": 10892, "role": "Name-heavy interview" },
+    { "id": 10986, "role": "Spanish-language (Español category)" },
+    { "id": 10898, "role": "Music" },
+    { "id": 11004, "role": "Call-in" },
+    { "id": 10932, "role": "Confessor host/guest metadata filled in" }
+  ]
+}
