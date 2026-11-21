@@ -1,7 +1,10 @@
 import { Job } from 'bullmq'
 import { supabaseAdmin } from '../lib/supabase'
 import { listStationIds } from '../lib/stations'
-import { autoRetryQueue } from '../lib/queue'
+import { autoRetryQueue, transcribeQueue, summarizeQueue } from '../lib/queue'
+import { isPipelinePaused } from '../lib/settings'
+import { getProcessingWindowBounds } from '../lib/quarters'
+import { jobPriority } from '../lib/tier'
 
 const MAX_RETRY_COUNT = 3
 // How long an episode may sit in a transient processing status before it's
@@ -11,7 +14,7 @@ const MAX_RETRY_COUNT = 3
 // handles the common crash case immediately, so this is just a safety net.
 const STUCK_MINUTES = 60
 
-export async function processAutoRetry(job: Job) {
+async function recoverAndRetry(job: Job) {
   const stationId = job.data?.stationId as string | undefined
   const recoverAll = job.data?.recoverAll === true
 
@@ -104,4 +107,50 @@ export async function processAutoRetry(job: Job) {
 
   console.log(`[auto-retry] reset ${retryIds.length} episodes to pending`)
   return { retried: retryIds.length, dead: deadEpisodes?.length ?? 0, recovered }
+}
+
+export async function processAutoRetry(job: Job) {
+  const result = await recoverAndRetry(job)
+  const stationId = job.data?.stationId as string | undefined
+  if (stationId) await kickWaitingWork(stationId)
+  return result
+}
+
+/**
+ * Start the chain for work that is already waiting. Transcription otherwise only
+ * starts when ingest finds a NEW episode, so after a restart (2026-11-21: 74
+ * pending sat idle after `docker restart qir-worker`) or after this job resets
+ * failed episodes to pending, nothing ran until the next new airing. Runs at
+ * startup (after orphan recovery) and on the 4-hourly tick. Cheap when idle:
+ * two head counts. Stage locks make a kick that overlaps a running chain a no-op.
+ */
+async function kickWaitingWork(stationId: string) {
+  try {
+    if (await isPipelinePaused(stationId)) return
+    const { start, end } = getProcessingWindowBounds()
+    const inWindow = `priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`
+    const count = async (status: string) => {
+      const { count: n } = await supabaseAdmin
+        .from('episode_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('station_id', stationId)
+        .eq('status', status)
+        .or(inWindow)
+      return n ?? 0
+    }
+    const [pending, transcribed] = await Promise.all([count('pending'), count('transcribed')])
+    const priority = await jobPriority(stationId)
+    // source 'chain' + chain: true → transcribe hands off to summarize → compliance.
+    if (pending > 0) {
+      await transcribeQueue.add('auto-retry-kick', { stationId, source: 'chain', chain: true }, { priority })
+    }
+    if (transcribed > 0) {
+      await summarizeQueue.add('auto-retry-kick', { stationId, source: 'chain', chain: true }, { priority })
+    }
+    if (pending || transcribed) {
+      console.log(`[auto-retry] kicked waiting work for station ${stationId}: ${pending} pending, ${transcribed} transcribed`)
+    }
+  } catch (err) {
+    console.error(`[auto-retry] kick failed for station ${stationId}:`, err instanceof Error ? err.message : err)
+  }
 }
