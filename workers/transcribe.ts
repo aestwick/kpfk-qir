@@ -12,6 +12,7 @@ import { getProcessingWindowBounds } from '../lib/quarters'
 import { logAuditEvent, AUDIT_ACTIONS } from '../lib/audit'
 import { withStationStageLock } from '../lib/locks'
 import { resolveProviderPlan, runTranscription, AudioUnavailableError } from '../lib/transcription'
+import type { TranscriptionResult } from '../lib/transcription/types'
 import { buildVtt } from '../lib/transcription/vtt'
 import { applyCorrections, correctionsForEpisode } from '../lib/transcription/corrections'
 import { replaceEpisodeCues } from '../lib/transcription/cues'
@@ -20,6 +21,7 @@ import { loadCorrectionRules, loadShowGroups, loadVocabulary, episodeHumanNames 
 import { buildVocabularyPrompt, shouldUseVocabularyHint } from '../lib/transcription/vocabulary'
 import { bumpCacheVersion } from '../lib/api-cache'
 import { withDeadline } from '../lib/deadline'
+import { submitBacklogBatch } from './transcribe-batch'
 
 const execFileAsync = promisify(execFile)
 
@@ -96,6 +98,104 @@ function makeChunkLoader(mp3Url: string, tmpDir: string): () => Promise<string[]
   }
 }
 
+type StoredEpisode = { id: number; show_key: string; duration: number | null }
+
+/**
+ * Persist one finished transcription: corrections → transcript + VTT → status
+ * `transcribed` → search cues → usage. Shared by the sync path below and the
+ * Groq batch collector (workers/transcribe-batch.ts) so both produce identical
+ * rows. Returns the audio duration in seconds. `batch` prices usage at the
+ * batch rate and tags it.
+ */
+export async function storeTranscriptionResult(
+  stationId: string,
+  episode: StoredEpisode,
+  result: TranscriptionResult,
+  corrections: Awaited<ReturnType<typeof loadCorrectionRules>>,
+  groupOf: Awaited<ReturnType<typeof loadShowGroups>>['groupOf'],
+  opts: { batch?: boolean } = {},
+): Promise<number> {
+  // Stitch and apply corrections — station-wide rules plus any scoped to THIS
+  // episode (episode_id) or THIS show (show_key, any feed of its group).
+  // Speaker labels (when diarized) go into the VTT as voice spans; the plain
+  // transcript stays speaker-free for summarize.
+  const episodeCorrections = correctionsForEpisode(corrections, episode.id, episode.show_key, groupOf)
+  const correctedTranscript = applyCorrections(result.text, episodeCorrections)
+  const vtt = buildVtt(result.segments, episodeCorrections, result.diarized)
+  const totalDuration = result.durationSec
+
+  // Store transcript — check for errors before marking episode as transcribed
+  const { error: upsertError } = await supabaseAdmin.from('transcripts').upsert(
+    {
+      episode_id: episode.id,
+      transcript: correctedTranscript,
+      vtt,
+      language: result.language,
+      provider: result.providerId,
+      model: result.model,
+      english_transcript: null,
+      english_vtt: null,
+    },
+    { onConflict: 'episode_id' }
+  )
+
+  if (upsertError) {
+    throw new Error(`Failed to store transcript: ${upsertError.message}`)
+  }
+
+  // Verify transcript was actually stored before updating status
+  const { count: transcriptCount } = await supabaseAdmin
+    .from('transcripts')
+    .select('episode_id', { count: 'exact', head: true })
+    .eq('episode_id', episode.id)
+
+  if (!transcriptCount || transcriptCount === 0) {
+    throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
+  }
+
+  // A transcript was (re)written: orphan the public API's cached caption
+  // bodies so a re-transcription (e.g. after a corrections change) reaches
+  // consumers now, not after the transcripts route's 1h TTL. 'episodes'
+  // too — the episode detail route can embed the transcript. Fire-and-
+  // forget best-effort like the rest of the cache layer (fails open).
+  void bumpCacheVersion(stationId, 'transcripts')
+  void bumpCacheVersion(stationId, 'episodes')
+
+  // Update episode status. Fill duration when it's missing (a backfill, or any
+  // RSS feed that omitted itunes:duration, ships a null duration) — transcription
+  // knows the true audio length. Never overwrite an existing duration.
+  const durationMinutes =
+    episode.duration == null && Number.isFinite(totalDuration)
+      ? Math.max(1, Math.round(totalDuration / 60))
+      : undefined
+  await supabaseAdmin
+    .from('episode_log')
+    .update({
+      status: 'transcribed',
+      error_message: null,
+      ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', episode.id)
+
+  // Populate timed search cues from the VTT (best-effort — never fail the
+  // episode over auxiliary search data).
+  try {
+    await replaceEpisodeCues(supabaseAdmin, episode.id, vtt)
+  } catch (cueErr) {
+    console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
+  }
+
+  // Log usage against the provider that actually ran (cost is provider-rated).
+  await logTranscriptionUsage(stationId, episode.id, totalDuration, {
+    provider: result.providerId,
+    model: result.model,
+    metadata: { diarized: result.diarized, ...(opts.batch ? { batch: true } : {}) },
+    batch: opts.batch,
+  })
+  return totalDuration
+}
+
 export async function processTranscribe(job: Job) {
   // Workers run with the service-role client (RLS bypassed), so the station_id
   // filter below is the ONLY guard against processing another station's episodes.
@@ -153,7 +253,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   // id+category over one window is small, so fetching all then slicing is cheap.
   const { data: candidates, error } = await supabaseAdmin
     .from('episode_log')
-    .select('id, category')
+    .select('id, category, created_at, priority, batch_attempted_at')
     .eq('station_id', stationId)
     .eq('status', 'pending')
     .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
@@ -174,7 +274,21 @@ async function runTranscribeBatch(job: Job, stationId: string) {
     console.log('[transcribe] no claimable pending episodes')
     return { transcribed: 0, remaining: false }
   }
-  const claimIds = claimable.slice(0, batchSize).map((ep) => ep.id)
+
+  // Backlog? Send the episodes that have already waited to Groq's Batch API at
+  // half price (lib/transcription/batch-policy.ts); the rest — fresh episodes,
+  // files over Groq's size limit, anything batch already returned — carry on
+  // below on the fast path. Groq-only, so skipped when Groq isn't in the plan.
+  // Never throws: any batch trouble leaves those episodes pending for sync.
+  const batched = providerPlan.some((p) => p.id === 'groq')
+    ? await submitBacklogBatch(job, stationId, claimable, groqModel)
+    : new Set<number>()
+  const syncClaimable = batched.size ? claimable.filter((ep) => !batched.has(ep.id)) : claimable
+  if (!syncClaimable.length) {
+    console.log(`[transcribe] all ${batched.size} claimable episode(s) went to Groq batch`)
+    return { transcribed: 0, remaining: false, batched: batched.size }
+  }
+  const claimIds = syncClaimable.slice(0, batchSize).map((ep) => ep.id)
 
   // Atomically claim: the `.eq('status', 'pending')` guard means only rows still
   // pending are flipped to 'transcribing', so overlapping runs (manual retry,
@@ -236,84 +350,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
         providerPlan,
       ), EPISODE_TRANSCRIBE_DEADLINE_MS, `transcription of episode ${episode.id}`)
 
-      // Stitch and apply corrections — station-wide rules plus any scoped to THIS
-      // episode (episode_id) or THIS show (show_key, any feed of its group).
-      // Speaker labels (when diarized) go into the VTT as voice spans; the plain
-      // transcript stays speaker-free for summarize.
-      const episodeCorrections = correctionsForEpisode(corrections, episode.id, episode.show_key, groupOf)
-      const correctedTranscript = applyCorrections(result.text, episodeCorrections)
-      const vtt = buildVtt(result.segments, episodeCorrections, result.diarized)
-      const totalDuration = result.durationSec
-
-      // Store transcript — check for errors before marking episode as transcribed
-      const { error: upsertError } = await supabaseAdmin.from('transcripts').upsert(
-        {
-          episode_id: episode.id,
-          transcript: correctedTranscript,
-          vtt,
-          language: result.language,
-          provider: result.providerId,
-          model: result.model,
-          english_transcript: null,
-          english_vtt: null,
-        },
-        { onConflict: 'episode_id' }
-      )
-
-      if (upsertError) {
-        throw new Error(`Failed to store transcript: ${upsertError.message}`)
-      }
-
-      // Verify transcript was actually stored before updating status
-      const { count: transcriptCount } = await supabaseAdmin
-        .from('transcripts')
-        .select('episode_id', { count: 'exact', head: true })
-        .eq('episode_id', episode.id)
-
-      if (!transcriptCount || transcriptCount === 0) {
-        throw new Error('Transcript upsert succeeded but row not found — possible constraint or RLS issue')
-      }
-
-      // A transcript was (re)written: orphan the public API's cached caption
-      // bodies so a re-transcription (e.g. after a corrections change) reaches
-      // consumers now, not after the transcripts route's 1h TTL. 'episodes'
-      // too — the episode detail route can embed the transcript. Fire-and-
-      // forget best-effort like the rest of the cache layer (fails open).
-      void bumpCacheVersion(stationId, 'transcripts')
-      void bumpCacheVersion(stationId, 'episodes')
-
-      // Update episode status. Fill duration when it's missing (a backfill, or any
-      // RSS feed that omitted itunes:duration, ships a null duration) — transcription
-      // knows the true audio length. Never overwrite an existing duration.
-      const durationMinutes =
-        episode.duration == null && Number.isFinite(totalDuration)
-          ? Math.max(1, Math.round(totalDuration / 60))
-          : undefined
-      await supabaseAdmin
-        .from('episode_log')
-        .update({
-          status: 'transcribed',
-          error_message: null,
-          ...(durationMinutes !== undefined ? { duration: durationMinutes } : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', episode.id)
-
-      // Populate timed search cues from the VTT (best-effort — never fail the
-      // episode over auxiliary search data).
-      try {
-        await replaceEpisodeCues(supabaseAdmin, episode.id, vtt)
-      } catch (cueErr) {
-        console.warn(`[transcribe] ep ${episode.id} cue population failed:`, cueErr instanceof Error ? cueErr.message : cueErr)
-      }
-
-      // Log usage against the provider that actually ran (cost is provider-rated).
-      await logTranscriptionUsage(stationId, episode.id, totalDuration, {
-        provider: result.providerId,
-        model: result.model,
-        metadata: { diarized: result.diarized },
-      })
-
+      const totalDuration = await storeTranscriptionResult(stationId, episode, result, corrections, groupOf)
       transcribed++
       console.log(`[transcribe] ep ${episode.id} done via ${result.providerId} (${Math.round(totalDuration)}s${result.diarized ? ', diarized' : ''})`)
     } catch (err) {
@@ -357,9 +394,9 @@ async function runTranscribeBatch(job: Job, stationId: string) {
   // episodes are already part of `claimable` (the candidate query pulls them in),
   // so this in-memory check covers them too. The continue job re-queries fresh, so
   // a slight over-estimate just costs one extra empty tick.
-  const remaining = claimable.length > claimIds.length
+  const remaining = syncClaimable.length > claimIds.length
   if (remaining) {
-    console.log(`[transcribe] ${claimable.length - claimIds.length} more claimable pending — will continue`)
+    console.log(`[transcribe] ${syncClaimable.length - claimIds.length} more claimable pending — will continue`)
   }
 
   if (transcribed > 0) {

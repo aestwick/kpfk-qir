@@ -577,8 +577,22 @@ async function buildDashboard(
     // are reported so the Home page can say which one is on.
     ...(await (async () => {
       const [g, st] = await Promise.all([isPipelinePaused(), isStationPaused(stationId)])
-      const transcriptionStall = await getTranscriptionStall(supabase, stationId, g || st)
-      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st, transcriptionStall }
+      const [transcriptionStall, inBatch] = await Promise.all([
+        getTranscriptionStall(supabase, stationId, g || st),
+        // Backlog episodes waiting on a Groq half-price batch (workers/transcribe-batch.ts).
+        supabase
+          .from('transcription_batches')
+          .select('episode_ids, submitted_at')
+          .eq('station_id', stationId)
+          .in('status', ['submitting', 'submitted'])
+          .order('submitted_at', { ascending: true })
+          .then(({ data }) => {
+            const rows = data ?? []
+            const count = rows.reduce((n, r) => n + ((r.episode_ids as number[] | null)?.length ?? 0), 0)
+            return count ? { count, since: rows[0].submitted_at as string } : null
+          }, () => null),
+      ])
+      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st, transcriptionStall, transcriptionBatch: inBatch }
     })()),
   })
 }

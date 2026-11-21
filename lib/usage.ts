@@ -1,7 +1,7 @@
 import { supabaseAdmin } from './supabase'
 import { DEFAULT_CHAT_MODEL, chatModelCost } from './openai-models'
 import { DEFAULT_GROQ_MODEL } from './groq-models'
-import { transcriptionCostPerSecond } from './transcription/pricing'
+import { transcriptionCostPerSecond, GROQ_BATCH_DISCOUNT } from './transcription/pricing'
 
 // usage_log.station_id is NOT NULL — every row must carry the tenant it belongs
 // to. These inserts are best-effort (a logging failure must never fail the
@@ -29,11 +29,12 @@ export async function logTranscriptionUsage(
   stationId: string,
   episodeId: number,
   durationSeconds: number,
-  options?: { provider?: string; model?: string; metadata?: Record<string, unknown> }
+  options?: { provider?: string; model?: string; metadata?: Record<string, unknown>; batch?: boolean }
 ) {
   const provider = options?.provider ?? 'groq'
   const model = options?.model ?? DEFAULT_GROQ_MODEL
-  const estimatedCost = durationSeconds * transcriptionCostPerSecond(provider, model)
+  const rate = transcriptionCostPerSecond(provider, model) * (options?.batch ? GROQ_BATCH_DISCOUNT : 1)
+  const estimatedCost = durationSeconds * rate
 
   await insertUsage({
     station_id: stationId,

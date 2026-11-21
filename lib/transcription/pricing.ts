@@ -11,6 +11,12 @@ const FLAT_COST_PER_SECOND: Record<string, number> = {
   assemblyai: 0.12 / 3600, // ~$0.12 / hr (Universal) — estimate
 }
 
+/**
+ * Groq Batch API: 50% off the synchronous rate (console.groq.com/docs/batch,
+ * checked 2026-11). Applied by logTranscriptionUsage when `batch` is set.
+ */
+export const GROQ_BATCH_DISCOUNT = 0.5
+
 /** Unknown providers price at zero rather than mispricing. */
 export function transcriptionCostPerSecond(provider: string, model?: string | null): number {
   if (provider === 'groq') return groqCostPerSecond(model)
