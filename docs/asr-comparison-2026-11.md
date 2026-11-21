@@ -232,12 +232,19 @@ Forcing Spanish has a cost of its own: Pacifica reduced the English song to a si
 
 ## Listening packet
 
-`reports/asr-compare/listening-packet.html` is in the PR artifacts, not committed. Regenerate it
-with the README steps. It has the **10 biggest disagreements per episode**, longest first. Each
-row has the time into the original MP3, an inline player that plays just that span from
-archive.kpfk.org, QIR's text, Pacifica's text, and a "who's right?" pick (QIR / Pacifica / both
-OK / neither) with a note field. The picks stay in your browser, and "Copy results" puts them on
-the clipboard as a table. The same rows are in `reports/asr-compare/report.md`.
+The packet is published as a private page: https://claude.ai/artifact/Gv7vjUhhqxmB5zpjkT3tq9.
+Share it from the page's Share menu. The same file is regenerated locally as
+`reports/asr-compare/listening-packet.html`, which has inline players, by
+`scripts/compare-asr/score.py`. It isn't committed.
+
+It shows the **10 biggest disagreements per episode**, longest first. Each row has:
+- the time into the original MP3
+- a link that plays that moment from archive.kpfk.org
+- QIR's text and Pacifica's text
+- a "who's right?" pick (QIR / Pacifica / both OK / neither) and a note field
+
+Picks stay in your browser. "Copy results" gives them back as a table. The same rows are in
+`reports/asr-compare/report.md`.
 
 The rows most worth your ears:
 - Suplemento 2:00, 3:27 and 11:20

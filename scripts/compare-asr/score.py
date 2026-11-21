@@ -357,6 +357,9 @@ def main():
               open(os.path.join(out, "results.json"), "w"), ensure_ascii=False, indent=1)
     open(os.path.join(out, "report.md"), "w").write(render_md(results, meta, offset))
     open(os.path.join(out, "listening-packet.html"), "w").write(render_html(results, meta, offset))
+    # Same packet for publishing as a claude.ai artifact: its sandbox blocks media from
+    # other hosts, so each row links out to the archive MP3 instead of an inline player.
+    open(os.path.join(out, "listening-packet-artifact.html"), "w").write(render_html(results, meta, offset, artifact=True))
     print(f"[score] wrote results.json, report.md, listening-packet.html in {out}")
 
 
@@ -450,12 +453,12 @@ def clip(t, n=450):
     return t if len(t) <= n else t[:n].rsplit(" ", 1)[0] + " …"
 
 
-def render_html(results, meta, offset):
+def render_html(results, meta, offset, artifact=False):
     e = html.escape
     rows = []
     for r in results:
         rows.append(f"<section><h2>{e(str(r['id']))} · {e(r['show'])} <span class=meta>{e(r['role'])} · aired {e(str(r['air_date']))} · agreement {r['agreement']:.0%}</span></h2>")
-        rows.append(f"<p class=meta>Full audio: <a href=\"{e(r['mp3_url'])}\">{e(r['mp3_url'])}</a>. Times are into the original MP3. Each player plays only that span (it starts a second early).</p>")
+        rows.append(f"<p class=meta>Full audio: <a href=\"{e(r['mp3_url'])}\">{e(r['mp3_url'])}</a>. Times are into the original MP3. " + ("Play opens the archive MP3 at that moment in a new tab." if artifact else "Each player plays only that span (it starts a second early).") + "</p>")
         rows.append("<div class=tablewrap><table><thead><tr><th>At</th><th>Listen</th><th>QIR (Groq turbo)</th><th>Pacifica (FW small)</th><th>Who's right?</th></tr></thead><tbody>")
         for k, s in enumerate(r["spans"][:10]):
             a = max(0, s["start"] + offset - 1)
@@ -464,36 +467,40 @@ def render_html(results, meta, offset):
             frag = f"{r['mp3_url']}#t={a:.1f},{b:.1f}"
             rows.append(
                 f"<tr data-key=\"{key}\" data-at=\"{fmt_ts(s['start'] + offset)}\" data-ep=\"{r['id']}\"><td class=ts><a href=\"{e(frag)}\" target=_blank>{fmt_ts(s['start'] + offset)}</a></td>"
-                f"<td><audio controls preload=none src=\"{e(frag)}\"></audio></td>"
-                f"<td class=txt><span class=ctx>{e(s['ctx_before'])}</span> <mark>{e(clip(s['qir'])) or '<em>∅ nothing</em>'}</mark></td>"
+                + (f"<td><a class=play href=\"{e(frag)}\" target=_blank rel=noopener>Play ↗</a></td>" if artifact else f"<td><audio controls preload=none src=\"{e(frag)}\"></audio></td>")
+                + f"<td class=txt><span class=ctx>{e(s['ctx_before'])}</span> <mark>{e(clip(s['qir'])) or '<em>∅ nothing</em>'}</mark></td>"
                 f"<td class=txt><mark>{e(clip(s['pacifica'])) or '<em>∅ nothing</em>'}</mark></td>"
                 f"<td class=pick>" + "".join(
                     f"<label><input type=radio name=\"{key}\" value=\"{v}\"> {lbl}</label>" for v, lbl in
                     (("qir", "QIR"), ("pacifica", "Pacifica"), ("both", "Both OK"), ("neither", "Neither"))) +
-                f"<input class=note placeholder=\"note\" data-note=\"{key}\"></td></tr>")
+                f"<input class=note id=\"note-{key}\" placeholder=\"note\" aria-label=\"Note\" data-note=\"{key}\"></td></tr>")
         rows.append("</tbody></table></div></section>")
     body = "\n".join(rows)
-    return f"""<!doctype html>
-<html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width, initial-scale=1">
-<title>ASR Listening Packet</title>
+    head = "" if artifact else '<!doctype html>\n<html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width, initial-scale=1">\n'
+    meta_tag = '<meta name="claude:viewport-fit-sides" content="cover">\n' if artifact else ""
+    tail = "" if artifact else "</body></html>\n"
+    open_body = "" if artifact else "</head><body>"
+    return head + f"""<title>ASR Listening Packet</title>
+{meta_tag}
 <style>
 :root{{--bg:#fbfaf7;--fg:#1d1d1b;--muted:#6b6a65;--line:#e2dfd8;--mark:#fff1b8;--card:#fff;--accent:#8a3b12}}
-@media (prefers-color-scheme: dark){{:root:not([data-theme="light"]){{--bg:#161614;--fg:#ecebe6;--muted:#a3a19a;--line:#34332f;--mark:#5a4a12;--card:#1f1e1b;--accent:#f0a070}}}}
-:root[data-theme="dark"]{{--bg:#161614;--fg:#ecebe6;--muted:#a3a19a;--line:#34332f;--mark:#5a4a12;--card:#1f1e1b;--accent:#f0a070}}
-body{{background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;margin:0 auto;max-width:1200px;padding:24px 16px}}
+@media (prefers-color-scheme: dark){{:root:not([data-theme="light"]){{--bg:#161614;--fg:#ecebe6;--muted:#a3a19a;--line:#34332f;--mark:#5a4a12;--card:#1f1e1b;--accent:#f0a070;color-scheme:dark}}}}
+:root[data-theme="dark"]{{--bg:#161614;--fg:#ecebe6;--muted:#a3a19a;--line:#34332f;--mark:#5a4a12;--card:#1f1e1b;--accent:#f0a070;color-scheme:dark}}
+body{{background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;margin:0 auto;max-width:1200px;padding-block:24px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));box-sizing:border-box}}
 h1{{font-size:22px;margin:0 0 6px}} h2{{font-size:17px;margin:28px 0 4px}} .meta{{color:var(--muted);font-weight:400;font-size:13px}}
 a{{color:var(--accent)}} .tablewrap{{overflow-x:auto}} table{{border-collapse:collapse;width:100%;background:var(--card)}}
 th,td{{border-bottom:1px solid var(--line);padding:8px 6px;vertical-align:top;text-align:left}} th{{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}}
 td.ts{{white-space:nowrap;font-variant-numeric:tabular-nums}} td.txt{{min-width:220px}} mark{{background:var(--mark);color:inherit;padding:0 2px}}
 .ctx{{color:var(--muted)}} audio{{width:200px;height:32px}} .pick label{{display:block;white-space:nowrap;font-size:13px}} .note{{width:110px;margin-top:4px}}
-.bar{{position:sticky;top:0;background:var(--bg);padding:8px 0;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;z-index:2}}
-button{{font:inherit;padding:4px 10px}}
-</style></head><body>
+.bar{{position:sticky;top:env(safe-area-inset-top, 0px);background:var(--bg);padding:8px 0;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;z-index:2}}
+button{{font:inherit;padding:4px 10px}} .play{{white-space:nowrap}} #out{{width:100%;min-height:120px;font:12px ui-monospace,monospace}} a:focus-visible,button:focus-visible,input:focus-visible{{outline:2px solid var(--accent);outline-offset:2px}}
+</style>{open_body}
 <h1>ASR Listening Packet — QIR vs Pacifica Audio Services</h1>
 <p class=meta>Same 15-minute excerpt per episode (from {fmt_ts(offset)} into each MP3). Rows are the 10 longest places where the two transcripts disagree, longest first.
 Listen, then mark who got it right. Your picks are kept in this browser only; use “Copy results” to paste them into an email or doc.
 QIR commit {e(str(meta.get('qir_git_sha'))[:10])}.</p>
 <div class=bar><span id=tally class=meta></span><button id=copy>Copy results</button></div>
+<textarea id=out hidden readonly aria-label="Results to copy"></textarea>
 {body}
 <script>
 (function(){{
@@ -510,12 +517,12 @@ QIR commit {e(str(meta.get('qir_git_sha'))[:10])}.</p>
   document.getElementById('copy').addEventListener('click',function(){{
     var lines=['episode\\tat\\tpick\\tnote'];document.querySelectorAll('tr[data-key]').forEach(function(tr){{var s=state[tr.dataset.key]||{{}};
       lines.push(tr.dataset.ep+'\\t'+tr.dataset.at+'\\t'+(s.pick||'')+'\\t'+(s.note||''));}});
-    var t=lines.join('\\n'); if(navigator.clipboard) navigator.clipboard.writeText(t); else prompt('Copy:',t);}});
+    var t=lines.join('\\n'); var o=document.getElementById('out'); o.value=t; o.hidden=false; o.select();
+    try{{navigator.clipboard.writeText(t).then(function(){{document.getElementById('copy').textContent='Copied';}},function(){{}});}}catch(e){{}}}});
   tally();
 }})();
 </script>
-</body></html>
-"""
+""" + tail
 
 
 if __name__ == "__main__":
