@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { ingestQueue, transcribeQueue, summarizeQueue, complianceQueue } from '@/lib/queue'
-import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused, isComplianceBlocking } from '@/lib/settings'
+import { getIssueCategories, getSetting, isPipelinePaused, isStationPaused, isComplianceBlocking, getExcludedCategories } from '@/lib/settings'
+import { getProcessingWindowBounds } from '@/lib/quarters'
+import { detectTranscriptionStall } from '@/lib/pipeline-stall'
 import { BLOCKING_SEVERITY, CLEARING_REVIEW_STATUS, summarizeBlockedEpisodes, type BlockingFlagRow } from '@/lib/compliance-blocking'
 import { QIR_CANDIDATE_STATUSES, quarterEpisodeOrFilter } from '@/lib/qir-format'
 import { getStationContext, stationErrorResponse, StationContext } from '@/lib/auth'
@@ -46,6 +48,47 @@ async function getQueueCounts(queue: typeof ingestQueue) {
   } catch (err) {
     console.error('[dashboard] queue counts unavailable:', err instanceof Error ? err.message : err)
     return { active: 0, waiting: 0, completed: 0, failed: 0 }
+  }
+}
+
+// Read from the database, not the worker: the worker is what's stuck when this
+// fires (see lib/pipeline-stall.ts). Mirrors the transcribe candidate query —
+// pending, inside the processing window, not an excluded category.
+async function getTranscriptionStall(supabase: StationContext['supabase'], stationId: string, paused: boolean) {
+  if (paused) return null
+  try {
+    const { start, end } = getProcessingWindowBounds()
+    const [pending, lastUsage, excluded] = await Promise.all([
+      supabase
+        .from('episode_log')
+        .select('category, created_at')
+        .eq('station_id', stationId)
+        .eq('status', 'pending')
+        .or(`priority.is.true,and(air_date.gte.${start},air_date.lte.${end}),and(air_date.is.null,created_at.gte.${start}T00:00:00Z,created_at.lte.${end}T23:59:59Z)`)
+        .order('created_at', { ascending: true })
+        .limit(1000),
+      supabase
+        .from('usage_log')
+        .select('created_at')
+        .eq('station_id', stationId)
+        .eq('operation', 'transcribe')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      getExcludedCategories(stationId),
+    ])
+    const claimable = (pending.data ?? []).filter(
+      (ep) => !excluded.some((exc) => ep.category?.includes(exc)),
+    )
+    return detectTranscriptionStall({
+      paused,
+      pendingCount: claimable.length,
+      oldestPendingAt: claimable[0]?.created_at ?? null,
+      lastTranscribedAt: lastUsage.data?.created_at ?? null,
+    })
+  } catch (err) {
+    console.error('[dashboard] stall check failed:', err instanceof Error ? err.message : err)
+    return null
   }
 }
 
@@ -534,7 +577,22 @@ async function buildDashboard(
     // are reported so the Home page can say which one is on.
     ...(await (async () => {
       const [g, st] = await Promise.all([isPipelinePaused(), isStationPaused(stationId)])
-      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st }
+      const [transcriptionStall, inBatch] = await Promise.all([
+        getTranscriptionStall(supabase, stationId, g || st),
+        // Backlog episodes waiting on a Groq half-price batch (workers/transcribe-batch.ts).
+        supabase
+          .from('transcription_batches')
+          .select('episode_ids, submitted_at')
+          .eq('station_id', stationId)
+          .in('status', ['submitting', 'submitted'])
+          .order('submitted_at', { ascending: true })
+          .then(({ data }) => {
+            const rows = data ?? []
+            const count = rows.reduce((n, r) => n + ((r.episode_ids as number[] | null)?.length ?? 0), 0)
+            return count ? { count, since: rows[0].submitted_at as string } : null
+          }, () => null),
+      ])
+      return { pipelinePaused: g || st, pipelinePausedGlobal: g, pipelinePausedStation: st, transcriptionStall, transcriptionBatch: inBatch }
     })()),
   })
 }

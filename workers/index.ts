@@ -8,6 +8,7 @@ import { processAutoRetry } from './auto-retry'
 import { processDiscoverSync } from './discover-sync'
 import { processCorrections } from './corrections'
 import { processConfessorResync } from './confessor-resync'
+import { processBatchPoll } from './transcribe-batch'
 import { isPipelinePaused } from '../lib/settings'
 import { jobPriority } from '../lib/tier'
 import { continuationData, ZERO_PROGRESS_BACKOFF_MS } from '../lib/job-chain'
@@ -300,6 +301,28 @@ confessorResyncWorker.on('failed', (job, err) => {
   console.error(`[confessor-resync] failed:`, err.message)
 })
 
+// -- Groq Batch Poller --
+// Collects finished Groq transcription batches (backlogs sent at half price by
+// the transcribe worker): stores the transcripts, returns failures to the sync
+// path, chains summarize. Runs regardless of pause — results already paid for.
+const transcribeBatchQueue = new Queue('transcribe-batch', {
+  connection,
+  defaultJobOptions: { attempts: 1, removeOnComplete: 100, removeOnFail: 100 },
+})
+const transcribeBatchWorker = new Worker('transcribe-batch', processBatchPoll, {
+  connection,
+  concurrency: 1,
+})
+transcribeBatchWorker.on('completed', (job) => {
+  const r = (job.returnvalue ?? {}) as { open?: number; collected?: number; swept?: number }
+  if (r.open || r.collected || r.swept) {
+    console.log(`[transcribe-batch] ${r.open} open batch(es), ${r.collected} episode(s) collected, ${r.swept} stranded returned`)
+  }
+})
+transcribeBatchWorker.on('failed', (job, err) => {
+  console.error(`[transcribe-batch] poll failed:`, err.message)
+})
+
 // -- Cron Schedules --
 async function setupCron() {
   // Remove any existing repeatable jobs first
@@ -316,6 +339,9 @@ async function setupCron() {
   }
   for (const job of await confessorResyncQueue.getRepeatableJobs()) {
     await confessorResyncQueue.removeRepeatableByKey(job.key)
+  }
+  for (const job of await transcribeBatchQueue.getRepeatableJobs()) {
+    await transcribeBatchQueue.removeRepeatableByKey(job.key)
   }
   const existingDiscover = await discoverSyncQueue.getRepeatableJobs()
   for (const job of existingDiscover) {
@@ -363,7 +389,16 @@ async function setupCron() {
     }
   )
 
+  await transcribeBatchQueue.add(
+    'transcribe-batch-poll-cron',
+    {},
+    {
+      repeat: { pattern: '*/10 * * * *' }, // every 10 min — Groq batches finish in minutes to 24h
+    }
+  )
+
   console.log('[cron] hourly ingest scheduled at minute :02')
+  console.log('[cron] Groq batch poll scheduled every 10 minutes')
   console.log('[cron] auto-retry scheduled every 4 hours at minute :17')
   console.log('[cron] archive discovery sync scheduled daily at 06:37')
   console.log('[cron] transcript-name upkeep scheduled daily at 03:47')
@@ -447,6 +482,7 @@ async function shutdown() {
     autoRetryWorker.close(),
     discoverSyncWorker.close(),
     confessorResyncWorker.close(),
+    transcribeBatchWorker.close(),
   ])
   process.exit(0)
 }

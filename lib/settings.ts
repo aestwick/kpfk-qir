@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabase'
+import { resolveBatchSettings, type BatchSettings } from './transcription/batch-policy'
 import { getStation } from './stations'
 import { fetchAllRows } from './fetch-all'
 import { resolveChatModel, DEFAULT_COMPLIANCE_MODEL } from './openai-models'
@@ -124,6 +125,13 @@ export async function getDiscoveryAutoActivate(stationId: string): Promise<boole
 // excluded_categories (matched on category). Defaults to none.
 export async function getExcludedShowKeys(stationId: string): Promise<string[]> {
   return (await getSetting<string[]>('excluded_show_keys', stationId)) ?? []
+}
+
+// Groq Batch API for backlogs (half price, ≤24h). One JSON setting, per-station
+// overridable: {enabled, backlog_threshold, min_age_hours, max_file_mb,
+// max_per_batch}. Missing/partial → defaults (lib/transcription/batch-policy.ts).
+export async function getTranscriptionBatchSettings(stationId: string): Promise<BatchSettings> {
+  return resolveBatchSettings(await getSetting<unknown>('transcription_batch', stationId))
 }
 
 export async function getTranscribeBatchSize(stationId: string): Promise<number> {

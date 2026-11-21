@@ -78,6 +78,10 @@ export const AUDIT_ACTIONS = {
   CONFESSOR_RESYNC: 'confessor.resync',
   DISCOVERY_SYNC_COMPLETE: 'discovery.sync.complete',
   TRANSCRIBE_COMPLETE: 'transcribe.complete',
+  // Groq Batch API (workers/transcribe-batch.ts): a backlog sent at half price,
+  // and its results collected (transcribed / returned to the sync path).
+  TRANSCRIBE_BATCH_SUBMITTED: 'transcribe.batch.submitted',
+  TRANSCRIBE_BATCH_COLLECTED: 'transcribe.batch.collected',
   SUMMARIZE_COMPLETE: 'summarize.complete',
   COMPLIANCE_COMPLETE: 'compliance.complete',
   QIR_GENERATE_COMPLETE: 'qir.generate.complete',

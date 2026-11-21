@@ -54,11 +54,14 @@ interface DashData {
   pipelinePaused: boolean
   pipelinePausedGlobal?: boolean
   pipelinePausedStation?: boolean
+  transcriptionStall?: { pendingCount: number; stalledSince: string; hours: number } | null
+  transcriptionBatch?: { count: number; since: string } | null
 }
 
 const BADGE_COLORS: Record<string, string> = {
   pending:             'bg-amber-100/80 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   transcribing:        'bg-indigo-100/80 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+  batch_queued:  'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
   transcribed:         'bg-blue-100/80 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
   summarizing:         'bg-violet-100/80 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
   summarized:          'bg-emerald-100/80 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
@@ -70,6 +73,7 @@ const BADGE_COLORS: Record<string, string> = {
 const STATUS_LABELS: Record<string, string> = {
   pending: 'Pending',
   transcribing: 'Transcribing',
+  batch_queued: 'At Groq (batch)',
   transcribed: 'Transcribed',
   summarizing: 'Summarizing',
   summarized: 'Summarized',
@@ -146,6 +150,7 @@ function getNextIngestMinutes(): number {
 const STATUS_VERB: Record<string, string> = {
   pending: 'Ingested',
   transcribing: 'Transcribing',
+  batch_queued: 'At Groq (batch)',
   transcribed: 'Transcribed',
   summarizing: 'Summarizing',
   summarized: 'Summarized',
@@ -316,6 +321,8 @@ export default function DashboardOverview() {
   // Older API responses only carried the effective flag; treat that as station.
   const pausedStation = data.pipelinePausedStation ?? (pipelinePaused && !pausedGlobal)
   const pause = describePause({ global: pausedGlobal, station: pausedStation })
+  const stall = data.transcriptionStall ?? null
+  const atGroq = data.transcriptionBatch ?? null
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -395,6 +402,16 @@ export default function DashboardOverview() {
                 )}
               </div>
             </>
+          ) : stall ? (
+            <div className="flex items-center gap-2.5">
+              <span className="dot dot-md bg-amber-500" />
+              <span className="text-sm text-amber-700 dark:text-amber-300">Waiting — {stall.pendingCount} not transcribed</span>
+            </div>
+          ) : atGroq ? (
+            <div className="flex items-center gap-2.5" title={`Sent ${new Date(atGroq.since).toLocaleString()}. Groq's batch service is half price and returns within 24 hours; results are collected every 10 minutes.`}>
+              <span className="dot dot-md bg-sky-400" />
+              <span className="text-sm text-warm-500 dark:text-warm-300">Catching up — {atGroq.count} at Groq (half-price batch)</span>
+            </div>
           ) : (
             <div className="flex items-center gap-2.5">
               <span className="dot dot-md bg-emerald-400" />
@@ -456,6 +473,31 @@ export default function DashboardOverview() {
           ))}
         </div>
       </div>
+
+      {/* Transcription stall — the worker can be stuck while everything else looks healthy (lib/pipeline-stall.ts) */}
+
+      {stall && (
+
+        <div role="alert" className="rounded-xl border px-5 py-3.5 bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-900/20 dark:border-amber-700/50 dark:text-amber-200">
+
+          <p className="text-sm font-semibold">
+
+            Transcription has stopped — nothing transcribed in {stall.hours >= 48 ? `${Math.floor(stall.hours / 24)} days` : `${stall.hours} hours`}, {stall.pendingCount} episode{stall.pendingCount === 1 ? '' : 's'} waiting.
+
+          </p>
+
+          <p className="text-xs mt-1 text-amber-800 dark:text-amber-300">
+
+            Stalled since {new Date(stall.stalledSince).toLocaleString()}. The pipeline isn&apos;t paused, so the background worker is most likely stuck.
+
+            Fix: on the server, run <code className="font-mono">docker restart qir-worker</code>. Episodes resume within a few minutes.
+
+          </p>
+
+        </div>
+
+      )}
+
 
       {/* ═══ 2. QUARTER SCOREBOARD ═══ */}
       <div className="card p-6">

@@ -27,6 +27,7 @@ interface UsageEntry {
 const BADGE_COLORS: Record<string, string> = {
   pending:              'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
   transcribing:         'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300',
+  batch_queued:   'bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300',
   transcribed:          'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
   summarizing:          'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300',
   summarized:           'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300',
