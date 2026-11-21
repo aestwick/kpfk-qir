@@ -385,3 +385,12 @@ See `IMPROVEMENTS.md` for the prioritized improvement plan. Key items:
 ## Environment
 
 Runs on a VPS behind Traefik reverse proxy at `qir.kpfk.org`. Supabase is hosted (not self-hosted). Redis runs in a sidecar container. The archive server at `archive.kpfk.org` provides RSS feeds and MP3 files.
+
+## Querying production from a Claude session (read-only)
+
+Use **`scripts/claude/sbq.sh "select …"`** for live-database lookups (debugging the pipeline, counts, audit trail). It goes through the cloud session's proxy-injected Supabase connection with `read_only=true` enforced server-side, so it **cannot write** and doesn't trigger a permission prompt per query. Prefer it over the `mcp__Supabase__execute_sql` connector, which can write and prompts every call. Project ref `czjhwhfqohpmwprhasve` (the "QIR" project; "beacon" is a different app). Production schema/data changes still go through migrations + `scripts/migrate.sh`, never this.
+
+**Stuck-pipeline checklist** (from the 2026-11-18 incident: transcription silently stopped for 3 days):
+- Symptom: ingest keeps adding `pending` episodes, no `transcribe` rows in `usage_log`, nothing `failed`. The dashboard Home now shows a "Transcription has stopped" banner (`lib/pipeline-stall.ts`).
+- Cause pattern: a stage holder hung (that time: ffmpeg blocked reading a dead archive connection) and kept refreshing its Redis chain lock `qir:chain-lock:<stage>:<station_id>`, so every later job skipped as `locked`. Now bounded by the per-episode deadline (`lib/deadline.ts`, 60 min), ffmpeg `-rw_timeout`, and the lock's `maxHoldMs` (3h, `lib/locks.ts`).
+- On the VPS: `docker exec qir-redis redis-cli --scan --pattern 'qir:chain-lock:*'` and `docker exec qir-worker ps -eo pid,etime,args` (busybox ps — no `cmd` column) to confirm; `docker restart qir-worker` to clear. Workers run in `qir-worker`, not `qir-app`.

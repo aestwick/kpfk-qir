@@ -15,14 +15,22 @@ import { resolveProviderPlan, runTranscription, AudioUnavailableError } from '..
 import { buildVtt } from '../lib/transcription/vtt'
 import { applyCorrections, correctionsForEpisode } from '../lib/transcription/corrections'
 import { replaceEpisodeCues } from '../lib/transcription/cues'
-import { CHUNK_DURATION_SECONDS, CHUNK_ENCODE_ARGS } from '../lib/transcription/chunking'
+import { CHUNK_DURATION_SECONDS, CHUNK_ENCODE_ARGS, CHUNK_INPUT_ARGS } from '../lib/transcription/chunking'
 import { loadCorrectionRules, loadShowGroups, loadVocabulary, episodeHumanNames } from '../lib/transcription/store'
 import { buildVocabularyPrompt, shouldUseVocabularyHint } from '../lib/transcription/vocabulary'
 import { bumpCacheVersion } from '../lib/api-cache'
+import { withDeadline } from '../lib/deadline'
 
 const execFileAsync = promisify(execFile)
 
 const MAX_CHUNK_SIZE_BYTES = 25 * 1024 * 1024 // 25MB
+
+// Hard ceiling on one episode's transcription (all providers, incl. fallback).
+// Normal: ~1 min per broadcast hour. The worst legitimate path — ffmpeg (10 min)
+// → Groq retries → Deepgram (15 min) → AssemblyAI polling — still fits. Past
+// this the episode is marked failed (auto-retry picks it up later) and the batch
+// moves on, so one hung download can no longer block the station.
+const EPISODE_TRANSCRIBE_DEADLINE_MS = 60 * 60_000
 
 /**
  * Date window for candidate selection. Defaults to the current quarter (steady
@@ -49,13 +57,14 @@ function makeChunkLoader(mp3Url: string, tmpDir: string): () => Promise<string[]
     const chunkPattern = path.join(tmpDir, 'chunk_%03d.m4a')
     try {
       await execFileAsync('ffmpeg', [
+        ...CHUNK_INPUT_ARGS,
         '-i', mp3Url,
         '-f', 'segment',
         '-segment_time', String(CHUNK_DURATION_SECONDS),
         '-reset_timestamps', '1',
         ...CHUNK_ENCODE_ARGS,
         chunkPattern,
-      ], { timeout: 600_000 }) // 10 min timeout
+      ], { timeout: 600_000, killSignal: 'SIGKILL' }) // 10 min; SIGKILL — a blocked read ignores SIGTERM
     } catch (ffErr: unknown) {
       const errMsg = ffErr instanceof Error ? ffErr.message : String(ffErr)
       // Only a literal 404 is terminal `unavailable`. ffmpeg reports every
@@ -214,7 +223,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
               episodeNames: episodeHumanNames(episode.field_sources),
             })
           : ''
-      const result = await runTranscription(
+      const result = await withDeadline(runTranscription(
         {
           episodeId: episode.id,
           mp3Url: episode.mp3_url,
@@ -225,7 +234,7 @@ async function runTranscribeBatch(job: Job, stationId: string) {
           ...(vocabularyPrompt ? { prompt: vocabularyPrompt, promptStationTerms: vocabulary?.stationTerms } : {}),
         },
         providerPlan,
-      )
+      ), EPISODE_TRANSCRIBE_DEADLINE_MS, `transcription of episode ${episode.id}`)
 
       // Stitch and apply corrections — station-wide rules plus any scoped to THIS
       // episode (episode_id) or THIS show (show_key, any feed of its group).

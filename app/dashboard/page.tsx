@@ -54,6 +54,7 @@ interface DashData {
   pipelinePaused: boolean
   pipelinePausedGlobal?: boolean
   pipelinePausedStation?: boolean
+  transcriptionStall?: { pendingCount: number; stalledSince: string; hours: number } | null
 }
 
 const BADGE_COLORS: Record<string, string> = {
@@ -316,6 +317,7 @@ export default function DashboardOverview() {
   // Older API responses only carried the effective flag; treat that as station.
   const pausedStation = data.pipelinePausedStation ?? (pipelinePaused && !pausedGlobal)
   const pause = describePause({ global: pausedGlobal, station: pausedStation })
+  const stall = data.transcriptionStall ?? null
   const qtrCounts = counts.quarter
   const qtrTotal = Object.values(qtrCounts).reduce((a, b) => a + b, 0)
   const qtrComplete = (qtrCounts.summarized ?? 0) + (qtrCounts.compliance_checked ?? 0)
@@ -395,6 +397,11 @@ export default function DashboardOverview() {
                 )}
               </div>
             </>
+          ) : stall ? (
+            <div className="flex items-center gap-2.5">
+              <span className="dot dot-md bg-amber-500" />
+              <span className="text-sm text-amber-700 dark:text-amber-300">Waiting — {stall.pendingCount} not transcribed</span>
+            </div>
           ) : (
             <div className="flex items-center gap-2.5">
               <span className="dot dot-md bg-emerald-400" />
@@ -456,6 +463,31 @@ export default function DashboardOverview() {
           ))}
         </div>
       </div>
+
+      {/* Transcription stall — the worker can be stuck while everything else looks healthy (lib/pipeline-stall.ts) */}
+
+      {stall && (
+
+        <div role="alert" className="rounded-xl border px-5 py-3.5 bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-900/20 dark:border-amber-700/50 dark:text-amber-200">
+
+          <p className="text-sm font-semibold">
+
+            Transcription has stopped — nothing transcribed in {stall.hours >= 48 ? `${Math.floor(stall.hours / 24)} days` : `${stall.hours} hours`}, {stall.pendingCount} episode{stall.pendingCount === 1 ? '' : 's'} waiting.
+
+          </p>
+
+          <p className="text-xs mt-1 text-amber-800 dark:text-amber-300">
+
+            Stalled since {new Date(stall.stalledSince).toLocaleString()}. The pipeline isn&apos;t paused, so the background worker is most likely stuck.
+
+            Fix: on the server, run <code className="font-mono">docker restart qir-worker</code>. Episodes resume within a few minutes.
+
+          </p>
+
+        </div>
+
+      )}
+
 
       {/* ═══ 2. QUARTER SCOREBOARD ═══ */}
       <div className="card p-6">

@@ -23,6 +23,13 @@ export type PipelineStage = 'transcribe' | 'summarize' | 'compliance'
 
 const DEFAULT_TTL_MS = 60_000
 const REFRESH_EVERY_MS = 20_000
+// Backstop: a holder stops refreshing after this long, so its lock lapses one
+// TTL later even if `fn` never returns. Without it, a hung-but-alive holder kept
+// the transcribe lock for three days (2026-11-18) and every later job skipped as
+// 'locked'. Generous on purpose — a lapse while a slow batch is still working is
+// harmless (the atomic DB claim still prevents double-processing), it only lets
+// a second chain for the station start alongside.
+export const DEFAULT_MAX_HOLD_MS = 3 * 60 * 60_000
 
 // Compare-and-extend / compare-and-delete: only ever touch a lock we still own,
 // so a slow holder whose TTL lapsed can't have its successor's lock stolen.
@@ -42,8 +49,9 @@ function keyFor(stationId: string, stage: PipelineStage): string {
  * chain re-queues its own continuation, so no work is lost.
  *
  * The lock auto-refreshes while `fn` runs (a batch can take minutes) and is
- * released on return or throw. A crashed holder's lock expires via TTL, after
- * which the next kick/continue/cron re-acquires and resumes the chain.
+ * released on return or throw. A crashed holder's lock expires via TTL; a hung
+ * holder's stops refreshing after `maxHoldMs` and expires the same way. Either
+ * way the next kick/continue/cron re-acquires and resumes the chain.
  */
 export async function withStationStageLock<T, U>(
   stationId: string,
@@ -51,6 +59,7 @@ export async function withStationStageLock<T, U>(
   fn: () => Promise<T>,
   onBusy: U,
   ttlMs: number = DEFAULT_TTL_MS,
+  maxHoldMs: number = DEFAULT_MAX_HOLD_MS,
 ): Promise<T | U> {
   const key = keyFor(stationId, stage)
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -58,7 +67,15 @@ export async function withStationStageLock<T, U>(
   const acquired = await redis().set(key, token, 'PX', ttlMs, 'NX')
   if (acquired !== 'OK') return onBusy
 
+  const acquiredAt = Date.now()
   const refresh = setInterval(() => {
+    if (Date.now() - acquiredAt > maxHoldMs) {
+      clearInterval(refresh)
+      console.error(
+        `[locks] ${key} held for over ${Math.round(maxHoldMs / 60_000)} min — no longer refreshing; it will lapse so the station's chain can resume`,
+      )
+      return
+    }
     redis()
       .eval(EXTEND_LUA, 1, key, token, String(ttlMs))
       .catch((err) =>
