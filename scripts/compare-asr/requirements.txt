@@ -1,0 +1,5 @@
+# Pacifica Audio Services' worker pins (ops/worker/requirements.txt in their repo)
+faster-whisper==1.2.1
+ctranslate2==4.9.0
+# faster-whisper 1.2.1 calls av.open(metadata_errors=...), which PyAV 16+ removed.
+av<16
